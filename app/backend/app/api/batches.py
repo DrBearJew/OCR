@@ -20,7 +20,7 @@ from app.services.collections import create_record_for_upload, ensure_collection
 from app.services.folders import ensure_folder_path
 from app.services.processing import mark_duplicate_document, queue_full_process, queue_ocr, reserve_processing_task, update_batch_status
 from app.services.storage import LocalStorage
-from app.workers.tasks import ocr_document_task, process_document_task, publish_task
+from app.workers.tasks import ocr_document_task, process_document_task, publish_document_task
 
 
 router = APIRouter(prefix="/api/batches", tags=["batches"], dependencies=[Depends(require_admin)])
@@ -130,9 +130,9 @@ async def upload_batch(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     for document_id, task_id in queued_document_ids:
-        publish_task(ocr_document_task, args=[str(document_id)], task_id=task_id, queue="ocr")
+        publish_document_task(db, document_id, ocr_document_task, args=[str(document_id)], task_id=task_id, queue="ocr", stage="ocr")
     for document_id, task_id in process_document_ids:
-        publish_task(process_document_task, args=[str(document_id)], task_id=task_id, queue="ocr")
+        publish_document_task(db, document_id, process_document_task, args=[str(document_id)], task_id=task_id, queue="ocr", stage="process")
 
     stmt = select(Batch).where(Batch.id == batch.id).options(selectinload(Batch.documents))
     created = db.scalars(stmt).one()

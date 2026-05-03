@@ -58,7 +58,7 @@ services:
     command: >
       celery -A app.workers.celery_app.celery_app worker
       --loglevel=INFO
-      --queues=ocr
+      --queues=ocr,metadata,maintenance
       --concurrency=${OCR_WORKER_CONCURRENCY:-1}
       --prefetch-multiplier=${CELERY_WORKER_PREFETCH_MULTIPLIER:-1}
 

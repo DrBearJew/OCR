@@ -15,7 +15,7 @@ from app.services.events import record_event
 from app.services.folders import purge_document_storage, restore_record, soft_delete_record
 from app.services.processing import queue_full_process, reserve_processing_task
 from app.services.shared_titles import apply_shared_title_base
-from app.workers.tasks import process_document_task, publish_task
+from app.workers.tasks import process_document_task, publish_document_task
 
 
 router = APIRouter(prefix="/api/records", tags=["records"], dependencies=[Depends(require_admin)])
@@ -125,7 +125,7 @@ def process_record_documents(
             skipped += 1
     db.commit()
     for document_id, task_id in enqueue_after_commit:
-        publish_task(process_document_task, args=[document_id], kwargs={"force": force}, task_id=task_id, queue="ocr")
+        publish_document_task(db, document_id, process_document_task, args=[document_id], kwargs={"force": force}, task_id=task_id, queue="ocr", stage="process")
     return AdminActionResult(ok=True, queued=queued, skipped=skipped, details={"record_id": str(record.id), "task": "process_documents"})
 
 

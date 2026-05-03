@@ -30,7 +30,7 @@ from app.services.ocr_pipeline import resolve_ocr_config
 from app.services.folders import purge_document_storage, restore_document, soft_delete_document
 from app.services.processing import queue_full_process, queue_ocr, reserve_processing_task
 from app.services.storage import LocalStorage
-from app.workers.tasks import extract_metadata_task, ocr_document_task, process_document_task, publish_task
+from app.workers.tasks import extract_metadata_task, ocr_document_task, process_document_task, publish_document_task
 
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
@@ -207,9 +207,9 @@ def bulk_documents(
 
     db.commit()
     for document_id, task_id in enqueue_ocr_after_commit:
-        publish_task(ocr_document_task, args=[document_id], task_id=task_id, queue="ocr")
+        publish_document_task(db, document_id, ocr_document_task, args=[document_id], task_id=task_id, queue="ocr", stage="ocr")
     for document_id, force, task_id in enqueue_metadata_after_commit:
-        publish_task(extract_metadata_task, args=[document_id], kwargs={"force": force}, task_id=task_id, queue="metadata")
+        publish_document_task(db, document_id, extract_metadata_task, args=[document_id], kwargs={"force": force}, task_id=task_id, queue="metadata", stage="metadata")
     return AdminActionResult(ok=True, updated=updated, queued=queued, skipped=skipped).model_dump()
 
 
@@ -280,7 +280,7 @@ def retry_document(
     queue_ocr(db, document, force=True)
     reserve_processing_task(document, task_id=task_id, stage="ocr", force=True)
     db.commit()
-    publish_task(ocr_document_task, args=[str(document.id)], task_id=task_id, queue="ocr")
+    publish_document_task(db, document.id, ocr_document_task, args=[str(document.id)], task_id=task_id, queue="ocr", stage="ocr")
     db.refresh(document)
     return DocumentRead.model_validate(document)
 
@@ -311,7 +311,7 @@ def process_document(
         return DocumentRead.model_validate(document)
     reserve_processing_task(document, task_id=task_id, stage="process", force=force)
     db.commit()
-    publish_task(process_document_task, args=[str(document.id)], kwargs={"force": force}, task_id=task_id, queue="ocr")
+    publish_document_task(db, document.id, process_document_task, args=[str(document.id)], kwargs={"force": force}, task_id=task_id, queue="ocr", stage="process")
     db.refresh(document)
     return DocumentRead.model_validate(document)
 
@@ -433,7 +433,7 @@ def run_document_ocr(
     queue_ocr(db, document, force=True)
     reserve_processing_task(document, task_id=task_id, stage="ocr", force=True)
     db.commit()
-    publish_task(ocr_document_task, args=[str(document.id)], task_id=task_id, queue="ocr")
+    publish_document_task(db, document.id, ocr_document_task, args=[str(document.id)], task_id=task_id, queue="ocr", stage="ocr")
     db.refresh(document)
     return DocumentRead.model_validate(document)
 
@@ -491,7 +491,7 @@ def reextract_document(
     reserve_processing_task(existing, task_id=task_id, stage="metadata", force=force)
     record_event(db, existing, "manual_reextract", "Manual metadata re-extract requested", actor="admin", source="manual", metadata={"force": force})
     db.commit()
-    publish_task(extract_metadata_task, args=[str(existing.id)], kwargs={"force": force}, task_id=task_id, queue="metadata")
+    publish_document_task(db, existing.id, extract_metadata_task, args=[str(existing.id)], kwargs={"force": force}, task_id=task_id, queue="metadata", stage="metadata")
     db.refresh(existing)
     return DocumentRead.model_validate(existing)
 

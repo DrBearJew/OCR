@@ -236,6 +236,39 @@ def test_process_all_enqueues_record_task_only_once_without_document_prequeue(
     assert sorted(queued_documents) == sorted([(str(first.id), False), (str(second.id), False)])
 
 
+def test_process_publish_failure_releases_document_lease(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    document = make_document(db_session, tmp_path, "Demo GmbH", title="publish-fail.txt")
+
+    def fail_publish(document_id: str, force: bool = False) -> None:
+        raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr("app.api.documents.process_document_task.delay", fail_publish)
+
+    try:
+        process_document_endpoint(
+            document.id,
+            force=False,
+            qwen_enabled=True,
+            overwrite_manual_values=False,
+            db=db_session,
+            _admin="admin",
+        )
+    except RuntimeError as exc:
+        assert "redis unavailable" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("publish failure should surface to caller")
+
+    db_session.refresh(document)
+    assert document.processing_state == DocumentState.queued_for_ocr
+    assert document.processing_task_id is None
+    assert document.processing_lease_until is None
+    assert "Task publish failed" in (document.error_message or "")
+
+
 def test_soft_delete_restore_and_search_exclusion(db_session: Session, tmp_path: Path) -> None:
     text = "Demo GmbH AlphaNeedle\nRechnungsnummer PR400000005\nRechnungsdatum 12.10.2020\nEndsumme 205,25"
     document = make_document(db_session, tmp_path, text, title="delete.txt")

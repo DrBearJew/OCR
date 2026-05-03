@@ -8,6 +8,7 @@ from app.api import admin, app_shell, auth, batches, collections, documents, fol
 from app.config import get_settings, validate_production_settings
 from app.db import SessionLocal
 from app.services.integrations import log_startup_model_status
+from app.workers.tasks import reconcile_stuck_documents_task
 from app.utils.logging import configure_logging
 
 
@@ -38,6 +39,12 @@ app.include_router(admin.router)
 def startup_checks() -> None:
     validate_production_settings(settings)
     log_startup_model_status(settings)
+    try:
+        reconcile_stuck_documents_task.apply_async(queue="maintenance")
+    except Exception:
+        # Startup should report health even if Redis is temporarily unavailable;
+        # orphaned queued docs are also recoverable through manual reconcile.
+        pass
 
 
 @app.get("/health")

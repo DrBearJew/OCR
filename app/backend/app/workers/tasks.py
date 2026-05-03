@@ -8,7 +8,7 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Document, DocumentState, StageState
 from app.services.events import record_event
-from app.services.processing import queue_full_process, queue_ocr, reserve_processing_task
+from app.services.processing import clear_processing_lease, queue_full_process, queue_ocr, reserve_processing_task
 from app.services.processing import run_full_process_for_document, run_metadata_for_document, run_ocr_for_document
 from app.services.reconciliation import reconcile_stuck_documents
 from app.services.ingestion import scan_enabled_sources
@@ -33,6 +33,36 @@ def publish_task(task, *, args: list | tuple, kwargs: dict | None = None, task_i
     if getattr(delay, "__self__", None) is not task:
         return delay(*args, **(kwargs or {}))
     return task.apply_async(args=list(args), kwargs=kwargs or {}, task_id=task_id, queue=queue)
+
+
+def publish_document_task(
+    db,
+    document_id: str | uuid.UUID,
+    task,
+    *,
+    args: list | tuple,
+    kwargs: dict | None = None,
+    task_id: str | None = None,
+    queue: str | None = None,
+    stage: str,
+):
+    try:
+        return publish_task(task, args=args, kwargs=kwargs, task_id=task_id, queue=queue)
+    except Exception as exc:  # noqa: BLE001
+        document = db.get(Document, uuid.UUID(str(document_id)))
+        if document is not None:
+            if task_id is None or document.processing_task_id == task_id:
+                clear_processing_lease(document)
+            document.error_message = f"Task publish failed for {stage}: {exc}"
+            record_event(
+                db,
+                document,
+                "task_publish_failed",
+                "Task publish failed; processing lease was released for reconciliation",
+                metadata={"stage": stage, "task_id": task_id, "queue": queue, "error": str(exc)},
+            )
+            db.commit()
+        raise
 
 
 @celery_app.task(name="app.workers.tasks.ocr_document_task", bind=True, max_retries=MAX_PROCESSING_RETRIES, queue="ocr")
@@ -142,7 +172,7 @@ def process_record_task(self, record_id: str, force: bool = False) -> dict:
                 skipped += 1
         db.commit()
         for document_id, task_id in queueable:
-            publish_task(process_document_task, args=[document_id], kwargs={"force": force}, task_id=task_id, queue="ocr")
+            publish_document_task(db, document_id, process_document_task, args=[document_id], kwargs={"force": force}, task_id=task_id, queue="ocr", stage="process")
         return {"record_id": record_id, "queued": queued, "skipped": skipped}
     except Exception as exc:  # noqa: BLE001
         raise self.retry(exc=exc, countdown=_retry_delay(self.request.retries))

@@ -22,7 +22,14 @@ from app.cli import import_legacy
 from app.models import Batch, Document, DocumentEvent, DocumentState, StageState
 from app.services.extraction import ExtractionInput, extract_metadata, normalize_amount
 from app.services.ocr_glm import OCRProviderError, OCRResult
-from app.services.processing import mark_duplicate_document, queue_ocr, run_metadata_for_document, run_ocr_for_document
+from app.services.processing import (
+    clear_processing_lease,
+    mark_duplicate_document,
+    queue_ocr,
+    reserve_processing_task,
+    run_metadata_for_document,
+    run_ocr_for_document,
+)
 from app.services.reconciliation import reconcile_stuck_documents
 from app.services.search import search_documents
 from app.services.document_assets import inspect_page_count
@@ -151,6 +158,58 @@ def test_reconcile_stale_documents_requeues_correct_stage(db_session: Session, t
     assert result["queued"] == 2
     assert ("ocr", str(ocr_doc.id)) in queued
     assert ("metadata", str(metadata_doc.id)) in queued
+
+
+def test_reconcile_requeues_orphaned_queued_docs_without_waiting_for_stale(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    queued: list[tuple[str, str]] = []
+    monkeypatch.setattr("app.services.reconciliation._enqueue_ocr", lambda doc_id, task_id=None: queued.append(("ocr", str(doc_id))))
+    monkeypatch.setattr("app.services.reconciliation._enqueue_metadata", lambda doc_id, force=False, task_id=None: queued.append(("metadata", str(doc_id))))
+
+    ocr_doc = make_doc(db_session, tmp_path, "fresh queued", sha="9" * 64)
+    ocr_doc.processing_state = DocumentState.queued_for_ocr
+    ocr_doc.final_state = DocumentState.queued_for_ocr
+    ocr_doc.ocr_state = StageState.pending
+    ocr_doc.error_message = "Task publish failed for ocr: redis unavailable"
+    clear_processing_lease(ocr_doc)
+
+    metadata_doc = make_doc(db_session, tmp_path, "fresh metadata", sha="8" * 64)
+    metadata_doc.processing_state = DocumentState.ocr_done
+    metadata_doc.final_state = DocumentState.ocr_done
+    metadata_doc.ocr_state = StageState.done
+    metadata_doc.metadata_state = StageState.pending
+    metadata_doc.error_message = "Task publish failed for metadata: redis unavailable"
+    clear_processing_lease(metadata_doc)
+    db_session.commit()
+
+    result = reconcile_stuck_documents(db_session)
+
+    assert result["queued"] == 2
+    assert ("ocr", str(ocr_doc.id)) in queued
+    assert ("metadata", str(metadata_doc.id)) in queued
+
+
+def test_reconcile_skips_queued_doc_with_active_lease(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    queued: list[str] = []
+    monkeypatch.setattr("app.services.reconciliation._enqueue_ocr", lambda doc_id, task_id=None: queued.append(str(doc_id)))
+    document = make_doc(db_session, tmp_path, "leased", sha="7" * 64)
+    document.processing_state = DocumentState.queued_for_ocr
+    document.final_state = DocumentState.queued_for_ocr
+    document.ocr_state = StageState.pending
+    reserve_processing_task(document, task_id="active-task", stage="ocr")
+    db_session.commit()
+
+    result = reconcile_stuck_documents(db_session)
+
+    assert result["queued"] == 0
+    assert queued == []
 
 
 def test_duplicate_detection_links_without_reprocessing(db_session: Session, tmp_path: Path) -> None:

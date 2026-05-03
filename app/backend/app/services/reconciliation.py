@@ -114,6 +114,37 @@ def reconcile_stuck_documents(db: Session, *, limit: int = 100) -> dict[str, Any
             update_record_status(db, document.record_id)
             continue
 
+        if (
+            document.processing_state == DocumentState.queued_for_ocr
+            and not has_active_processing_lease(document)
+            and _looks_orphaned_from_publish_or_expired_lease(document)
+        ):
+            record_event(db, document, "reconcile_orphaned_queued_ocr", "Queued OCR document had no active task lease; requeued immediately")
+            task_id = str(uuid.uuid4())
+            reserve_processing_task(document, task_id=task_id, stage="ocr", force=True)
+            enqueue_after_commit.append(("ocr", str(document.id), False, task_id))
+            queued_ocr += 1
+            document_ids.append(str(document.id))
+            update_batch_status(db, document.batch_id)
+            update_record_status(db, document.record_id)
+            continue
+
+        if (
+            document.processing_state == DocumentState.ocr_done
+            and document.metadata_state not in {StageState.done, StageState.skipped}
+            and not has_active_processing_lease(document)
+            and _looks_orphaned_from_publish_or_expired_lease(document)
+        ):
+            record_event(db, document, "reconcile_orphaned_queued_metadata", "OCR-done document had no active metadata task lease; metadata requeued immediately")
+            task_id = str(uuid.uuid4())
+            reserve_processing_task(document, task_id=task_id, stage="metadata", force=True)
+            enqueue_after_commit.append(("metadata", str(document.id), False, task_id))
+            queued_metadata += 1
+            document_ids.append(str(document.id))
+            update_batch_status(db, document.batch_id)
+            update_record_status(db, document.record_id)
+            continue
+
         if not _is_reconcile_stale(document, cutoff):
             skipped += 1
             continue
@@ -275,15 +306,25 @@ def reextract_collection(db: Session, collection_name: str, *, force: bool = Fal
 
 
 def _enqueue_ocr(document_id, *, task_id: str | None = None) -> None:
-    from app.workers.tasks import ocr_document_task, publish_task
+    from app.workers.tasks import ocr_document_task, publish_document_task
+    from app.db import SessionLocal
 
-    publish_task(ocr_document_task, args=[str(document_id)], task_id=task_id, queue="ocr")
+    db = SessionLocal()
+    try:
+        publish_document_task(db, document_id, ocr_document_task, args=[str(document_id)], task_id=task_id, queue="ocr", stage="ocr")
+    finally:
+        db.close()
 
 
 def _enqueue_metadata(document_id, *, force: bool = False, task_id: str | None = None) -> None:
-    from app.workers.tasks import extract_metadata_task, publish_task
+    from app.workers.tasks import extract_metadata_task, publish_document_task
+    from app.db import SessionLocal
 
-    publish_task(extract_metadata_task, args=[str(document_id)], kwargs={"force": force}, task_id=task_id, queue="metadata")
+    db = SessionLocal()
+    try:
+        publish_document_task(db, document_id, extract_metadata_task, args=[str(document_id)], kwargs={"force": force}, task_id=task_id, queue="metadata", stage="metadata")
+    finally:
+        db.close()
 
 
 def _is_reconcile_stale(document: Document, cutoff: datetime) -> bool:
@@ -298,3 +339,11 @@ def _is_reconcile_stale(document: Document, cutoff: datetime) -> bool:
     if updated.tzinfo is None:
         updated = updated.replace(tzinfo=timezone.utc)
     return updated <= cutoff
+
+
+def _looks_orphaned_from_publish_or_expired_lease(document: Document) -> bool:
+    if (document.error_message or "").startswith("Task publish failed"):
+        return True
+    if document.processing_task_id and not has_active_processing_lease(document):
+        return True
+    return False

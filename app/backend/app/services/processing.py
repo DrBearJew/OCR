@@ -692,9 +692,9 @@ def run_ocr_for_document(
         update_batch_status(db, document.batch_id)
         db.commit()
         if enqueue_metadata:
-            from app.workers.tasks import extract_metadata_task, publish_task
+            from app.workers.tasks import extract_metadata_task, publish_document_task
 
-            publish_task(extract_metadata_task, args=[str(document.id)], task_id=metadata_task_id, queue="metadata")
+            publish_document_task(db, document.id, extract_metadata_task, args=[str(document.id)], task_id=metadata_task_id, queue="metadata", stage="metadata")
         return document
     provider = provider or build_ocr_provider()
     try:
@@ -758,9 +758,9 @@ def run_ocr_for_document(
         logger.info("OCR completed document_id=%s chars=%s", document.id, len(result.text))
 
         if enqueue_metadata:
-            from app.workers.tasks import extract_metadata_task, publish_task
+            from app.workers.tasks import extract_metadata_task, publish_document_task
 
-            publish_task(extract_metadata_task, args=[str(document.id)], task_id=metadata_task_id, queue="metadata")
+            publish_document_task(db, document.id, extract_metadata_task, args=[str(document.id)], task_id=metadata_task_id, queue="metadata", stage="metadata")
         return document
     except Exception as exc:  # noqa: BLE001
         mark_document_failed(db, document, str(exc))
