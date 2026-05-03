@@ -1,0 +1,6 @@
+Demo GmbH
+Rechnungsnummer PR400000005
+Rechnungsdatum 12.10.2020
+Netto 172,48
+MwSt 32,77
+Endsumme 205,25

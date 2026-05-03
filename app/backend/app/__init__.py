@@ -1,0 +1,2 @@
+"""Document processing backend application."""
+

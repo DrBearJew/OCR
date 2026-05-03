@@ -1,0 +1,63 @@
+fallbacks:
+  unknown_party: "Dok"
+  missing_value: "NA"
+  missing_month_year: "00/00"
+  missing_full_date: "00/00/0000"
+
+invoice_number_cues:
+  - "Rechnungsnummer"
+  - "Rechnungsnr."
+  - "Rechnungs-Nr."
+  - "Rechnung Nr."
+  - "Rechnung-Nr."
+  - "Invoice No."
+  - "Invoice Number"
+  - "Belegnr"
+  - "Belegnummer"
+
+amount_priority:
+  strong:
+    - "Endsumme"
+    - "Gesamtsumme"
+    - "Gesamtbetrag"
+    - "Rechnungsbetrag"
+    - "Zu zahlen"
+    - "Invoice Total"
+    - "Grand Total"
+    - "Balance Due"
+    - "Brutto"
+  reject:
+    - "Netto"
+    - "MwSt"
+    - "USt"
+    - "Steuer"
+    - "Skonto"
+    - "Rabatt"
+
+amount_garbage:
+  max_abs: 10000000
+  repeated_digit_min_length: 8
+
+belege_bad_sender_substrings:
+  - "worldhealthorganization"
+  - "sauglinge"
+  - "impf"
+  - "masern"
+  - "rki"
+  - "who"
+  - "leaflet"
+  - "beipack"
+  - "kleinkinder"
+  - "erwachsene"
+  - "jugendliche"
+  - "therapie"
+  - "zuzahlung"
+  - "behandl"
+  - "fango"
+  - "microsoft"
+  - "bgm"
+  - "kmt"
+  - "kg"
+  - "shiptobill"
+  - "namevornameved"
+  - "fehlendegrundimmunisierungennach"

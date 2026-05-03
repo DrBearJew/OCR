@@ -1,0 +1,6 @@
+Fenster Beruhmt GmbH
+Kundennummer 12345
+Rechnungs-Nr. 7453
+Rechnungsdatum 08.11.2015
+Netto 2500,00
+Gesamtbetrag (brutto) 2.975,00

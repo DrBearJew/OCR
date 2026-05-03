@@ -1,0 +1,14 @@
+{
+  "name": "dokocr-extraction-reference",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "vitest run src",
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "latest",
+    "vitest": "latest"
+  }
+}

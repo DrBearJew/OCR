@@ -1,0 +1,210 @@
+from __future__ import annotations
+
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload, with_loader_criteria
+
+from app.auth import require_admin
+from app.db import get_db
+from app.models import Collection, Document, Folder, Record
+from app.schemas import AdminActionResult, RecordPatch, RecordRead
+from app.services.collections import seed_default_collections, update_record_status
+from app.services.events import record_event
+from app.services.folders import purge_document_storage, restore_record, soft_delete_record
+from app.services.processing import queue_full_process, reserve_processing_task
+from app.services.shared_titles import apply_shared_title_base
+from app.workers.tasks import process_document_task, publish_task
+
+
+router = APIRouter(prefix="/api/records", tags=["records"], dependencies=[Depends(require_admin)])
+
+
+@router.get("", response_model=list[RecordRead])
+def list_records(
+    collection_id: uuid.UUID | None = None,
+    collection_slug: str | None = None,
+    folder_id: uuid.UUID | None = None,
+    status_filter: str | None = None,
+    include_deleted: bool = False,
+    db: Session = Depends(get_db),
+) -> list[RecordRead]:
+    seed_default_collections(db)
+    stmt = (
+        select(Record)
+        .options(selectinload(Record.collection), selectinload(Record.documents), with_loader_criteria(Document, Document.deleted_at.is_(None)))
+        .order_by(Record.updated_at.desc())
+    )
+    if not include_deleted:
+        stmt = stmt.where(Record.deleted_at.is_(None))
+    if collection_id:
+        stmt = stmt.where(Record.collection_id == collection_id)
+    if collection_slug:
+        stmt = stmt.join(Collection).where(Collection.slug == collection_slug)
+    if folder_id:
+        stmt = stmt.where(Record.folder_id == folder_id)
+    if status_filter:
+        stmt = stmt.where(Record.status == status_filter)
+    rows = db.scalars(stmt).all()
+    return [RecordRead.model_validate(row) for row in rows]
+
+
+@router.get("/{record_id}", response_model=RecordRead)
+def get_record(record_id: uuid.UUID, db: Session = Depends(get_db)) -> RecordRead:
+    stmt = (
+        select(Record)
+        .where(Record.id == record_id)
+        .where(Record.deleted_at.is_(None))
+        .options(selectinload(Record.collection), selectinload(Record.documents), with_loader_criteria(Document, Document.deleted_at.is_(None)))
+    )
+    record = db.scalars(stmt).first()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Record not found")
+    return RecordRead.model_validate(record)
+
+
+@router.patch("/{record_id}", response_model=RecordRead)
+def patch_record(record_id: uuid.UUID, payload: RecordPatch, db: Session = Depends(get_db)) -> RecordRead:
+    record = db.get(Record, record_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Record not found")
+    updates = payload.model_dump(exclude_unset=True)
+    if "folder_id" in updates and updates["folder_id"] is not None:
+        folder = db.get(Folder, updates["folder_id"])
+        if folder is None or folder.deleted_at is not None:
+            raise HTTPException(status_code=404, detail="Folder not found")
+        if folder.collection_id is not None and folder.collection_id != record.collection_id:
+            raise HTTPException(status_code=400, detail="Folder belongs to a different collection")
+    for key, value in updates.items():
+        if key == "shared_title_base" and value is not None:
+            value = str(value).strip()[:255] or None
+        setattr(record, key, value)
+    db.commit()
+    db.refresh(record)
+    return RecordRead.model_validate(record)
+
+
+@router.post("/{record_id}/process-all", response_model=AdminActionResult, status_code=status.HTTP_202_ACCEPTED)
+def process_record_documents(
+    record_id: uuid.UUID,
+    force: bool = False,
+    qwen_enabled: bool | None = None,
+    overwrite_manual_values: bool | None = None,
+    db: Session = Depends(get_db),
+) -> AdminActionResult:
+    stmt = (
+        select(Record)
+        .where(Record.id == record_id)
+        .where(Record.deleted_at.is_(None))
+        .options(selectinload(Record.documents), with_loader_criteria(Document, Document.deleted_at.is_(None)))
+    )
+    record = db.scalars(stmt).first()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Record not found")
+    queued = 0
+    skipped = 0
+    enqueue_after_commit: list[tuple[str, str]] = []
+    for document in record.documents:
+        if document.deleted_at is not None:
+            skipped += 1
+            continue
+        options = dict(document.processing_options_json or {})
+        if qwen_enabled is not None:
+            options["qwen_enabled"] = qwen_enabled
+            options["qwen_enrichment_enabled"] = qwen_enabled
+        if overwrite_manual_values is not None:
+            options["overwrite_manual_values"] = overwrite_manual_values
+        document.processing_options_json = options
+        if queue_full_process(db, document, force=force):
+            task_id = str(uuid.uuid4())
+            reserve_processing_task(document, task_id=task_id, stage="process", force=force)
+            enqueue_after_commit.append((str(document.id), task_id))
+            queued += 1
+        else:
+            skipped += 1
+    db.commit()
+    for document_id, task_id in enqueue_after_commit:
+        publish_task(process_document_task, args=[document_id], kwargs={"force": force}, task_id=task_id, queue="ocr")
+    return AdminActionResult(ok=True, queued=queued, skipped=skipped, details={"record_id": str(record.id), "task": "process_documents"})
+
+
+@router.delete("/{record_id}", response_model=RecordRead)
+def delete_record(record_id: uuid.UUID, db: Session = Depends(get_db)) -> RecordRead:
+    stmt = select(Record).where(Record.id == record_id).options(selectinload(Record.collection), selectinload(Record.documents), with_loader_criteria(Document, Document.deleted_at.is_(None)))
+    record = db.scalars(stmt).first()
+    if record is None or record.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="Record not found")
+    soft_delete_record(db, record)
+    update_record_status(db, record.id)
+    db.commit()
+    db.refresh(record)
+    return RecordRead.model_validate(record)
+
+
+@router.post("/{record_id}/restore", response_model=RecordRead)
+def restore_deleted_record(record_id: uuid.UUID, db: Session = Depends(get_db)) -> RecordRead:
+    stmt = select(Record).where(Record.id == record_id).options(selectinload(Record.collection), selectinload(Record.documents))
+    record = db.scalars(stmt).first()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Record not found")
+    restore_record(db, record)
+    update_record_status(db, record.id)
+    db.commit()
+    db.refresh(record)
+    return RecordRead.model_validate(record)
+
+
+@router.post("/{record_id}/purge", response_model=AdminActionResult)
+def purge_record(record_id: uuid.UUID, db: Session = Depends(get_db)) -> AdminActionResult:
+    stmt = select(Record).where(Record.id == record_id).options(selectinload(Record.documents))
+    record = db.scalars(stmt).first()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Record not found")
+    count = len(record.documents)
+    for document in list(record.documents):
+        purge_document_storage(document)
+    db.delete(record)
+    db.commit()
+    return AdminActionResult(ok=True, updated=count + 1, details={"record_id": str(record_id)})
+
+
+@router.post("/{record_id}/apply-shared-title", response_model=RecordRead)
+def apply_record_shared_title(
+    record_id: uuid.UUID,
+    only_unlocked: bool = True,
+    db: Session = Depends(get_db),
+) -> RecordRead:
+    stmt = (
+        select(Record)
+        .where(Record.id == record_id)
+        .options(selectinload(Record.collection), selectinload(Record.documents), with_loader_criteria(Document, Document.deleted_at.is_(None)))
+    )
+    record = db.scalars(stmt).first()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Record not found")
+    before = {document.id: document.extracted_title for document in record.documents}
+    updated = apply_shared_title_base(record, record.documents, only_unlocked=only_unlocked)
+    for document in record.documents:
+        if before.get(document.id) == document.extracted_title:
+            continue
+        record_event(
+            db,
+            document,
+            "shared_title_base_applied",
+            "Shared record title base applied to unlocked document",
+            old_value={"title": before.get(document.id)},
+            new_value={"title": document.extracted_title},
+            metadata={"record_id": str(record.id), "only_unlocked": only_unlocked},
+        )
+    update_record_status(db, record.id)
+    db.commit()
+    db.refresh(record)
+    if updated:
+        stmt = (
+            select(Record)
+            .where(Record.id == record_id)
+            .options(selectinload(Record.collection), selectinload(Record.documents))
+        )
+        record = db.scalars(stmt).one()
+    return RecordRead.model_validate(record)

@@ -1,0 +1,23 @@
+collections:
+  Belege:
+    title_pattern: "{sender}_B_{date}_{amount}_{payment_method}"
+    title_regex: "^[^_]+_B_\\d{2}/\\d{2}_[^_]+_[^_]+$"
+    fallback_sender: "Dok"
+    fallback_amount: "NA"
+    fallback_payment_method: "NA"
+    date_format: "MM/YY"
+  Eingangsrechnung:
+    title_pattern: "{sender}_{invoice_number}_{date}_{amount}"
+    title_regex: "^[^_]+_[^_]+_\\d{2}/\\d{2}/\\d{4}_[^_]+$"
+    fallback_sender: "Dok"
+    fallback_invoice_number: "NA"
+    fallback_amount: "NA"
+    date_format: "DD/MM/YYYY"
+  Ausgangsrechnung:
+    title_pattern: "{recipient}_{invoice_number}_{date}_{amount}"
+    title_regex: "^[^_]+_[^_]+_\\d{2}/\\d{2}/\\d{4}_[^_]+$"
+    fallback_recipient: "Dok"
+    fallback_invoice_number: "NA"
+    fallback_amount: "NA"
+    date_format: "DD/MM/YYYY"
+

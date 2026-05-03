@@ -1,0 +1,40 @@
+# Optional example only.
+# Do not use this file if you already have stable llama.cpp containers,
+# ports, GPU mapping, volumes, aliases, or reverse-proxy routes.
+services:
+  glm-llama:
+    image: ghcr.io/ggerganov/llama.cpp:server
+    container_name: glm-llama
+    profiles: ["llama-example"]
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./llm-models:/llm-models:ro
+    command: >
+      -m /llm-models/glm.gguf
+      --mmproj /llm-models/glm-mmproj.gguf
+      --host 0.0.0.0
+      --port 8080
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  qwen-llama:
+    image: ghcr.io/ggerganov/llama.cpp:server
+    container_name: qwen-llama
+    profiles: ["llama-example"]
+    ports:
+      - "8082:8080"
+    volumes:
+      - ./llm-models:/llm-models:ro
+    command: >
+      -m /llm-models/qwen.gguf
+      --host 0.0.0.0
+      --port 8080
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5

@@ -1,0 +1,16 @@
+# Optional converter services only.
+# Keep this separate from the default stack so Tika/Gotenberg are never baked
+# into the core app. Enable CONVERTERS_ENABLED=true before accepting Office or
+# email inputs that need conversion.
+services:
+  tika:
+    image: apache/tika:2.9.2.1-full
+    profiles: ["converters"]
+    ports:
+      - "9998:9998"
+
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    profiles: ["converters"]
+    ports:
+      - "3002:3000"

@@ -1,0 +1,9 @@
+Muster GmbH
+Industriestrasse 1
+12345 Berlin
+Habermann & Sohne KG
+Hauptstrasse 2
+54321 Hamburg
+Rechnung Nr. M1675
+Rechnungsdatum 29.10.2020
+Grand Total 222,51
