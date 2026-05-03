@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 
+from celery.app.task import Task
 from sqlalchemy import select
 
 from app.config import get_settings
@@ -30,7 +31,7 @@ def publish_task(task, *, args: list | tuple, kwargs: dict | None = None, task_i
     the patched function instead of touching Redis.
     """
     delay = getattr(task, "delay")
-    if getattr(delay, "__self__", None) is not task:
+    if getattr(delay, "__func__", None) is not Task.delay:
         return delay(*args, **(kwargs or {}))
     return task.apply_async(args=list(args), kwargs=kwargs or {}, task_id=task_id, queue=queue)
 
