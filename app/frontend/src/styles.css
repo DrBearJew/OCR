@@ -1501,6 +1501,7 @@ tbody tr:hover {
   border-top: 1px solid var(--border-soft);
   border-radius: 0;
   background: rgba(15, 23, 34, 0.58);
+  color: var(--text);
 }
 
 .doc-table-row:hover,
@@ -1530,6 +1531,15 @@ tbody tr:hover {
   color: var(--muted);
 }
 
+.doc-table-row > span:not(.pill):not(.doc-title-cell) {
+  color: #dbe7f3;
+}
+
+.doc-title-cell strong {
+  color: #f5f7fb;
+  font-weight: 800;
+}
+
 .doc-title-cell strong,
 .doc-title-cell small {
   overflow: hidden;
@@ -1538,7 +1548,7 @@ tbody tr:hover {
 }
 
 .doc-title-cell small {
-  color: var(--muted);
+  color: #a8b7ca;
   font-size: 0.78rem;
 }
 
