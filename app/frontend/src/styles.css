@@ -3104,3 +3104,360 @@ mark {
 .folders-page .folder-row button[title="Delete folder"] {
   color: var(--danger);
 }
+
+/* Focused UI repair: keep late legacy light-theme rules from washing out
+   operational pages that live inside the dark admin shell. */
+.schema-page,
+.admin-page,
+.processing-page,
+.collections-console,
+.documents-console,
+.upload-dashboard {
+  color: var(--text);
+}
+
+.schema-page .workflow-card,
+.admin-page .admin-list,
+.processing-page .admin-list,
+.processing-page .stats-grid,
+.collections-console .workflow-card,
+.documents-console .workflow-card {
+  background: var(--panel);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.schema-page h1,
+.schema-page h2,
+.schema-page h3,
+.schema-page strong,
+.schema-page label,
+.admin-page h1,
+.admin-page h2,
+.admin-page h3,
+.admin-page strong,
+.admin-page label,
+.processing-page h1,
+.processing-page h2,
+.processing-page h3,
+.processing-page strong,
+.processing-page label,
+.documents-console h1,
+.documents-console h2,
+.documents-console strong {
+  color: var(--text);
+}
+
+.schema-page p,
+.schema-page small,
+.schema-page span,
+.admin-page p,
+.admin-page small,
+.admin-page span,
+.processing-page p,
+.processing-page small,
+.processing-page span,
+.documents-console p,
+.documents-console small {
+  color: var(--muted);
+}
+
+.schema-page input,
+.schema-page select,
+.schema-page textarea,
+.admin-page input,
+.admin-page select,
+.admin-page textarea,
+.processing-page input,
+.processing-page select,
+.processing-page textarea,
+.create-collection-form input,
+.create-collection-form select,
+.create-collection-form textarea,
+.shared-title-card input,
+.shared-title-card select {
+  background: #0d1622;
+  border-color: var(--border);
+  color: var(--text);
+  -webkit-text-fill-color: var(--text);
+}
+
+.schema-page input::placeholder,
+.schema-page textarea::placeholder,
+.admin-page input::placeholder,
+.admin-page textarea::placeholder,
+.processing-page input::placeholder,
+.processing-page textarea::placeholder,
+.create-collection-form input::placeholder {
+  color: #7f8ea3;
+  opacity: 1;
+}
+
+.schema-page option,
+.admin-page option,
+.processing-page option,
+.shared-title-card option {
+  background: #0d1622;
+  color: #f8fafc;
+}
+
+.schema-page .table-wrap,
+.admin-page .table-wrap,
+.processing-page .table-wrap {
+  background: #0b1320;
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.schema-page table,
+.admin-page table,
+.processing-page table {
+  color: var(--text);
+}
+
+.schema-page th,
+.schema-page td,
+.admin-page th,
+.admin-page td,
+.processing-page th,
+.processing-page td {
+  color: var(--text);
+  border-color: var(--border-soft);
+}
+
+.schema-page th,
+.admin-page th,
+.processing-page th {
+  background: #0d1622;
+  color: #b9d7ff;
+}
+
+.schema-page tr,
+.admin-page tr,
+.processing-page tr {
+  background: #0b1320;
+}
+
+.schema-page tr:nth-child(even),
+.admin-page tr:nth-child(even),
+.processing-page tr:nth-child(even) {
+  background: #0f1826;
+}
+
+.schema-layout {
+  align-items: start;
+  gap: 1rem;
+}
+
+.schema-editor-stack {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.schema-panel {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.schema-form,
+.create-collection-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  align-items: end;
+  gap: 0.75rem;
+}
+
+.schema-form > *,
+.create-collection-form > * {
+  min-width: 0;
+}
+
+.schema-form .check {
+  min-height: 2.45rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.schema-form .check input,
+.admin-actions .check input,
+.processing-page input[type='checkbox'] {
+  width: 1rem;
+  min-height: 1rem;
+  accent-color: var(--green);
+  -webkit-text-fill-color: initial;
+}
+
+.schema-collections {
+  align-content: start;
+  padding: 1rem;
+}
+
+.schema-collections h2 {
+  margin: 0 0 0.35rem;
+}
+
+.schema-collections button {
+  width: 100%;
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.75rem;
+  text-align: left;
+  background: #0d1622;
+  border-color: var(--border-soft);
+  color: var(--text);
+}
+
+.schema-collections button strong,
+.schema-collections button span {
+  color: inherit;
+}
+
+.schema-collections button.active {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.62);
+  color: #86efac;
+}
+
+.admin-actions,
+.filter-row,
+.saved-views,
+.bulk-bar {
+  background: rgba(15, 23, 42, 0.78);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.admin-actions input,
+.admin-actions select,
+.filter-row input,
+.filter-row select,
+.saved-views input,
+.saved-views select {
+  background: #0d1622;
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.admin-row,
+.processing-page .admin-row,
+.timeline-row {
+  background: #0d1622;
+  border-color: var(--border-soft);
+  color: var(--text);
+}
+
+.admin-row > button:first-child,
+.processing-page .admin-row > button:first-child {
+  background: transparent;
+  color: var(--text);
+}
+
+.admin-row > button:first-child span,
+.processing-page .admin-row > button:first-child span {
+  color: var(--muted);
+}
+
+.metric {
+  background: #0d1622;
+  border-color: var(--border-soft);
+}
+
+.metric strong {
+  color: var(--text);
+}
+
+.metric span {
+  color: var(--muted);
+}
+
+.danger-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  color: #fecaca;
+  border-color: rgba(239, 68, 68, 0.45);
+  background: rgba(127, 29, 29, 0.28);
+}
+
+.danger-button:hover {
+  color: #fff1f2;
+  border-color: rgba(248, 113, 113, 0.7);
+  background: rgba(153, 27, 27, 0.42);
+}
+
+.documents-console .bulk-bar {
+  align-items: center;
+}
+
+.documents-console .doc-table-row,
+.documents-console .doc-table-head {
+  color: var(--text);
+}
+
+.documents-console .doc-table-row > span,
+.documents-console .doc-table-row .doc-title-cell strong {
+  color: var(--text);
+}
+
+.documents-console .doc-table-row .doc-title-cell small {
+  color: #9db4cc;
+}
+
+.documents-console .doc-table-row input[type='checkbox'] {
+  accent-color: var(--green);
+  -webkit-text-fill-color: initial;
+}
+
+.shared-title-card {
+  grid-template-columns: minmax(220px, 0.65fr) minmax(0, 1.35fr);
+  align-items: start;
+  overflow: visible;
+}
+
+.shared-title-controls {
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  align-items: start;
+  min-width: 0;
+}
+
+.shared-title-controls label,
+.shared-title-controls .toggle-row {
+  min-width: 0;
+}
+
+.shared-title-preview {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.shared-title-preview strong {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.shared-title-hint {
+  grid-column: 2 / 3;
+}
+
+.shared-title-controls .toggle-row {
+  min-height: 2.5rem;
+  margin-top: 1.45rem;
+}
+
+@media (max-width: 1100px) {
+  .shared-title-card,
+  .shared-title-controls,
+  .schema-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .shared-title-hint {
+    grid-column: auto;
+  }
+}

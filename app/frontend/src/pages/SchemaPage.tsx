@@ -19,6 +19,7 @@ export default function SchemaPage() {
   const [metadataRows, setMetadataRows] = useState<PaperlessMetadata[]>([])
   const [metadataName, setMetadataName] = useState('')
   const [metadataTemplate, setMetadataTemplate] = useState('{collection}/{year}')
+  const [collectionForm, setCollectionForm] = useState({ name: '', slug: '', icon: '', color: '#22c55e' })
   const [error, setError] = useState('')
 
   async function load() {
@@ -61,6 +62,27 @@ export default function SchemaPage() {
     setFields(await api.customFields(selected))
   }
 
+  async function addCollection(event: FormEvent) {
+    event.preventDefault()
+    if (!collectionForm.name.trim()) return
+    setError('')
+    try {
+      const created = await api.createCollection({
+        name: collectionForm.name.trim(),
+        slug: collectionForm.slug.trim() || undefined,
+        icon: collectionForm.icon.trim() || undefined,
+        color: collectionForm.color.trim() || undefined
+      })
+      setCollectionForm({ name: '', slug: '', icon: '', color: '#22c55e' })
+      const rows = await api.collections()
+      setCollections(rows)
+      setSelected(created.id)
+      setFields(await api.customFields(created.id))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create collection')
+    }
+  }
+
   async function addMetadata(event: FormEvent) {
     event.preventDefault()
     if (!metadataName.trim()) return
@@ -74,7 +96,7 @@ export default function SchemaPage() {
   }
 
   return (
-    <main>
+    <main className="schema-page">
       <header className="page-header">
         <div>
           <h1>Schemas</h1>
@@ -83,8 +105,16 @@ export default function SchemaPage() {
         <button className="icon-button" title="Refresh" onClick={() => void load()}><RefreshCw size={18} /></button>
       </header>
       {error && <p className="error">{error}</p>}
+      <form className="workflow-card create-collection-form schema-create-collection" onSubmit={addCollection}>
+        <label>Collection name<input value={collectionForm.name} onChange={(event) => setCollectionForm({ ...collectionForm, name: event.target.value })} placeholder="New collection" /></label>
+        <label>Slug<input value={collectionForm.slug} onChange={(event) => setCollectionForm({ ...collectionForm, slug: event.target.value })} placeholder="auto-generated if empty" /></label>
+        <label>Icon<input value={collectionForm.icon} onChange={(event) => setCollectionForm({ ...collectionForm, icon: event.target.value })} placeholder="NC" maxLength={4} /></label>
+        <label>Color<input type="color" value={collectionForm.color} onChange={(event) => setCollectionForm({ ...collectionForm, color: event.target.value })} /></label>
+        <button className="primary"><Plus size={18} /> Create collection</button>
+      </form>
       <section className="schema-layout">
-        <aside className="schema-collections">
+        <aside className="workflow-card schema-collections">
+          <h2>Collections</h2>
           {collections.map((collection) => (
             <button key={collection.id} className={selected === collection.id ? 'active' : ''} onClick={() => setSelected(collection.id)}>
               <strong>{collection.name}</strong>
@@ -92,62 +122,67 @@ export default function SchemaPage() {
             </button>
           ))}
         </aside>
-        <section>
-          <form className="schema-form" onSubmit={addField}>
-            <input placeholder="Field name" value={name} onChange={(event) => setName(event.target.value)} />
-            <input placeholder="slug" value={slug} onChange={(event) => setSlug(event.target.value)} />
-            <select value={fieldType} onChange={(event) => setFieldType(event.target.value as CustomFieldType)}>
-              {fieldTypes.map((type) => <option key={type}>{type}</option>)}
-            </select>
-            <input placeholder="Enum options, comma separated" value={enumOptions} onChange={(event) => setEnumOptions(event.target.value)} />
-            <label className="check"><input type="checkbox" checked={required} onChange={(event) => setRequired(event.target.checked)} /> Required</label>
-            <label className="check"><input type="checkbox" checked={searchable} onChange={(event) => setSearchable(event.target.checked)} /> Searchable</label>
-            <button className="primary"><Plus size={18} /> Add field</button>
-          </form>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Order</th><th>Name</th><th>Slug</th><th>Type</th><th>Required</th><th>Searchable</th></tr></thead>
-              <tbody>
-                {fields.map((field) => (
-                  <tr key={field.id}>
-                    <td>{field.display_order}</td>
-                    <td>{field.name}</td>
-                    <td>{field.slug}</td>
-                    <td>{field.field_type}</td>
-                    <td>{field.required ? 'yes' : 'no'}</td>
-                    <td>{field.searchable ? 'yes' : 'no'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <h2>Paperless Metadata</h2>
-          <form className="schema-form" onSubmit={addMetadata}>
-            <select value={metadataKind} onChange={(event) => setMetadataKind(event.target.value as typeof metadataKind)}>
-              <option value="correspondents">Correspondents</option>
-              <option value="document-types">Document types</option>
-              <option value="tags">Tags</option>
-              <option value="storage-paths">Storage paths</option>
-            </select>
-            <input placeholder="Name" value={metadataName} onChange={(event) => setMetadataName(event.target.value)} />
-            <input placeholder="Storage path template" value={metadataTemplate} onChange={(event) => setMetadataTemplate(event.target.value)} />
-            <button className="primary"><Plus size={18} /> Add metadata</button>
-          </form>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Name</th><th>Slug</th><th>Collection</th><th>Template</th></tr></thead>
-              <tbody>
-                {metadataRows.map((row) => (
-                  <tr key={row.id}>
-                    <td>{row.name}</td>
-                    <td>{row.slug}</td>
-                    <td>{row.collection_id || 'global'}</td>
-                    <td>{row.path_template || ''}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <section className="schema-editor-stack">
+          <section className="workflow-card schema-panel">
+            <h2>Custom Fields</h2>
+            <form className="schema-form" onSubmit={addField}>
+              <input placeholder="Field name" value={name} onChange={(event) => setName(event.target.value)} />
+              <input placeholder="slug" value={slug} onChange={(event) => setSlug(event.target.value)} />
+              <select value={fieldType} onChange={(event) => setFieldType(event.target.value as CustomFieldType)}>
+                {fieldTypes.map((type) => <option key={type}>{type}</option>)}
+              </select>
+              <input placeholder="Enum options, comma separated" value={enumOptions} onChange={(event) => setEnumOptions(event.target.value)} />
+              <label className="check"><input type="checkbox" checked={required} onChange={(event) => setRequired(event.target.checked)} /> Required</label>
+              <label className="check"><input type="checkbox" checked={searchable} onChange={(event) => setSearchable(event.target.checked)} /> Searchable</label>
+              <button className="primary"><Plus size={18} /> Add field</button>
+            </form>
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Order</th><th>Name</th><th>Slug</th><th>Type</th><th>Required</th><th>Searchable</th></tr></thead>
+                <tbody>
+                  {fields.map((field) => (
+                    <tr key={field.id}>
+                      <td>{field.display_order}</td>
+                      <td>{field.name}</td>
+                      <td>{field.slug}</td>
+                      <td>{field.field_type}</td>
+                      <td>{field.required ? 'yes' : 'no'}</td>
+                      <td>{field.searchable ? 'yes' : 'no'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <section className="workflow-card schema-panel">
+            <h2>Paperless Metadata</h2>
+            <form className="schema-form metadata-schema-form" onSubmit={addMetadata}>
+              <select value={metadataKind} onChange={(event) => setMetadataKind(event.target.value as typeof metadataKind)}>
+                <option value="correspondents">Correspondents</option>
+                <option value="document-types">Document types</option>
+                <option value="tags">Tags</option>
+                <option value="storage-paths">Storage paths</option>
+              </select>
+              <input placeholder="Name" value={metadataName} onChange={(event) => setMetadataName(event.target.value)} />
+              <input placeholder="Storage path template" value={metadataTemplate} onChange={(event) => setMetadataTemplate(event.target.value)} />
+              <button className="primary"><Plus size={18} /> Add metadata</button>
+            </form>
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Name</th><th>Slug</th><th>Collection</th><th>Template</th></tr></thead>
+                <tbody>
+                  {metadataRows.map((row) => (
+                    <tr key={row.id}>
+                      <td>{row.name}</td>
+                      <td>{row.slug}</td>
+                      <td>{row.collection_id || 'global'}</td>
+                      <td>{row.path_template || ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
         </section>
       </section>
     </main>

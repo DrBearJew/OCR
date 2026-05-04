@@ -91,7 +91,7 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
   useEffect(() => { void load() }, [])
 
   return (
-    <main>
+    <main className="admin-page">
       <header className="page-header">
         <div>
           <h1>Admin</h1>

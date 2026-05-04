@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Database, FileText, RefreshCw, Search, Settings2, SlidersHorizontal } from 'lucide-react'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { Database, FileText, Plus, RefreshCw, Search, Settings2, SlidersHorizontal } from 'lucide-react'
 import type { CSSProperties, ReactNode } from 'react'
 import { api } from '../api/client'
 import type { CollectionSummary } from '../types'
@@ -12,6 +12,8 @@ interface CollectionsPageProps {
 export default function CollectionsPage({ onOpenCollection, onSchemas }: CollectionsPageProps) {
   const [collections, setCollections] = useState<CollectionSummary[]>([])
   const [query, setQuery] = useState('')
+  const [createOpen, setCreateOpen] = useState(false)
+  const [newCollection, setNewCollection] = useState({ name: '', slug: '', icon: '', color: '#22c55e' })
   const [error, setError] = useState('')
 
   async function load() {
@@ -42,6 +44,26 @@ export default function CollectionsPage({ onOpenCollection, onSchemas }: Collect
     needsReview: collections.reduce((sum, item) => sum + (item.status_counts.needs_review || 0), 0)
   }), [collections])
 
+  async function createCollection(event: FormEvent) {
+    event.preventDefault()
+    if (!newCollection.name.trim()) return
+    setError('')
+    try {
+      const created = await api.createCollection({
+        name: newCollection.name.trim(),
+        slug: newCollection.slug.trim() || undefined,
+        icon: newCollection.icon.trim() || undefined,
+        color: newCollection.color.trim() || undefined
+      })
+      setNewCollection({ name: '', slug: '', icon: '', color: '#22c55e' })
+      setCreateOpen(false)
+      await load()
+      onOpenCollection(created.slug)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create collection')
+    }
+  }
+
   return (
     <main className="collections-console">
       <header className="page-header console-header">
@@ -50,11 +72,22 @@ export default function CollectionsPage({ onOpenCollection, onSchemas }: Collect
           <p>PocketBase-style schema buckets with document-true records, fields, and OCR workflows.</p>
         </div>
         <div className="button-row">
+          <button className="primary" onClick={() => setCreateOpen((value) => !value)}><Plus size={17} /> Create collection</button>
           <button onClick={onSchemas}><Settings2 size={17} /> Manage Schemas</button>
           <button className="icon-button" title="Refresh" onClick={() => void load()}><RefreshCw size={18} /></button>
         </div>
       </header>
       {error && <p className="warning">{error}</p>}
+      {createOpen && (
+        <form className="workflow-card create-collection-form" onSubmit={createCollection}>
+          <label>Name<input value={newCollection.name} onChange={(event) => setNewCollection({ ...newCollection, name: event.target.value })} placeholder="Steuer" autoFocus /></label>
+          <label>Slug<input value={newCollection.slug} onChange={(event) => setNewCollection({ ...newCollection, slug: event.target.value })} placeholder="auto-generated if empty" /></label>
+          <label>Icon<input value={newCollection.icon} onChange={(event) => setNewCollection({ ...newCollection, icon: event.target.value })} placeholder="ST" maxLength={4} /></label>
+          <label>Color<input type="color" value={newCollection.color} onChange={(event) => setNewCollection({ ...newCollection, color: event.target.value })} /></label>
+          <button className="primary"><Plus size={17} /> Save collection</button>
+          <button type="button" onClick={() => setCreateOpen(false)}>Cancel</button>
+        </form>
+      )}
 
       <section className="collections-summary-grid">
         <SummaryCard icon={<Database size={23} />} label="Collections" value={totals.collections} detail="schema buckets" />
@@ -70,6 +103,7 @@ export default function CollectionsPage({ onOpenCollection, onSchemas }: Collect
             <input placeholder="Search collections, slugs, document types..." value={query} onChange={(event) => setQuery(event.target.value)} />
           </label>
           <button onClick={onSchemas}><Settings2 size={17} /> Schema Editor</button>
+          <button onClick={() => setCreateOpen(true)}><Plus size={17} /> New collection</button>
           <button className="primary" onClick={() => onOpenCollection('eingangsrechnung')}>Open invoices</button>
         </div>
 

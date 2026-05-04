@@ -23,7 +23,7 @@ export default function ProcessingPage({ onOpenDocument }: { onOpenDocument: (id
   const docs = (data?.documents || []).filter((doc) => !filters.state || doc.processing_state === filters.state)
 
   return (
-    <main>
+    <main className="processing-page">
       <header className="page-header">
         <div>
           <h1>Processing</h1>

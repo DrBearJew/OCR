@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Download, FileText, RefreshCw, Search, UploadCloud } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Download, FileText, RefreshCw, Search, Trash2, UploadCloud } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { api, downloadUrl, previewUrl, thumbnailUrl } from '../api/client'
 import SavedViewsBar from '../components/SavedViewsBar'
@@ -43,6 +43,39 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
     await api.bulkDocuments({ action, document_ids: ids, ...extra })
     setSelectedIds(new Set())
     await load()
+  }
+
+  async function deleteSelectedDocuments() {
+    const ids = Array.from(selectedIds).filter((id) => !id.startsWith('demo-'))
+    if (!ids.length) return
+    if (!confirm(`Delete ${ids.length} selected document${ids.length === 1 ? '' : 's'}? This soft-deletes each file, OCR text, and metadata without touching sibling documents.`)) return
+    setError('')
+    try {
+      await Promise.all(ids.map((id) => api.deleteDocument(id)))
+      setSelectedIds(new Set())
+      setSelectedId((current) => ids.includes(current) ? '' : current)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Delete failed')
+    }
+  }
+
+  async function deleteDocument(document: Document) {
+    if (document.id.startsWith('demo-')) return
+    if (!confirm(`Delete "${document.original_filename}"? This soft-deletes this document only; sibling files stay in the record.`)) return
+    setError('')
+    try {
+      await api.deleteDocument(document.id)
+      setSelectedIds((current) => {
+        const next = new Set(current)
+        next.delete(document.id)
+        return next
+      })
+      setSelectedId('')
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Delete failed')
+    }
   }
 
   return (
@@ -89,6 +122,7 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
             <button onClick={() => void bulk('reextract')}>Re-extract</button>
             <button onClick={() => void bulk('set_review_state', { review_state: 'needs_review', review_reason: 'Bulk marked for review' })}>Needs review</button>
             <button onClick={() => void bulk('set_review_state', { review_state: 'reviewed' })}>Reviewed</button>
+            <button className="danger-button" onClick={() => void deleteSelectedDocuments()}><Trash2 size={16} /> Delete selected</button>
           </div>
           <div className="document-console-table">
             <div className="doc-table-head">
@@ -119,7 +153,7 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
           </div>
         </section>
         {selected && <DocumentPreviewPanel document={selected} onOpenDocument={onOpenDocument} />}
-        {selected && <DocumentInspector document={selected} onOpenDocument={onOpenDocument} onOpenRecord={onOpenRecord} />}
+        {selected && <DocumentInspector document={selected} onOpenDocument={onOpenDocument} onOpenRecord={onOpenRecord} onDelete={() => void deleteDocument(selected)} />}
       </section>
     </main>
   )
@@ -152,7 +186,7 @@ function DocumentPreviewPanel({ document, onOpenDocument }: { document: Document
   )
 }
 
-function DocumentInspector({ document, onOpenDocument, onOpenRecord }: { document: Document; onOpenDocument: (id: string) => void; onOpenRecord: (id: string) => void }) {
+function DocumentInspector({ document, onOpenDocument, onOpenRecord, onDelete }: { document: Document; onOpenDocument: (id: string) => void; onOpenRecord: (id: string) => void; onDelete: () => void }) {
   return (
     <aside className="document-detail-panel workflow-card">
       <div className="detail-tabs"><button className="active">Details</button><button>Metadata</button><button>Activity</button></div>
@@ -172,9 +206,10 @@ function DocumentInspector({ document, onOpenDocument, onOpenRecord }: { documen
       <label>Tags<div className="tag-input"><button type="button">invoice</button><button type="button">2020</button><button type="button">supplier:demo</button></div></label>
       <label>Notes<textarea placeholder="Add notes..." readOnly /></label>
       <div className="detail-actions">
-        <button onClick={() => onOpenDocument(document.id)}>Open</button>
-        {document.record_id && <button onClick={() => onOpenRecord(document.record_id!)}>Record</button>}
-        <button className="primary">Mark Reviewed</button>
+        <button type="button" onClick={() => onOpenDocument(document.id)}>Open</button>
+        {document.record_id && <button type="button" onClick={() => onOpenRecord(document.record_id!)}>Record</button>}
+        <button type="button" className="primary">Mark Reviewed</button>
+        <button type="button" className="danger-button" disabled={document.id.startsWith('demo-')} onClick={onDelete}><Trash2 size={16} /> Delete</button>
       </div>
     </aside>
   )
