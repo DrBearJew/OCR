@@ -226,6 +226,8 @@ def _ocr_config_from_processing_options(options: dict[str, Any]) -> dict[str, An
         config["page_limit"] = options["page_limit"]
     if options.get("ocr_mode"):
         config["ocr_mode"] = options["ocr_mode"]
+    if options.get("ocr_engine"):
+        config["ocr_engine"] = options["ocr_engine"]
     return config
 
 

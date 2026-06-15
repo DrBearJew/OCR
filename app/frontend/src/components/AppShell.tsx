@@ -109,7 +109,7 @@ export function StatusChip({ label, detail, state = 'healthy' }: { label: string
 
 function buildHealthChips(summary: IntegrationSummary | null) {
   const fallback = [
-    { label: 'GLM OCR', detail: 'Checking', state: 'checking' as const },
+    { label: 'PaddleOCR-VL', detail: 'Checking', state: 'checking' as const },
     { label: 'Qwen Metadata', detail: 'Checking', state: 'checking' as const },
     { label: 'Llama.cpp', detail: 'Checking', state: 'checking' as const },
     { label: 'Storage', detail: 'Checking', state: 'checking' as const },
@@ -118,17 +118,19 @@ function buildHealthChips(summary: IntegrationSummary | null) {
   ]
   if (!summary) return fallback
   const byName = new Map(summary.integrations.map((item) => [item.name.toLowerCase(), item]))
+  const paddle = byName.get('paddle_vl_llama')
   const glm = byName.get('glm_llama')
   const qwen = byName.get('qwen_llama')
   const database = byName.get('database')
   const redis = byName.get('redis')
   return fallback.map((chip) => {
-    if (chip.label === 'GLM OCR') return fromIntegration(chip.label, glm)
+    if (chip.label === 'PaddleOCR-VL') return fromIntegration(chip.label, paddle || glm)
     if (chip.label === 'Qwen Metadata') return fromIntegration(chip.label, qwen)
     if (chip.label === 'Llama.cpp') {
-      if (!glm && !qwen) return chip
-      if (glm?.ok && qwen?.ok) return { label: chip.label, detail: 'Healthy', state: 'healthy' as const }
-      if (glm?.ok || qwen?.ok) return { label: chip.label, detail: 'Partial', state: 'warning' as const }
+      const ocrOk = Boolean(paddle?.ok || glm?.ok)
+      if (!paddle && !glm && !qwen) return chip
+      if (ocrOk && qwen?.ok) return { label: chip.label, detail: 'Healthy', state: 'healthy' as const }
+      if (ocrOk || qwen?.ok) return { label: chip.label, detail: 'Partial', state: 'warning' as const }
       return { label: chip.label, detail: 'Down', state: 'down' as const }
     }
     if (chip.label === 'Storage') return fromIntegration(chip.label, database)

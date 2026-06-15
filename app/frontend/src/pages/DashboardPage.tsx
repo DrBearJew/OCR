@@ -62,6 +62,7 @@ interface ProcessingOptionsState {
   qwenEnrichment: boolean
   overwriteManualValues: boolean
   preserveLockedFields: boolean
+  ocrEngine: 'paddle_vl' | 'ppocrv6'
   ocrLanguage: string
   ocrPageMode: 'all' | 'first_n'
   ocrPageLimit: number
@@ -156,6 +157,7 @@ const defaultProcessingOptions: ProcessingOptionsState = {
   qwenEnrichment: false,
   overwriteManualValues: false,
   preserveLockedFields: true,
+  ocrEngine: 'paddle_vl',
   ocrLanguage: 'deu+eng',
   ocrPageMode: 'all',
   ocrPageLimit: 10,
@@ -540,6 +542,7 @@ function ProcessingOptionsPanel({ options, setOptions, qwenStatus }: { options: 
         <Toggle label="Include Qwen tags, folders, and search hints" checked={options.qwenEnrichment && qwenAvailable} disabled={!qwenAvailable} onChange={(checked) => set({ qwenEnrichment: checked, qwenAutofill: checked || options.qwenAutofill })} />
         <Toggle label="Overwrite manual values" checked={options.overwriteManualValues} onChange={(checked) => set({ overwriteManualValues: checked })} />
         <Toggle label="Preserve manual edits / locked fields" checked={options.preserveLockedFields} onChange={(checked) => set({ preserveLockedFields: checked })} />
+        <label>OCR engine<select value={options.ocrEngine} onChange={(event) => set({ ocrEngine: event.target.value as ProcessingOptionsState['ocrEngine'] })}><option value="paddle_vl">Smart parser · PaddleOCR-VL</option><option value="ppocrv6">Fast OCR · PP-OCRv6 medium</option></select></label>
         <label>OCR language<select value={options.ocrLanguage} onChange={(event) => set({ ocrLanguage: event.target.value })}><option value="deu+eng">German + English</option><option value="auto">Auto-detect</option><option value="deu">German</option><option value="eng">English</option></select></label>
         <label>OCR pages<select value={options.ocrPageMode} onChange={(event) => set({ ocrPageMode: event.target.value as ProcessingOptionsState['ocrPageMode'] })}><option value="all">All pages</option><option value="first_n">First N pages</option></select></label>
         <label>Page limit<input type="number" min="1" max="100" value={options.ocrPageLimit} onChange={(event) => set({ ocrPageLimit: Number(event.target.value) || 1 })} /></label>
@@ -785,6 +788,7 @@ function toProcessingPayload(options: ProcessingOptionsState, qwenAvailable: boo
     skip_metadata: false,
     extract_tables: options.extractTables,
     collection_rules_enabled: options.collectionRules,
+    ocr_engine: options.ocrEngine,
     language: options.ocrLanguage,
     page_limit: options.ocrPageMode === 'all' ? 100 : options.ocrPageLimit,
   }

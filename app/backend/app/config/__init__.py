@@ -26,14 +26,14 @@ class Settings(BaseSettings):
 
     storage_root: Path = Field(
         default=Path("/data/storage"),
-        validation_alias=AliasChoices("STORAGE_ROOT", "STORAGE_PATH"),
+        validation_alias=AliasChoices("storage_root", "STORAGE_ROOT", "STORAGE_PATH"),
     )
-    max_upload_file_size_mb: int = Field(default=200, validation_alias=AliasChoices("MAX_UPLOAD_FILE_SIZE_MB", "MAX_UPLOAD_MB"))
-    max_upload_batch_size_mb: int = Field(default=500, validation_alias=AliasChoices("MAX_UPLOAD_BATCH_SIZE_MB"))
-    max_upload_files_per_batch: int = Field(default=50, validation_alias=AliasChoices("MAX_UPLOAD_FILES_PER_BATCH"))
+    max_upload_file_size_mb: int = Field(default=200, validation_alias=AliasChoices("max_upload_file_size_mb", "MAX_UPLOAD_FILE_SIZE_MB", "MAX_UPLOAD_MB"))
+    max_upload_batch_size_mb: int = Field(default=500, validation_alias=AliasChoices("max_upload_batch_size_mb", "MAX_UPLOAD_BATCH_SIZE_MB"))
+    max_upload_files_per_batch: int = Field(default=50, validation_alias=AliasChoices("max_upload_files_per_batch", "MAX_UPLOAD_FILES_PER_BATCH"))
     allowed_upload_extensions: str = Field(
         default="pdf,png,jpg,jpeg,webp,tif,tiff,txt,doc,docx,xls,xlsx,ppt,pptx,odt,ods,odp,rtf,eml,msg",
-        validation_alias=AliasChoices("ALLOWED_EXTENSIONS", "ALLOWED_UPLOAD_EXTENSIONS"),
+        validation_alias=AliasChoices("allowed_upload_extensions", "ALLOWED_EXTENSIONS", "ALLOWED_UPLOAD_EXTENSIONS"),
     )
     allowed_upload_mime_types: str = Field(
         default=(
@@ -44,9 +44,9 @@ class Settings(BaseSettings):
         "application/vnd.oasis.opendocument.text,application/vnd.oasis.opendocument.spreadsheet,"
         "application/vnd.oasis.opendocument.presentation,application/rtf,message/rfc822,application/vnd.ms-outlook"
         ),
-        validation_alias=AliasChoices("ALLOWED_MIME_TYPES", "ALLOWED_UPLOAD_MIME_TYPES"),
+        validation_alias=AliasChoices("allowed_upload_mime_types", "ALLOWED_MIME_TYPES", "ALLOWED_UPLOAD_MIME_TYPES"),
     )
-    max_pdf_pages: int = Field(default=100, validation_alias=AliasChoices("MAX_PDF_PAGES"))
+    max_pdf_pages: int = Field(default=100, validation_alias=AliasChoices("max_pdf_pages", "MAX_PDF_PAGES"))
     thumbnail_size: int = 420
     stuck_document_minutes: int = 30
 
@@ -59,10 +59,18 @@ class Settings(BaseSettings):
     login_rate_limit_attempts: int = 5
     login_rate_limit_window_seconds: int = 300
 
-    ocr_provider: str = Field(default="fake", pattern="^(fake|glm)$")
+    ocr_provider: str = Field(default="fake", pattern="^(fake|glm|paddle_vl|ppocrv6)$")
     glm_llamacpp_base_url: str = "http://glm-llama:8080"
     glm_model_path: str = "/llm-models/glm.gguf"
     glm_mmproj_path: str = "/llm-models/glm-mmproj.gguf"
+
+    paddle_vl_llamacpp_base_url: str = "http://smart-proxy:8081/v1"
+    paddle_vl_model_path: str = "paddleocr-vl"
+    paddle_vl_mmproj_path: str = "/llm-models/paddleocr-vl-mmproj.gguf"
+
+    ppocrv6_tier: str = Field(default="medium", pattern="^(tiny|small|medium)$")
+    ppocrv6_engine: str = "onnxruntime"
+    ppocrv6_device: str = "cpu"
 
     qwen_llamacpp_base_url: str = "http://qwen-llama:8080"
     qwen_model_path: str = "/llm-models/qwen.gguf"
@@ -125,6 +133,10 @@ class Settings(BaseSettings):
     @property
     def qwen_model_name(self) -> str:
         return Path(self.qwen_model_path).name
+
+    @property
+    def paddle_vl_model_name(self) -> str:
+        return Path(self.paddle_vl_model_path).name
 
     @property
     def allowed_extensions_set(self) -> set[str]:

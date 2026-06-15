@@ -696,7 +696,7 @@ def run_ocr_for_document(
 
             publish_document_task(db, document.id, extract_metadata_task, args=[str(document.id)], task_id=metadata_task_id, queue="metadata", stage="metadata")
         return document
-    provider = provider or build_ocr_provider()
+    provider = provider or build_ocr_provider(provider_name=config.ocr_engine)
     try:
         document.processing_state = DocumentState.ocr_processing
         document.final_state = DocumentState.ocr_processing
@@ -734,9 +734,9 @@ def run_ocr_for_document(
                 "model": result.model_name,
             },
             "ocr_pipeline": {
-                "engine": "glm",
+                "engine": result.model_role or get_settings().ocr_provider,
                 "mode": config.ocr_mode.value,
-                "output_type_note": "GLM OCR produces text; output_type is trace-only in v1",
+                "output_type_note": "VLM OCR/parser produces text or markdown; output_type is trace-only in v1",
             },
         }
         record_event(

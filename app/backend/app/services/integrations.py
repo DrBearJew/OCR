@@ -105,6 +105,33 @@ def check_glm_multimodal(settings: Settings | None = None) -> IntegrationStatus:
     return IntegrationStatus("glm_multimodal_ocr", True, "multimodal OCR config looks usable", _elapsed_ms(start), metadata)
 
 
+def check_paddle_vl_multimodal(settings: Settings | None = None) -> IntegrationStatus:
+    settings = settings or get_settings()
+    start = time.perf_counter()
+    metadata: dict[str, Any] = {
+        "base_url": settings.paddle_vl_llamacpp_base_url,
+        "model": settings.paddle_vl_model_name,
+        "mmproj_configured": bool(str(settings.paddle_vl_mmproj_path or "").strip()),
+    }
+    if not metadata["mmproj_configured"]:
+        return IntegrationStatus("paddle_vl_multimodal_ocr", False, "PADDLE_VL_MMPROJ_PATH is empty; image parsing is not configured", _elapsed_ms(start), metadata)
+    model_ids = list_llama_model_ids(settings.paddle_vl_llamacpp_base_url, timeout_s=min(5.0, settings.llm_request_timeout_seconds))
+    metadata["available_models"] = model_ids
+    configured_names = {settings.paddle_vl_model_name}
+    path = Path(settings.paddle_vl_model_path)
+    if path.suffix.lower() == ".gguf":
+        configured_names.add(path.stem)
+    if model_ids and not configured_names.intersection(model_ids):
+        return IntegrationStatus(
+            "paddle_vl_multimodal_ocr",
+            False,
+            f"Configured PaddleOCR-VL model '{settings.paddle_vl_model_name}' not found in /v1/models",
+            _elapsed_ms(start),
+            metadata,
+        )
+    return IntegrationStatus("paddle_vl_multimodal_ocr", True, "PaddleOCR-VL multimodal parser config looks usable", _elapsed_ms(start), metadata)
+
+
 def check_celery_workers(settings: Settings | None = None) -> IntegrationStatus:
     settings = settings or get_settings()
     start = time.perf_counter()
@@ -140,6 +167,8 @@ def collect_integrations(db: Session, settings: Settings | None = None) -> dict[
     statuses = [
         check_database(db),
         check_redis(settings),
+        check_llama("paddle_vl_llama", settings.paddle_vl_llamacpp_base_url, settings.paddle_vl_model_name, settings.llm_request_timeout_seconds),
+        check_paddle_vl_multimodal(settings),
         check_llama("glm_llama", settings.glm_llamacpp_base_url, settings.glm_model_name, settings.llm_request_timeout_seconds),
         check_glm_multimodal(settings),
         check_llama("qwen_llama", settings.qwen_llamacpp_base_url, settings.qwen_model_name, settings.llm_request_timeout_seconds),
@@ -154,6 +183,7 @@ def collect_integrations(db: Session, settings: Settings | None = None) -> dict[
 def log_startup_model_status(settings: Settings | None = None) -> None:
     settings = settings or get_settings()
     for name, base_url, model in (
+        ("paddle_vl_llama", settings.paddle_vl_llamacpp_base_url, settings.paddle_vl_model_name),
         ("glm_llama", settings.glm_llamacpp_base_url, settings.glm_model_name),
         ("qwen_llama", settings.qwen_llamacpp_base_url, settings.qwen_model_name),
     ):

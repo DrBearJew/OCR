@@ -10,7 +10,7 @@ from app.models import Batch, Document, DocumentState, StageState
 from app.services.extraction import ExtractionInput, extract_belege_title
 from app.services.integrations import collect_integrations
 from app.services.llm_qwen import QwenLlamaCppProvider, QwenRefinement
-from app.services.ocr_glm import GLMLlamaCppOCRProvider, OCRProviderError
+from app.services.ocr_glm import GLMLlamaCppOCRProvider, OCRProviderError, PaddleVLLlamaCppOCRProvider, PPOCRv6Provider, build_ocr_provider
 from app.services.processing import run_metadata_for_document
 from app.services.prompt_loader import PromptLoader
 from app.services.rules import get_collection_rules, get_ocr_rules, validate_title_for_collection
@@ -72,8 +72,10 @@ def test_glm_ocr_adapter_uses_prompt_and_mocked_llama_response(monkeypatch, tmp_
         return FakeResponse({"choices": [{"message": {"content": "OCR text from GLM"}}]})
 
     monkeypatch.setattr("app.services.ocr_glm.httpx.post", fake_post)
-    path = tmp_path / "scan.txt"
-    path.write_text("image-ish", encoding="utf-8")
+    path = tmp_path / "scan.png"
+    from PIL import Image
+
+    Image.new("RGB", (8, 8), "white").save(path)
     settings = Settings(
         ocr_provider="glm",
         glm_llamacpp_base_url="http://glm-llama:8080",
@@ -87,6 +89,40 @@ def test_glm_ocr_adapter_uses_prompt_and_mocked_llama_response(monkeypatch, tmp_
     assert captured["url"] == "http://glm-llama:8080/v1/chat/completions"
     assert captured["json"]["model"] == "glm.gguf"
     assert captured["timeout"] == 7
+
+
+def test_paddle_vl_adapter_uses_prompt_and_mocked_llama_response(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, json: dict[str, Any], headers: dict[str, str], timeout: float) -> FakeResponse:
+        captured.update({"url": url, "json": json, "timeout": timeout})
+        return FakeResponse({"choices": [{"message": {"content": "OCR text from PaddleOCR-VL"}}]})
+
+    monkeypatch.setattr("app.services.ocr_glm.httpx.post", fake_post)
+    path = tmp_path / "scan.png"
+    from PIL import Image
+
+    Image.new("RGB", (8, 8), "white").save(path)
+    settings = Settings(
+        ocr_provider="paddle_vl",
+        paddle_vl_llamacpp_base_url="http://smart-proxy:8081/v1",
+        paddle_vl_model_path="paddleocr-vl",
+        paddle_vl_mmproj_path="/llm-models/paddleocr-vl-mmproj.gguf",
+        llm_request_timeout_seconds=11,
+    )
+    result = PaddleVLLlamaCppOCRProvider(settings).extract_text(str(path))
+    assert result.text == "OCR text from PaddleOCR-VL"
+    assert result.prompt_name == "ocr_prompt.tmpl"
+    assert result.model_role == "paddleocr_vl"
+    assert captured["url"] == "http://smart-proxy:8081/v1/chat/completions"
+    assert captured["json"]["model"] == "paddleocr-vl"
+    assert captured["timeout"] == 11
+
+
+def test_ocr_provider_can_be_overridden_per_document_engine() -> None:
+    settings = Settings(ocr_provider="paddle_vl")
+    assert isinstance(build_ocr_provider(settings, provider_name="paddle_vl"), PaddleVLLlamaCppOCRProvider)
+    assert isinstance(build_ocr_provider(settings, provider_name="ppocrv6"), PPOCRv6Provider)
 
 
 def test_glm_ocr_config_reports_model_mismatch_and_missing_mmproj(monkeypatch, tmp_path: Path) -> None:

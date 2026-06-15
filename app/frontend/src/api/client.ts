@@ -2,6 +2,8 @@ import type { ActivityItem, AdminActionResult, Batch, BatchDetail, Collection, C
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 const TOKEN_KEY = 'dokocr_token'
+const TOKEN_EXPIRY_SKEW_SECONDS = 10
+export const AUTH_EXPIRED_EVENT = 'dokocr:auth-expired'
 
 interface ProcessOptions {
   force?: boolean
@@ -10,12 +12,42 @@ interface ProcessOptions {
 }
 
 export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
+  const token = localStorage.getItem(TOKEN_KEY)
+  if (!token) return null
+  if (isStoredTokenExpired(token)) {
+    setToken(null)
+    return null
+  }
+  return token
 }
 
 export function setToken(token: string | null) {
   if (token) localStorage.setItem(TOKEN_KEY, token)
   else localStorage.removeItem(TOKEN_KEY)
+}
+
+function expireClientSession() {
+  setToken(null)
+  window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT))
+}
+
+function isStoredTokenExpired(token: string): boolean {
+  if (token === 'dev-preview-token' && import.meta.env.DEV) return false
+  const parts = token.split('.')
+  if (parts.length !== 3) return true
+  try {
+    const payload = JSON.parse(decodeBase64Url(parts[1])) as { exp?: unknown }
+    if (typeof payload.exp !== 'number') return true
+    return payload.exp <= Math.floor(Date.now() / 1000) + TOKEN_EXPIRY_SKEW_SECONDS
+  } catch {
+    return true
+  }
+}
+
+function decodeBase64Url(value: string): string {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
+  return atob(padded)
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -26,6 +58,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, { ...init, headers, credentials: 'include' })
   if (!response.ok) {
     const text = await response.text()
+    if (response.status === 401 && path !== '/api/auth/login') {
+      expireClientSession()
+      throw new Error('Session expired. Please sign in again.')
+    }
     if (response.status === 413) {
       throw new Error('Upload too large. Check the configured max file size and max batch size.')
     }

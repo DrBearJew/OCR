@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getToken, setToken } from './api/client'
+import { AUTH_EXPIRED_EVENT, getToken, setToken } from './api/client'
 import AppShell from './components/AppShell'
 import LoginPanel from './components/LoginPanel'
 import BatchListPage from './pages/BatchListPage'
@@ -66,12 +66,20 @@ function navigate(path: string) {
 
 export default function App() {
   const [route, setRoute] = useState<Route>(parseRoute())
-  const [authed, setAuthed] = useState(Boolean(getToken()))
+  const [authed, setAuthed] = useState(() => Boolean(getToken()))
 
   useEffect(() => {
     const onRoute = () => setRoute(parseRoute())
+    const onAuthExpired = () => {
+      setToken(null)
+      setAuthed(false)
+    }
     window.addEventListener('popstate', onRoute)
-    return () => window.removeEventListener('popstate', onRoute)
+    window.addEventListener(AUTH_EXPIRED_EVENT, onAuthExpired)
+    return () => {
+      window.removeEventListener('popstate', onRoute)
+      window.removeEventListener(AUTH_EXPIRED_EVENT, onAuthExpired)
+    }
   }, [])
 
   if (!authed) return <LoginPanel onLogin={() => setAuthed(true)} />

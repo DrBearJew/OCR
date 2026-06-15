@@ -12,6 +12,7 @@ from app.models import Document, OCRMode
 @dataclass(slots=True)
 class EffectiveOCRConfig:
     ocr_mode: OCRMode
+    ocr_engine: str
     language: str
     cleanup_mode: str
     deskew: bool
@@ -36,6 +37,7 @@ def resolve_ocr_config(document: Document, settings: Settings | None = None) -> 
     document_config = document.ocr_config_json or {}
     merged = {
         "ocr_mode": settings.ocr_mode,
+        "ocr_engine": settings.ocr_provider,
         "language": settings.ocr_language,
         "cleanup_mode": settings.ocr_cleanup_mode,
         "deskew": settings.ocr_deskew,
@@ -53,8 +55,12 @@ def resolve_ocr_config(document: Document, settings: Settings | None = None) -> 
         mode = merged["ocr_mode"]
     else:
         mode = OCRMode(str(merged.get("ocr_mode") or settings.ocr_mode))
+    engine = str(merged.get("ocr_engine") or settings.ocr_provider).strip() or settings.ocr_provider
+    if engine not in {"fake", "glm", "paddle_vl", "ppocrv6"}:
+        engine = settings.ocr_provider
     return EffectiveOCRConfig(
         ocr_mode=mode,
+        ocr_engine=engine,
         language=str(merged["language"]),
         cleanup_mode=str(merged["cleanup_mode"]),
         deskew=bool(merged["deskew"]),
@@ -75,8 +81,8 @@ def store_effective_ocr_trace(document: Document, config: EffectiveOCRConfig) ->
     document.model_trace_json = {
         **(document.model_trace_json or {}),
         "ocr_pipeline": {
-            "engine": "glm",
+            "engine": config.ocr_engine,
             "mode": config.ocr_mode.value,
-            "output_type_note": "GLM OCR produces text; output_type is trace-only in v1",
+            "output_type_note": "VLM OCR/parser produces text or markdown; output_type is trace-only in v1",
         },
     }
