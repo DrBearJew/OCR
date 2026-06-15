@@ -101,6 +101,7 @@ async def upload_batch(
             duplicate = db.scalars(
                 select(Document)
                 .where(Document.sha256 == stored["sha256"])
+                .where(Document.deleted_at.is_(None))
                 .where(Document.id != document.id)
                 .order_by(Document.created_at.asc())
             ).first()

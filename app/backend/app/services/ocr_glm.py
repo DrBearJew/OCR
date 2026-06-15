@@ -2,14 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import base64
+import io
+import logging
 import mimetypes
 from pathlib import Path
 from typing import Protocol
 
 import httpx
+from PIL import Image
 
 from app.config import Settings, get_settings
 from app.services.prompt_loader import PromptLoader, RenderedPrompt
+
+logger = logging.getLogger(__name__)
 
 
 class OCRProviderError(RuntimeError):
@@ -69,8 +74,36 @@ class GLMLlamaCppOCRProvider:
             raise OCRProviderError(f"File not found: {file_path}")
         self._validate_multimodal_config()
         prompt = self.prompt_loader.render("ocr_prompt.tmpl")
-        mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        data = base64.b64encode(path.read_bytes()).decode("ascii")
+        # Explicit fallback for image formats that Python's mimetypes may miss in containers
+        _IMAGE_MIME_FALLBACK = {
+            ".webp": "image/webp",
+            ".tif": "image/tiff",
+            ".tiff": "image/tiff",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+        }
+        mime_type = mimetypes.guess_type(path.name)[0]
+        if not mime_type:
+            mime_type = _IMAGE_MIME_FALLBACK.get(path.suffix.lower(), "image/png")
+        # llama.cpp multimodal backend only supports PNG and JPEG natively.
+        # Convert WebP, TIFF, and other unsupported formats to PNG to avoid
+        # "Failed to load image or audio file" errors from the upstream server.
+        _LLAMA_SUPPORTED_FORMATS = {"image/png", "image/jpeg"}
+        if mime_type not in _LLAMA_SUPPORTED_FORMATS:
+            try:
+                logger.info("Converting %s from %s to PNG for llama.cpp compatibility", path.name, mime_type)
+                img = Image.open(path).convert("RGB")
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                data = base64.b64encode(buf.getvalue()).decode("ascii")
+                mime_type = "image/png"
+            except Exception as exc:
+                raise OCRProviderError(
+                    f"Failed to convert image {path.name} from {mime_type} to PNG: {exc}"
+                ) from exc
+        else:
+            data = base64.b64encode(path.read_bytes()).decode("ascii")
         payload = {
             "model": self.settings.glm_model_name,
             "messages": [

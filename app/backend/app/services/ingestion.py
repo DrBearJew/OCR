@@ -132,7 +132,7 @@ def import_job(db: Session, job: IngestionJob, batch: Batch, record: Record) -> 
 
     digest = _sha256(source_path)
     job.sha256 = digest
-    if db.scalars(select(Document).where(Document.sha256 == digest)).first() is not None:
+    if db.scalars(select(Document).where(Document.sha256 == digest).where(Document.deleted_at.is_(None))).first() is not None:
         job.status = IngestionJobStatus.skipped
         job.completed_at = datetime.now(timezone.utc)
         job.error_message = "duplicate hash already imported"

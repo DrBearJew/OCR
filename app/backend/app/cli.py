@@ -93,7 +93,7 @@ def import_legacy(
         shutil.copy2(source_path, target)
         virus_scan_placeholder(str(target))
         file_hash = _sha256(target)
-        existing = db.scalars(select(Document).where(Document.sha256 == file_hash).order_by(Document.created_at.asc())).first()
+        existing = db.scalars(select(Document).where(Document.sha256 == file_hash).where(Document.deleted_at.is_(None)).order_by(Document.created_at.asc())).first()
         page_count = inspect_page_count(str(target), meta.get("mime_type"))
         document = Document(
             batch_id=batch.id,

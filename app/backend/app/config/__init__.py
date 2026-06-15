@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     celery_task_always_eager: bool = False
     celery_worker_prefetch_multiplier: int = 1
     ocr_worker_concurrency: int = 1
-    ocr_task_soft_time_limit: int = 300
-    ocr_task_time_limit: int = 360
+    ocr_task_soft_time_limit: int = 600
+    ocr_task_time_limit: int = 660
     ocr_max_retries: int = 2
     task_lease_seconds: int = 420
 
