@@ -1,31 +1,34 @@
 # Dok OCR
 
-Automated self-hosted document OCR workflow for uploads, metadata extraction, review, and search.
+Dok OCR is a self-hosted document processing app for uploads, OCR, metadata extraction, review, and search.
 
-![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-search%20%2B%20data-4169e1?logo=postgresql&logoColor=white)
-![Celery](https://img.shields.io/badge/Celery-workers-37814a)
-![OCR](https://img.shields.io/badge/OCR-PaddleOCR--VL%20%7C%20PP--OCRv6%20%7C%20GLM-7c3aed)
-![i18n](https://img.shields.io/badge/UI-English%20%2F%20German-0f766e)
-
-Dok OCR automatically turns PDFs and scanned documents into searchable records. It runs OCR, extracts metadata, generates titles, routes exceptions for review, and keeps documents organized as collections, records, and files.
+It is built around a `Collection → Record → Document` model. A document can store the original file, preview/thumbnail data, OCR text, extracted metadata, review state, events, and retry/reprocessing settings.
 
 > [!IMPORTANT]
 > Dok OCR handles sensitive documents. Run it only on trusted infrastructure, change default credentials, configure HTTPS at your reverse proxy, and back up PostgreSQL plus the file volume.
 
-## What it does
+## Scope
 
-| Workflow | Details |
-| --- | --- |
-| Automatic pipeline | Upload once, then OCR, metadata extraction, title generation, search indexing, and review routing run in sequence. |
-| OCR engines | Choose `paddle_vl` for smart document parsing, `ppocrv6` for fast/simple OCR, `glm` as fallback, or `fake` for tests. |
-| Metadata extraction | Deterministic invoice/receipt extraction with optional Qwen metadata refinement and neutral-file handling. |
-| Document model | Browse documents as `Collection → Record → Document`, with per-document OCR text, metadata, events, and retries. |
-| Review and search | Find OCR text through PostgreSQL full-text search, then retry, re-extract, lock, or send documents to review. |
-| Admin console | Configure collection OCR defaults, ingestion sources, hooks, integrations, maintenance actions, and EN/DE UI. |
+The repository contains the app stack:
 
-## How it works
+- React/Vite frontend
+- FastAPI backend
+- Celery workers and beat
+- Redis
+- PostgreSQL
+- local file storage
+- OCR provider adapters and deterministic metadata extraction
+
+Supported OCR providers in the app configuration:
+
+- `fake`: test/development OCR
+- `ppocrv6`: local PP-OCRv6 OCR path
+- `paddle_vl`: external PaddleOCR-VL-style multimodal endpoint
+- `glm`: external GLM OCR fallback endpoint
+
+Optional Qwen metadata refinement is configured separately from OCR.
+
+## Pipeline
 
 ```mermaid
 flowchart LR
@@ -36,11 +39,9 @@ flowchart LR
   R --> S[Search index]
 ```
 
-Stack: React/Vite frontend, FastAPI backend, Celery workers, Redis, PostgreSQL, local file storage, and optional external model endpoints.
+The pipeline can run automatically after upload. Review and retry controls remain available when extraction is incomplete or needs correction.
 
-The default app stack can run without a model server in fake/test mode. Real OCR can use local PP-OCRv6, or external OpenAI-compatible model endpoints for smart OCR and Qwen metadata refinement.
-
-## Run it
+## Run locally
 
 ```bash
 cd app
@@ -49,6 +50,8 @@ cp .env.example .env
 docker compose up --build
 ```
 
+Prerequisites: Docker Compose and outbound network access for image, Python package, and PP-OCRv6 model downloads. The first backend build prewarms PP-OCRv6 even when you start with `OCR_PROVIDER=fake`.
+
 Open:
 
 - UI: <http://localhost:3001>
@@ -56,11 +59,21 @@ Open:
 
 Default development login is defined in `app/.env.example`. Change it before real use.
 
-### OCR setup
+## OCR and model endpoints
 
-For a basic local start, use `OCR_PROVIDER=fake` for UI/dev or `OCR_PROVIDER=ppocrv6` for fast local OCR.
+For UI/dev without a real OCR model:
 
-Smart multimodal OCR currently requires external model endpoints configured through environment variables, for example:
+```env
+OCR_PROVIDER=fake
+```
+
+For basic local OCR:
+
+```env
+OCR_PROVIDER=ppocrv6
+```
+
+For smart OCR or Qwen metadata refinement, configure external OpenAI-compatible endpoints in `.env`, for example:
 
 ```env
 OCR_PROVIDER=paddle_vl
@@ -72,20 +85,14 @@ QWEN_LLAMACPP_BASE_URL=http://host.docker.internal:1234/v1
 QWEN_MODEL_PATH=qwen
 ```
 
-LM Studio, llama.cpp server, or a small model proxy can provide these OpenAI-compatible endpoints. The live deployment uses an out-of-repo Flask smart-proxy in front of llama.cpp; that proxy is deployment-specific and not included in the default app stack.
+LM Studio, llama.cpp server, or another compatible service can provide these endpoints. The live server deployment uses an out-of-repo Flask smart-proxy in front of llama.cpp; that proxy is deployment-specific and is not part of the default app stack.
 
-## Current status
+## Admin configuration
 
-- Active self-hosted project, tested on a private server workflow.
-- German and English UI are implemented; OCR/document-language behavior is configured separately.
-- Collection/document OCR defaults are configurable in Admin.
-- Global visual setup for LM Studio/llama.cpp endpoints is planned; today those endpoints are configured in `.env`.
-- Detailed setup, operations, upload limits, converters, migrations, tests, and API notes live in [`app/README.md`](app/README.md).
+The Admin UI can configure collection-level OCR defaults, ingestion sources, processing hooks, integration status, and maintenance actions.
 
-## Roadmap
+Global model endpoint setup is still environment-based. A visual setup screen for LM Studio, llama.cpp, and similar endpoints is planned.
 
-- Bootstrap scripts for easy `fake`, `ppocrv6`, and smart endpoint setup.
-- Admin model setup wizard for LM Studio, llama.cpp, and OpenAI-compatible endpoints.
-- Public demo screenshots with non-sensitive sample documents.
-- More German OCR hints and extraction synonyms.
-- CSS/docs cleanup as the UI stabilizes.
+## More documentation
+
+Detailed setup and operations notes are in [`app/README.md`](app/README.md), including upload limits, optional converters, reverse proxy settings, migrations, tests, API routes, and the document model.
