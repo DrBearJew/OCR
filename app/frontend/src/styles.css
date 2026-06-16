@@ -9435,3 +9435,15 @@ main,
     padding: 2rem !important;
   }
 }
+
+
+/* Upload preview: add scroll gutters so edge-click zoom targets remain reachable. */
+.document-preview-layout .upload-zoomable-preview .document-preview-stage {
+  padding: 8rem !important;
+}
+
+@media (max-width: 1200px) {
+  .document-preview-layout .upload-zoomable-preview .document-preview-stage {
+    padding: 4rem !important;
+  }
+}

@@ -645,12 +645,17 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
     return Math.min(400, Math.max(50, value))
   }
 
+  function currentPreviewMedia() {
+    return previewSurfaceRef.current?.querySelector('.upload-zoomable-preview-media') as HTMLElement | null
+  }
+
   function centerRatio() {
     const surface = previewSurfaceRef.current
-    if (!surface || !surface.scrollWidth || !surface.scrollHeight) return { x: 0.5, y: 0.5 }
+    const media = currentPreviewMedia()
+    if (!surface || !media || !media.offsetWidth || !media.offsetHeight) return { x: 0.5, y: 0.5 }
     return {
-      x: (surface.scrollLeft + surface.clientWidth / 2) / surface.scrollWidth,
-      y: (surface.scrollTop + surface.clientHeight / 2) / surface.scrollHeight
+      x: Math.min(1, Math.max(0, (surface.scrollLeft + surface.clientWidth / 2 - media.offsetLeft) / media.offsetWidth)),
+      y: Math.min(1, Math.max(0, (surface.scrollTop + surface.clientHeight / 2 - media.offsetTop) / media.offsetHeight))
     }
   }
 
@@ -658,9 +663,12 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
     const surface = previewSurfaceRef.current
     setZoom(clampZoom(nextZoom))
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (!surface) return
-      surface.scrollLeft = Math.max(0, Math.min(surface.scrollWidth - surface.clientWidth, ratio.x * surface.scrollWidth - surface.clientWidth / 2))
-      surface.scrollTop = Math.max(0, Math.min(surface.scrollHeight - surface.clientHeight, ratio.y * surface.scrollHeight - surface.clientHeight / 2))
+      const media = currentPreviewMedia()
+      if (!surface || !media) return
+      const targetLeft = media.offsetLeft + ratio.x * media.offsetWidth - surface.clientWidth / 2
+      const targetTop = media.offsetTop + ratio.y * media.offsetHeight - surface.clientHeight / 2
+      surface.scrollLeft = Math.max(0, Math.min(surface.scrollWidth - surface.clientWidth, targetLeft))
+      surface.scrollTop = Math.max(0, Math.min(surface.scrollHeight - surface.clientHeight, targetTop))
     }))
   }
 
