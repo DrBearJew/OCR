@@ -1,16 +1,25 @@
 # Dok OCR
 
-Dok OCR is a self-hosted document processing app for uploads, OCR, metadata extraction, review, and search.
+Automated self-hosted document OCR workflow for uploads, metadata extraction, review, and search.
+
+![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-search%20%2B%20data-4169e1?logo=postgresql&logoColor=white)
+![Celery](https://img.shields.io/badge/Celery-workers-37814a)
+![OCR](https://img.shields.io/badge/OCR-PaddleOCR--VL%20%7C%20PP--OCRv6%20%7C%20GLM-7c3aed)
+![i18n](https://img.shields.io/badge/UI-English%20%2F%20German-0f766e)
+
+Dok OCR automatically turns PDFs and scanned documents into searchable records. It runs OCR, extracts metadata, generates titles, routes exceptions for review, and keeps documents organized as collections, records, and files.
 
 It is built around a `Collection → Record → Document` model. A document can store the original file, preview/thumbnail data, OCR text, extracted metadata, review state, events, and retry/reprocessing settings.
 
 ## Why it is useful
 
-- It can run as a normal Docker app without a GPU; use `ppocrv6` for local CPU OCR or `fake` for UI/dev.
-- The app stack keeps large smart models outside the main containers, so small machines can run the web app and workers while LM Studio, llama.cpp, or another endpoint runs elsewhere.
-- On sub-4GB machines, run the app with `fake`/`ppocrv6`, keep OCR worker concurrency low, and put smart multimodal models on another endpoint. Smart OCR is optional, not required to start the app.
-- Upload processing can be automatic: OCR, metadata extraction, title generation, search indexing, and review routing run as one pipeline.
-- Manual controls remain available for retrying OCR, re-extracting metadata, locking fields, and reviewing exceptions.
+- Runs as a normal Docker app without a GPU; use `ppocrv6` for local CPU OCR or `fake` for UI/dev.
+- Keeps large smart models outside the main containers, so small machines can run the web app and workers while LM Studio, llama.cpp, or another endpoint runs elsewhere.
+- On sub-4GB machines, use `fake`/`ppocrv6`, keep OCR worker concurrency low, and put smart multimodal models on another endpoint.
+- Automates the pipeline from upload to OCR, metadata extraction, title generation, search indexing, and review routing.
+- Keeps manual controls for retrying OCR, re-extracting metadata, locking fields, and reviewing exceptions.
 
 > [!IMPORTANT]
 > Dok OCR handles sensitive documents. Run it only on trusted infrastructure, change default credentials, configure HTTPS at your reverse proxy, and back up PostgreSQL plus the file volume.
