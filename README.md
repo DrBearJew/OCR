@@ -16,7 +16,7 @@ Upload files, run OCR, extract metadata, generate titles, route exceptions, and 
 
 <br/>
 
-<img src="docs/assets/dok-ocr-hero.svg" alt="Dok OCR private document intelligence cockpit" width="100%"/>
+<img src="docs/assets/dok-ocr-pipeline-hero.png" alt="Dok OCR pipeline hero" width="100%"/>
 
 </div>
 
@@ -72,10 +72,6 @@ Each document can keep its original file, preview, OCR text, extracted metadata,
 - **PostgreSQL full-text search:** OCR text, titles, metadata, records, and collections.
 - **Collection model:** per-collection OCR defaults, schema rules, title rules, and search defaults.
 - **German/English UI:** app shell and core workflows are localized for English and German users.
-
-<p align="center">
-  <img src="docs/assets/dok-ocr-feature-map.svg" alt="Dok OCR feature map" width="100%"/>
-</p>
 
 ---
 
