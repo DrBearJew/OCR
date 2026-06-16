@@ -305,9 +305,9 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
           </label>
           <label>OCR mode
             <select value={modelForm.ocr_mode} onChange={(event) => setModelForm({ ...modelForm, ocr_mode: event.target.value })}>
-              <option value="redo">redo</option>
-              <option value="force">force</option>
-              <option value="skip">skip</option>
+              <option value="redo">{t('admin.ocrModeRedo')}</option>
+              <option value="force">{t('admin.ocrModeForce')}</option>
+              <option value="skip">{t('admin.ocrModeSkip')}</option>
             </select>
           </label>
           <label>Language

@@ -87,16 +87,16 @@ export default function SearchPage({ onOpenDocument }: { onOpenDocument: (id: st
         <input value={tagId} onChange={(event) => setTagId(event.target.value)} placeholder={t('search.tagId')} />
         <input value={storagePathId} onChange={(event) => setStoragePathId(event.target.value)} placeholder={t('search.storagePathId')} />
         <select value={ocrMode} onChange={(event) => setOcrMode(event.target.value)}>
-          <option value="">Any OCR mode</option>
-          <option value="skip">skip</option>
-          <option value="redo">redo</option>
-          <option value="force">force</option>
+          <option value="">{t('search.anyOcrMode')}</option>
+          <option value="skip">{t('search.ocrSkip')}</option>
+          <option value="redo">{t('search.ocrRedo')}</option>
+          <option value="force">{t('search.ocrForce')}</option>
         </select>
         <select value={reviewState} onChange={(event) => setReviewState(event.target.value)}>
-          <option value="">Any review</option>
-          <option value="unreviewed">unreviewed</option>
-          <option value="needs_review">needs review</option>
-          <option value="reviewed">reviewed</option>
+          <option value="">{t('search.anyReview')}</option>
+          <option value="unreviewed">{t('search.unreviewed')}</option>
+          <option value="needs_review">{t('search.needsReview')}</option>
+          <option value="reviewed">{t('search.reviewed')}</option>
         </select>
         <button className="primary"><Search size={18} /> {t('common.search')}</button>
       </form>
@@ -106,7 +106,7 @@ export default function SearchPage({ onOpenDocument }: { onOpenDocument: (id: st
           <button key={result.document_id} onClick={() => onOpenDocument(result.document_id)}>
             <div>
               <strong>{result.extracted_title || result.original_filename}</strong>
-              <span>{result.collection_name} · {result.record_title || 'Record'} · {new Date(result.created_at).toLocaleDateString()}</span>
+              <span>{result.collection_name} · {result.record_title || t('common.record')} · {new Date(result.created_at).toLocaleDateString()}</span>
             </div>
             <StatusBadge value={result.status} />
             <p><HighlightedSnippet snippet={result.snippet} /></p>

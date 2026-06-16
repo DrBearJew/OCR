@@ -5,7 +5,7 @@ import type { ActivityItem } from '../types'
 import { useI18n } from '../i18n'
 
 export default function ActivityPage({ onOpenDocument, onOpenRecord }: { onOpenDocument: (id: string) => void; onOpenRecord: (id: string) => void }) {
-  const { t } = useI18n()
+  const { t, language } = useI18n()
   const [rows, setRows] = useState<ActivityItem[]>([])
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [error, setError] = useState('')
@@ -48,9 +48,9 @@ export default function ActivityPage({ onOpenDocument, onOpenRecord }: { onOpenD
       <section className="timeline">
         {rows.map((row) => (
           <div className="timeline-row" key={row.id}>
-            <strong>{row.event_type}</strong>
-            <span>{new Date(row.created_at).toLocaleString()} · {row.actor} · {row.source}</span>
-            <p>{row.message || row.document_title}</p>
+            <strong>{translateActivityEvent(row.event_type, t)}</strong>
+            <span>{new Date(row.created_at).toLocaleString(language === 'de' ? 'de-DE' : undefined)} · {translateActivityActor(row.actor, t)} · {translateActivitySource(row.source, t)}</span>
+            <p>{translateActivityMessage(row.message || row.document_title || '', t)}</p>
             <div className="button-row">
               <button onClick={() => onOpenDocument(row.document_id)}>{t('common.document')}</button>
               {row.record_id && <button onClick={() => onOpenRecord(row.record_id!)}>{t('common.record')}</button>}
@@ -60,4 +60,50 @@ export default function ActivityPage({ onOpenDocument, onOpenRecord }: { onOpenD
       </section>
     </main>
   )
+}
+
+
+function translateActivityEvent(value: string, t: (key: string, fallback?: string) => string) {
+  return t(`activity.event.${value}`, value.replace(/_/g, ' '))
+}
+
+function translateActivityActor(value: string, t: (key: string, fallback?: string) => string) {
+  return t(`activity.actor.${value}`, value)
+}
+
+function translateActivitySource(value: string, t: (key: string, fallback?: string) => string) {
+  return t(`activity.source.${value}`, value)
+}
+
+function translateActivityMessage(value: string, t: (key: string, fallback?: string) => string) {
+  const key = ACTIVITY_MESSAGE_KEYS[value]
+  return key ? t(key, value) : value
+}
+
+const ACTIVITY_MESSAGE_KEYS: Record<string, string> = {
+  'Deterministic extraction completed': 'activity.message.deterministicDone',
+  'Document complete after OCR, metadata, title, and DB update': 'activity.message.documentComplete',
+  'Final title and metadata generated': 'activity.message.titleGenerated',
+  'Full OCR and metadata are searchable in the app database': 'activity.message.searchIndexed',
+  'Mapped correspondent, document type, and storage path metadata': 'activity.message.paperlessMapped',
+  'OCR completed': 'activity.message.ocrCompleted',
+  'OCR started': 'activity.message.ocrStarted',
+  'Metadata extraction started': 'activity.message.metadataStarted',
+  'Document queued for OCR': 'activity.message.queuedForOcr',
+  'Document uploaded': 'activity.message.uploaded',
+  'Original file stored on local filesystem': 'activity.message.stored',
+  'Qwen metadata brain started': 'activity.message.qwenStarted',
+  'Qwen metadata candidates generated': 'activity.message.qwenCandidates',
+  'Qwen metadata, search, tag, and folder candidates generated': 'activity.message.qwenDone',
+  'Qwen metadata brain disabled by processing options': 'activity.message.qwenSkipped',
+  'Document metadata saved but requires review': 'activity.message.needsReview',
+  'Full document processing started': 'activity.message.processStarted',
+  'Existing OCR reused for full processing': 'activity.message.ocrReused',
+  'Existing metadata reused for full processing': 'activity.message.metadataReused',
+  'Document soft-deleted': 'activity.message.documentDeleted',
+  'Document restored': 'activity.message.documentRestored',
+  'Review state updated': 'activity.message.reviewUpdated',
+  'OCR pipeline settings updated': 'activity.message.ocrSettingsUpdated',
+  'Manual metadata re-extract requested': 'activity.message.manualReextract',
+  'Search index marker refreshed': 'activity.message.searchRefreshed'
 }
