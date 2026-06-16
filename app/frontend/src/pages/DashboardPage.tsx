@@ -629,9 +629,12 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
   const [showOcr, setShowOcr] = useState(true)
   const previewSurfaceRef = useRef<HTMLDivElement | null>(null)
   const isPdf = selected?.kind === 'pdf'
-  const mediaStyle = isPdf
-    ? { width: `${zoom}%`, maxWidth: zoom <= 100 ? '100%' : 'none', height: `${Math.round(620 * zoom / 100)}px` }
-    : { width: `${zoom}%`, maxWidth: zoom <= 100 ? '100%' : 'none' }
+  const previewObjectStyle = {
+    width: `${zoom}%`,
+    maxWidth: zoom <= 100 ? '100%' : 'none',
+    transform: `rotate(${rotation}deg)`
+  }
+  const pdfMediaStyle = { height: `${Math.round(620 * zoom / 100)}px` }
 
   useEffect(() => {
     setZoom(100)
@@ -672,11 +675,11 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
   }
 
   const preview = selected?.serverPreviewUrl && selected.kind === 'pdf' ? (
-    <iframe className="upload-zoomable-preview-media" style={mediaStyle} src={selected.serverPreviewUrl} title={selected.filename} />
+    <iframe className="upload-zoomable-preview-media" style={pdfMediaStyle} src={selected.serverPreviewUrl} title={selected.filename} />
   ) : selected?.serverPreviewUrl && selected.kind === 'image' ? (
-    <img className="upload-zoomable-preview-media" style={mediaStyle} src={selected.serverPreviewUrl} alt={selected.filename} />
+    <img className="upload-zoomable-preview-media" src={selected.serverPreviewUrl} alt={selected.filename} />
   ) : selected?.previewUrl ? (
-    <img className="upload-zoomable-preview-media" style={mediaStyle} src={selected.previewUrl} alt={selected.filename} />
+    <img className="upload-zoomable-preview-media" src={selected.previewUrl} alt={selected.filename} />
   ) : selected?.kind === 'pdf' ? (
     <PdfMockup />
   ) : (
@@ -703,7 +706,7 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
         <AttachmentStrip files={files} selectedId={selectedId} onSelect={setSelectedId} onAddMore={onAddMore} />
         <div ref={previewSurfaceRef} className={`document-preview-surface upload-zoomable-preview ${showOcr ? 'show-ocr-overlay' : ''}`} onClick={handlePreviewClick}>
           <div className="document-preview-stage">
-            <div className="document-preview-object" style={{ transform: `rotate(${rotation}deg)` }}>
+            <div className="document-preview-object" style={previewObjectStyle}>
               {preview}
             </div>
           </div>

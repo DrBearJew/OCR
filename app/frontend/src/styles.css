@@ -9376,3 +9376,62 @@ main,
 .document-preview-layout .attachment-popover dt {
   color: #cbd5e1 !important;
 }
+
+
+/* Upload preview zoom fix: wrapper owns zoom size, media fills wrapper. */
+.document-preview-layout .upload-zoomable-preview {
+  display: block !important;
+  overflow: auto !important;
+  padding: 0 !important;
+}
+
+.document-preview-layout .upload-zoomable-preview .document-preview-stage {
+  width: 100% !important;
+  min-width: 100% !important;
+  min-height: 100% !important;
+  display: flex !important;
+  align-items: flex-start !important;
+  justify-content: center !important;
+  padding: 4rem !important;
+  box-sizing: border-box !important;
+}
+
+.document-preview-layout .upload-zoomable-preview .document-preview-object {
+  flex: 0 0 auto !important;
+  min-width: 0 !important;
+  display: grid !important;
+  place-items: center !important;
+  transform-origin: center center !important;
+  transition: transform 160ms ease !important;
+  will-change: transform !important;
+}
+
+.document-preview-layout .upload-zoomable-preview .upload-zoomable-preview-media,
+.document-preview-layout .document-preview-object > .upload-zoomable-preview-media {
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  object-fit: contain !important;
+  border: 0 !important;
+  border-radius: 4px !important;
+  background: #fff !important;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.32) !important;
+}
+
+.document-preview-layout .upload-zoomable-preview img.upload-zoomable-preview-media,
+.document-preview-layout .document-preview-object > img.upload-zoomable-preview-media {
+  height: auto !important;
+  max-height: none !important;
+}
+
+.document-preview-layout .upload-zoomable-preview iframe.upload-zoomable-preview-media,
+.document-preview-layout .document-preview-object > iframe.upload-zoomable-preview-media {
+  min-height: 620px !important;
+  max-height: none !important;
+}
+
+@media (max-width: 1200px) {
+  .document-preview-layout .upload-zoomable-preview .document-preview-stage {
+    padding: 2rem !important;
+  }
+}
