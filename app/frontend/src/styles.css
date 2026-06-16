@@ -9447,3 +9447,64 @@ main,
     padding: 4rem !important;
   }
 }
+
+
+/* Upload preview fixed viewport: zoom/pan internally without resizing page. */
+.document-preview-layout .upload-zoomable-preview.document-preview-surface {
+  height: clamp(560px, 66vh, 720px) !important;
+  min-height: 0 !important;
+  max-height: clamp(560px, 66vh, 720px) !important;
+  display: block !important;
+  overflow: auto !important;
+  padding: 0 !important;
+  overscroll-behavior: contain !important;
+}
+
+.document-preview-layout .upload-zoomable-preview .document-preview-stage {
+  width: max(100%, max-content) !important;
+  min-width: 100% !important;
+  min-height: 100% !important;
+  display: flex !important;
+  align-items: flex-start !important;
+  justify-content: center !important;
+  padding: 10rem !important;
+  box-sizing: border-box !important;
+}
+
+.document-preview-layout .upload-zoomable-preview .document-preview-object {
+  flex: 0 0 auto !important;
+  display: grid !important;
+  place-items: center !important;
+  min-width: 0 !important;
+  transform-origin: center center !important;
+}
+
+.document-preview-layout .upload-zoomable-preview .upload-zoomable-preview-media {
+  display: block !important;
+  width: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+}
+
+.document-preview-layout .upload-zoomable-preview img.upload-zoomable-preview-media {
+  height: auto !important;
+}
+
+.document-preview-layout .upload-zoomable-preview iframe.upload-zoomable-preview-media {
+  height: 100% !important;
+  min-height: 620px !important;
+}
+
+.document-preview-layout .upload-zoomable-preview .document-preview-ocr-overlay {
+  max-width: calc(100% - 2rem) !important;
+}
+
+@media (max-width: 1200px) {
+  .document-preview-layout .upload-zoomable-preview.document-preview-surface {
+    height: 560px !important;
+    max-height: 560px !important;
+  }
+  .document-preview-layout .upload-zoomable-preview .document-preview-stage {
+    padding: 5rem !important;
+  }
+}

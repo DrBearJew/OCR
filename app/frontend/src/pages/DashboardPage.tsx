@@ -645,17 +645,21 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
     return Math.min(400, Math.max(50, value))
   }
 
+  function currentPreviewObject() {
+    return previewSurfaceRef.current?.querySelector('.document-preview-object') as HTMLElement | null
+  }
+
   function currentPreviewMedia() {
     return previewSurfaceRef.current?.querySelector('.upload-zoomable-preview-media') as HTMLElement | null
   }
 
   function centerRatio() {
     const surface = previewSurfaceRef.current
-    const media = currentPreviewMedia()
-    if (!surface || !media || !media.offsetWidth || !media.offsetHeight) return { x: 0.5, y: 0.5 }
+    const object = currentPreviewObject()
+    if (!surface || !object || !object.offsetWidth || !object.offsetHeight) return { x: 0.5, y: 0.5 }
     return {
-      x: Math.min(1, Math.max(0, (surface.scrollLeft + surface.clientWidth / 2 - media.offsetLeft) / media.offsetWidth)),
-      y: Math.min(1, Math.max(0, (surface.scrollTop + surface.clientHeight / 2 - media.offsetTop) / media.offsetHeight))
+      x: Math.min(1, Math.max(0, (surface.scrollLeft + surface.clientWidth / 2 - object.offsetLeft) / object.offsetWidth)),
+      y: Math.min(1, Math.max(0, (surface.scrollTop + surface.clientHeight / 2 - object.offsetTop) / object.offsetHeight))
     }
   }
 
@@ -663,10 +667,10 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
     const surface = previewSurfaceRef.current
     setZoom(clampZoom(nextZoom))
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      const media = currentPreviewMedia()
-      if (!surface || !media) return
-      const targetLeft = media.offsetLeft + ratio.x * media.offsetWidth - surface.clientWidth / 2
-      const targetTop = media.offsetTop + ratio.y * media.offsetHeight - surface.clientHeight / 2
+      const object = currentPreviewObject()
+      if (!surface || !object) return
+      const targetLeft = object.offsetLeft + ratio.x * object.offsetWidth - surface.clientWidth / 2
+      const targetTop = object.offsetTop + ratio.y * object.offsetHeight - surface.clientHeight / 2
       surface.scrollLeft = Math.max(0, Math.min(surface.scrollWidth - surface.clientWidth, targetLeft))
       surface.scrollTop = Math.max(0, Math.min(surface.scrollHeight - surface.clientHeight, targetTop))
     }))
