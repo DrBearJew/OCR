@@ -90,7 +90,7 @@ For basic local OCR:
 OCR_PROVIDER=ppocrv6
 ```
 
-For smart OCR or Qwen metadata refinement, configure external OpenAI-compatible endpoints in Admin → Model Setup or in `.env`, for example:
+For smart OCR or Qwen metadata refinement, configure Admin → Model Setup. Most local deployments should use the internal model gateway; advanced users can point directly at OpenAI-compatible endpoints in Admin or `.env`, for example:
 
 ```env
 OCR_PROVIDER=paddle_vl
@@ -102,7 +102,7 @@ QWEN_LLAMACPP_BASE_URL=http://host.docker.internal:1234/v1
 QWEN_MODEL_PATH=qwen
 ```
 
-LM Studio, llama.cpp server, or another compatible service can provide these endpoints. The live server deployment uses an out-of-repo Flask smart-proxy in front of llama.cpp; that proxy is deployment-specific and is not part of the default app stack.
+LM Studio, llama.cpp server, or another compatible service can provide these endpoints. The app can also use an internal model gateway to hide routing, OCR/metadata cleanup, and local endpoint details; the technical service name may appear only in diagnostics.
 
 ## Admin configuration
 

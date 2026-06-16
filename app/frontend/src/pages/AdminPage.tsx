@@ -31,15 +31,18 @@ const engineLabels: Record<string, { title: string; detail: string }> = {
   fake: { title: 'Fake OCR', detail: 'Development/test stub only.' }
 }
 
+const INTERNAL_MODEL_GATEWAY_URL = 'http://smart-proxy:8081/v1'
+const DIRECT_MODEL_ENDPOINT_PLACEHOLDER = 'http://host.docker.internal:1234/v1'
+
 const defaultRuntimeSetup: ModelSetup = {
   mode: 'fake',
   ocr_provider: 'fake',
-  paddle_vl_base_url: 'http://host.docker.internal:1234/v1',
+  paddle_vl_base_url: INTERNAL_MODEL_GATEWAY_URL,
   paddle_vl_model: 'paddleocr-vl',
-  glm_base_url: 'http://host.docker.internal:1234/v1',
+  glm_base_url: INTERNAL_MODEL_GATEWAY_URL,
   glm_model: 'glm',
   qwen_enabled: false,
-  qwen_base_url: 'http://host.docker.internal:1234/v1',
+  qwen_base_url: INTERNAL_MODEL_GATEWAY_URL,
   qwen_model: 'qwen',
   timeout_seconds: 120
 }
@@ -137,6 +140,18 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
     } finally {
       setSetupBusy(false)
     }
+  }
+
+  function useInternalGatewayPreset() {
+    setRuntimeSetup({
+      ...runtimeSetup,
+      mode: 'smart',
+      ocr_provider: runtimeSetup.ocr_provider === 'fake' ? 'paddle_vl' : runtimeSetup.ocr_provider,
+      paddle_vl_base_url: INTERNAL_MODEL_GATEWAY_URL,
+      glm_base_url: INTERNAL_MODEL_GATEWAY_URL,
+      qwen_base_url: INTERNAL_MODEL_GATEWAY_URL
+    })
+    setEndpointTest(null)
   }
 
   async function testRuntimeEndpoint(kind: 'paddle' | 'glm' | 'qwen') {
@@ -244,20 +259,20 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
             </select>
           </label>
           <label>{t('admin.paddleBaseUrl')}
-            <input value={runtimeSetup.paddle_vl_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, paddle_vl_base_url: event.target.value })} placeholder="http://host.docker.internal:1234/v1" />
+            <input value={runtimeSetup.paddle_vl_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, paddle_vl_base_url: event.target.value })} placeholder={DIRECT_MODEL_ENDPOINT_PLACEHOLDER} />
           </label>
           <label>{t('admin.paddleModel')}
             <input value={runtimeSetup.paddle_vl_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, paddle_vl_model: event.target.value })} placeholder="paddleocr-vl" />
           </label>
           <label>{t('admin.glmBaseUrl')}
-            <input value={runtimeSetup.glm_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, glm_base_url: event.target.value })} placeholder="http://host.docker.internal:1234/v1" />
+            <input value={runtimeSetup.glm_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, glm_base_url: event.target.value })} placeholder={DIRECT_MODEL_ENDPOINT_PLACEHOLDER} />
           </label>
           <label>{t('admin.glmModel')}
             <input value={runtimeSetup.glm_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, glm_model: event.target.value })} placeholder="glm" />
           </label>
           <label className="check runtime-check"><input type="checkbox" checked={runtimeSetup.qwen_enabled} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_enabled: event.target.checked })} /> {t('admin.enableQwenMetadata')}</label>
           <label>{t('admin.qwenBaseUrl')}
-            <input value={runtimeSetup.qwen_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_base_url: event.target.value })} placeholder="http://host.docker.internal:1234/v1" />
+            <input value={runtimeSetup.qwen_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_base_url: event.target.value })} placeholder={DIRECT_MODEL_ENDPOINT_PLACEHOLDER} />
           </label>
           <label>{t('admin.qwenModel')}
             <input value={runtimeSetup.qwen_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_model: event.target.value })} placeholder="qwen" />
@@ -266,13 +281,15 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
             <input type="number" min="5" value={runtimeSetup.timeout_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, timeout_seconds: Number(event.target.value) || 120 })} />
           </label>
         </div>
+        <p className="form-help">{t('admin.internalGatewayHelp')}</p>
         <div className="button-row form-actions runtime-setup-actions">
+          <button type="button" onClick={useInternalGatewayPreset} disabled={setupBusy}>{t('admin.useInternalGateway')}</button>
           <button type="button" onClick={() => void testRuntimeEndpoint('paddle')} disabled={setupBusy}>{t('admin.testPaddle')}</button>
           <button type="button" onClick={() => void testRuntimeEndpoint('glm')} disabled={setupBusy}>{t('admin.testGlm')}</button>
           <button type="button" onClick={() => void testRuntimeEndpoint('qwen')} disabled={setupBusy}>{t('admin.testQwen')}</button>
           <button type="button" className="primary" onClick={() => void saveRuntimeSetup()} disabled={setupBusy}><Save size={17} /> {t('admin.saveModelSetup')}</button>
         </div>
-        {endpointTest && <p className={endpointTest.ok ? 'success-message' : 'error'}>{endpointTest.detail}{endpointTest.available_models.length ? ` · ${t('admin.models')}: ${endpointTest.available_models.join(', ')}` : ''}</p>}
+        {endpointTest && <p className={endpointTest.ok ? 'success-message' : 'error'}>{translateEndpointDetail(endpointTest.detail, t)}{endpointTest.available_models.length ? ` · ${t('admin.models')}: ${endpointTest.available_models.join(', ')}` : ''}</p>}
       </section>
 
       <section className="admin-card model-config-card">
@@ -513,7 +530,17 @@ function translateIntegrationDetail(detail: string, t: (key: string, fallback?: 
   if (detail === 'workers reachable') return t('admin.detailWorkersReachable')
   if (detail === 'PaddleOCR-VL multimodal parser config looks usable') return t('admin.detailPaddleUsable')
   if (detail === 'multimodal OCR config looks usable') return t('admin.detailMultimodalUsable')
-  if (detail.startsWith('reachable via ')) return `${t('admin.detailReachableVia')} ${detail.replace('reachable via ', '')}`
+  if (detail.startsWith('reachable via ')) return translateEndpointDetail(detail, t)
+  return detail
+}
+
+function translateEndpointDetail(detail: string, t: (key: string, fallback?: string) => string) {
+  if (detail === 'reachable') return t('admin.detailReachable')
+  if (detail.startsWith('reachable via ')) {
+    const url = detail.replace('reachable via ', '')
+    if (url.includes('smart-proxy')) return t('admin.detailInternalGatewayReachable')
+    return `${t('admin.detailReachableVia')} ${url}`
+  }
   return detail
 }
 
