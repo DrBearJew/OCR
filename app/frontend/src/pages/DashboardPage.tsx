@@ -981,6 +981,7 @@ function qwenRunStatusFromDocument(document: Document): UploadDraftFile['qwenRun
   const refinement = document.metadata_json.qwen_refinement as Record<string, unknown> | undefined
   const candidates = document.metadata_json.qwen_candidates as Record<string, unknown> | undefined
   if (refinement?.disabled === true) return 'disabled'
+  if (refinement?.empty_response === true) return 'not_run'
   if (refinement?.error || document.llm_raw_response?.metadata_brain_error) return 'failed'
   if (candidates && Object.keys(candidates).length > 0) return 'succeeded'
   return 'not_run'
@@ -991,6 +992,7 @@ function qwenMessageFromDocument(document: Document): string {
   const sourceValues = Object.values(fromDocumentSources(document.metadata_sources_json)).filter((item) => item.source === 'qwen')
   if (sourceValues.length) return `Qwen filled ${sourceValues.length} field${sourceValues.length === 1 ? '' : 's'}; hover badges for evidence.`
   if (refinement?.disabled === true) return 'Qwen did not run for this document.'
+  if (refinement?.empty_response === true) return 'Qwen did not produce metadata candidates for this document.'
   if (refinement?.error) return String(refinement.error)
   if (document.llm_summary) return document.llm_summary
   return 'Qwen has not produced metadata candidates yet.'

@@ -134,6 +134,23 @@ def test_invalid_qwen_enrichment_preserves_deterministic_metadata(db_session: Se
     assert document.llm_raw_response["metadata_brain"]["invalid"] is True
 
 
+
+def test_empty_qwen_response_keeps_deterministic_completion(db_session: Session, tmp_path: Path) -> None:
+    text = "Demo GmbH\nRechnungsnummer PR400000005\nRechnungsdatum 12.10.2020\nEndsumme 205,25"
+    document = make_document(db_session, tmp_path, text, title="empty-qwen.txt")
+
+    run_full_process_for_document(db_session, document.id, ocr_provider=StaticOCR(text), qwen_provider=MockQwen("   "))
+    db_session.refresh(document)
+
+    assert document.extracted_invoice_number == "PR400000005"
+    assert document.extracted_title == "Demo_PR400000005_12/10/2020_205,25"
+    assert document.review_state == ReviewState.unreviewed
+    assert document.processing_state == DocumentState.complete
+    assert document.llm_raw_response["metadata_brain"]["empty_response"] is True
+    assert document.llm_raw_response["metadata_brain"]["invalid"] is False
+    assert document.metadata_json["qwen_refinement"]["empty_response"] is True
+
+
 def test_similar_document_context_is_passed_to_qwen(db_session: Session, tmp_path: Path) -> None:
     text = "Demo GmbH\nRechnungsnummer PR400000005\nRechnungsdatum 12.10.2020\nEndsumme 205,25"
     prior = make_document(db_session, tmp_path, text, title="prior.txt")

@@ -25,6 +25,14 @@ CORE_CANDIDATE_FIELDS = (
     "suggested_title_base",
 )
 
+QWEN_PROMPT_OMIT_METADATA_KEYS = {
+    "qwen_refinement",
+    "qwen_candidates",
+    "merged_sources",
+    "review_warnings",
+    "missing_required_fields",
+}
+
 
 def find_similar_documents(
     db: Session,
@@ -117,7 +125,7 @@ def build_qwen_metadata_payload(
         },
         "title_rule": collection.title_generation_rule if collection else {"collection": document.collection_name},
         "custom_fields": custom_fields,
-        "deterministic_metadata": deterministic_metadata,
+        "deterministic_metadata": _sanitize_qwen_prompt_metadata(deterministic_metadata),
         "manual_locked_fields": {
             "current_sources": document.metadata_sources_json or {},
             "locks": document.field_locks_json or {},
@@ -158,6 +166,20 @@ def qwen_generate_metadata_candidates(
             "candidate": {},
             "payload": payload,
             "similar_documents": payload["similar_documents"],
+        }
+
+    if not refinement.raw_text.strip():
+        return {
+            "ok": False,
+            "candidate": {},
+            "raw_text": refinement.raw_text,
+            "raw_response": refinement.raw_response,
+            "prompt": {"name": refinement.prompt.name, "version": refinement.prompt.version},
+            "model": {"role": "qwen_metadata_brain", "endpoint": refinement.endpoint, "model": refinement.model},
+            "payload": payload,
+            "similar_documents": payload["similar_documents"],
+            "empty_response": True,
+            "error": "Qwen returned empty metadata candidate response",
         }
 
     parsed = parse_json_suggestion(refinement.raw_text)
@@ -217,7 +239,7 @@ def run_qwen_secondbrain_enrichment(
             "metadata_brain_error": result.get("error"),
             "similar_documents": result.get("similar_documents", []),
         }
-        if result.get("raw_text"):
+        if result.get("raw_text") and not result.get("empty_response"):
             document.review_state = ReviewState.needs_review
             document.review_reason = document.review_reason or "Qwen metadata brain returned invalid JSON"
         record_event(db, document, "qwen_enrichment_unavailable", "Qwen search metadata unavailable", metadata={"reason": result.get("error")})
@@ -483,6 +505,22 @@ def _confidence(value: Any) -> int | None:
         return max(0, min(100, int(round(numeric))))
     except (TypeError, ValueError):
         return None
+
+
+def _sanitize_qwen_prompt_metadata(value: dict[str, Any]) -> dict[str, Any]:
+    cleaned: dict[str, Any] = {}
+    for key, item in (value or {}).items():
+        if key in QWEN_PROMPT_OMIT_METADATA_KEYS:
+            continue
+        if key == "metadata" and isinstance(item, dict):
+            cleaned[key] = {
+                metadata_key: metadata_value
+                for metadata_key, metadata_value in item.items()
+                if metadata_key not in QWEN_PROMPT_OMIT_METADATA_KEYS
+            }
+        else:
+            cleaned[key] = item
+    return cleaned
 
 
 def uuid_or_none(value: str | uuid.UUID | None) -> uuid.UUID | None:

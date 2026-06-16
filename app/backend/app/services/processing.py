@@ -1112,14 +1112,15 @@ def run_metadata_for_document(
                 document.llm_raw_response = {
                     **(document.llm_raw_response or {}),
                     "metadata_brain": {
-                        "invalid": bool(qwen_debug.get("raw_text")),
+                        "invalid": bool(qwen_debug.get("raw_text")) and not bool(qwen_debug.get("empty_response")),
+                        "empty_response": bool(qwen_debug.get("empty_response")),
                         "raw_text": qwen_debug.get("raw_text"),
                         "raw_response": qwen_debug.get("raw_response"),
                         "error": qwen_debug.get("error"),
                         "similar_documents": qwen_debug.get("similar_documents", []),
                     },
                 }
-                if qwen_debug.get("raw_text"):
+                if qwen_debug.get("raw_text") and not qwen_debug.get("empty_response"):
                     document.review_state = ReviewState.needs_review
                     document.review_reason = document.review_reason or "Qwen metadata brain returned invalid JSON"
                 record_event(

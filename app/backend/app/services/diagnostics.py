@@ -132,15 +132,34 @@ def _qwen_status(document: Document) -> dict[str, Any]:
     if isinstance(refinement, dict):
         if refinement.get("disabled"):
             return {"status": "skipped", "reason": "disabled"}
+        if _qwen_empty_response(refinement):
+            return {"status": "not_run", "reason": "Qwen returned no metadata candidate"}
         if refinement.get("error"):
             return {"status": "failed", "reason": refinement.get("error")}
         if refinement.get("ok"):
             return {"status": "done", "confidence": document.llm_confidence}
     if document.llm_raw_response:
         metadata_brain = document.llm_raw_response.get("metadata_brain")
+        if isinstance(metadata_brain, dict) and _qwen_empty_response(metadata_brain):
+            return {"status": "not_run", "reason": "Qwen returned no metadata candidate"}
         if isinstance(metadata_brain, dict) and metadata_brain.get("error"):
             return {"status": "failed", "reason": metadata_brain.get("error")}
     return {"status": "not_run"}
+
+
+def _qwen_empty_response(value: dict[str, Any]) -> bool:
+    if value.get("empty_response") is True:
+        return True
+    if value.get("raw_text"):
+        return False
+    if value.get("error") == "Qwen returned empty metadata candidate response":
+        return True
+    raw_response = value.get("raw_response")
+    if not isinstance(raw_response, dict):
+        return False
+    choices = raw_response.get("choices") or []
+    message = choices[0].get("message") if choices else {}
+    return not str((message or {}).get("content") or "").strip()
 
 
 def _search_index_is_implicit(document: Document) -> bool:

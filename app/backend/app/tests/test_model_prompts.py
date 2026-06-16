@@ -204,6 +204,32 @@ def test_qwen_refinement_adapter_is_mockable(monkeypatch) -> None:
     assert captured["json"]["messages"][1]["role"] == "user"
 
 
+def test_qwen_metadata_candidate_adapter_requests_json_mode(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, json: dict[str, Any], timeout: float) -> FakeResponse:
+        captured.update({"url": url, "json": json, "timeout": timeout})
+        return FakeResponse({"choices": [{"message": {"content": "{\"summary\":\"ok\"}"}}]})
+
+    monkeypatch.setattr("app.services.llm_qwen.httpx.post", fake_post)
+    settings = Settings(
+        qwen_llamacpp_base_url="http://qwen-llama:8080",
+        qwen_model_path="/llm-models/qwen.gguf",
+        llm_request_timeout_seconds=9,
+        llm_metadata_refinement_enabled=True,
+    )
+    result = QwenLlamaCppProvider(settings).generate_metadata_candidates(
+        {
+            "collection_name": "Eingangsrechnung",
+            "ocr_text": "Demo Rechnung",
+            "title": "Demo",
+        }
+    )
+
+    assert result.raw_text == '{"summary":"ok"}'
+    assert captured["json"]["response_format"] == {"type": "json_object"}
+
+
 def test_qwen_metadata_brain_prompt_requires_structured_candidates() -> None:
     rendered = PromptLoader().render(
         "secondbrain_metadata_prompt.tmpl",

@@ -93,7 +93,7 @@ class QwenLlamaCppProvider:
                 "OcrText": payload.get("ocr_text", ""),
             },
         )
-        return self._chat(prompt, role_name="metadata candidates")
+        return self._chat(prompt, role_name="metadata candidates", json_only=True)
 
     def extract_correspondent(self, payload: dict[str, Any]) -> QwenRefinement:
         prompt = self.prompt_loader.render(
@@ -154,7 +154,7 @@ class QwenLlamaCppProvider:
         )
         return self._chat(prompt, role_name="secondbrain enrichment")
 
-    def _chat(self, prompt: RenderedPrompt, *, role_name: str) -> QwenRefinement:
+    def _chat(self, prompt: RenderedPrompt, *, role_name: str, json_only: bool = False) -> QwenRefinement:
         body = {
             "model": self.settings.qwen_model_name,
             "messages": [
@@ -164,23 +164,37 @@ class QwenLlamaCppProvider:
             "temperature": self.settings.llm_temperature,
             "max_tokens": self.settings.llm_max_tokens,
         }
+        if json_only:
+            body["response_format"] = {"type": "json_object"}
         url = llama_chat_completions_url(self.settings.qwen_llamacpp_base_url)
         try:
-            response = httpx.post(
-                url,
-                json=body,
-                timeout=self.settings.llm_request_timeout_seconds,
-            )
-            response.raise_for_status()
-            raw = response.json()
+            raw = self._post_chat(url, body)
+        except httpx.HTTPStatusError as exc:
+            if json_only and body.get("response_format") and exc.response.status_code in {400, 422}:
+                fallback_body = {key: value for key, value in body.items() if key != "response_format"}
+                raw = self._post_chat(url, fallback_body)
+            else:
+                raise QwenProviderError(f"Qwen request failed: {exc}") from exc
         except httpx.HTTPError as exc:
             raise QwenProviderError(f"Qwen request failed: {exc}") from exc
         except ValueError as exc:
             raise QwenProviderError("Qwen returned invalid JSON") from exc
 
-        choices = raw.get("choices") or []
-        message = choices[0].get("message") if choices else {}
-        text = str((message or {}).get("content") or "").strip()
+        text = _chat_content(raw)
+        if json_only and not text:
+            retry_messages = [dict(message) for message in body["messages"]]
+            retry_messages[-1]["content"] = (
+                str(retry_messages[-1]["content"]).rstrip()
+                + "\n\nReturn one valid compact JSON object now. Do not return an empty answer."
+            )
+            retry_body = {**body, "messages": retry_messages}
+            try:
+                raw = self._post_chat(url, retry_body)
+                text = _chat_content(raw)
+            except httpx.HTTPError as exc:
+                raise QwenProviderError(f"Qwen retry failed after empty response: {exc}") from exc
+            except ValueError as exc:
+                raise QwenProviderError("Qwen retry returned invalid JSON") from exc
         logger.info("Qwen %s completed prompt=%s model=%s", role_name, prompt.name, self.settings.qwen_model_name)
         return QwenRefinement(
             raw_text=text,
@@ -189,6 +203,15 @@ class QwenLlamaCppProvider:
             endpoint=self.settings.qwen_llamacpp_base_url,
             model=self.settings.qwen_model_name,
         )
+
+    def _post_chat(self, url: str, body: dict[str, Any]) -> dict[str, Any]:
+        response = httpx.post(
+            url,
+            json=body,
+            timeout=self.settings.llm_request_timeout_seconds,
+        )
+        response.raise_for_status()
+        return response.json()
 
 
 class DisabledQwenProvider:
@@ -235,6 +258,12 @@ def parse_json_suggestion(raw_text: str) -> Any:
             except json.JSONDecodeError:
                 pass
         return {"text": raw_text}
+
+
+def _chat_content(raw: dict[str, Any]) -> str:
+    choices = raw.get("choices") or []
+    message = choices[0].get("message") if choices else {}
+    return str((message or {}).get("content") or "").strip()
 
 
 def _extract_json_region(text: str) -> str | None:
