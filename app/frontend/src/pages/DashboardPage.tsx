@@ -658,8 +658,10 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
       <div className="document-preview-layout">
         <AttachmentStrip files={files} selectedId={selectedId} onSelect={setSelectedId} onAddMore={onAddMore} />
         <div className={`document-preview-surface ${showOcr ? 'show-ocr-overlay' : ''}`}>
-          <div className="document-preview-stage" style={{ transform: `scale(${zoom / 100}) rotate(${rotation}deg)` }}>
-            {preview}
+          <div className="document-preview-stage">
+            <div className="document-preview-object" style={{ transform: `scale(${zoom / 100}) rotate(${rotation}deg)` }}>
+              {preview}
+            </div>
           </div>
           {showOcr && selected?.ocrSnippet && <pre className="document-preview-ocr-overlay">{selected.ocrSnippet}</pre>}
         </div>
