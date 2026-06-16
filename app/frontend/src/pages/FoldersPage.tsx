@@ -48,6 +48,7 @@ export default function FoldersPage({ onOpenDocument }: Props) {
   const documents = documentPage?.items || []
   const selectedDocumentCount = documentPage?.total_estimate ?? 0
   const showDocumentShortcuts = Boolean(selected || showUnfiledOnly || appliedQuery.trim())
+  const showFileShortcutPanel = showDocumentShortcuts && (Boolean(documents.length) || Boolean(documentPage?.next_cursor) || !childFolders.length || showUnfiledOnly || Boolean(appliedQuery.trim()))
 
   useEffect(() => {
     void load()
@@ -404,7 +405,7 @@ export default function FoldersPage({ onOpenDocument }: Props) {
           </div>
 
 
-          {showDocumentShortcuts && (
+          {showFileShortcutPanel && (
             <div className="table-card folder-items-card">
               <h3>{t('folders.fileShortcuts', 'File shortcuts')} <small>{documents.length} / {documentPage?.total_estimate ?? 0}</small></h3>
               {documents.length ? <div className="folder-shortcut-grid">{documents.map(renderDocumentShortcut)}</div> : <p className="empty-state">{t('folders.noDocuments', 'No documents match this folder/filter.')}</p>}
