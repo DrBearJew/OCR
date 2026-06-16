@@ -281,51 +281,51 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
             <h2>{t('admin.modelConfig')}</h2>
             <p>{t('admin.modelConfigCopy')}</p>
           </div>
-          <TechnicalPill state="info" label="Collection default" />
+          <TechnicalPill state="info" label={t('admin.collectionDefault')} />
         </div>
         <div className="model-engine-grid">
           <EngineCard engine="paddle_vl" item={integrationByName.get('paddle_vl_multimodal_ocr') || integrationByName.get('paddle_vl_llama')} />
-          <EngineCard engine="ppocrv6" item={undefined} note="Local ONNX runtime, loaded on demand." />
+          <EngineCard engine="ppocrv6" item={undefined} note={t('admin.enginePpocrNote')} />
           <EngineCard engine="glm" item={integrationByName.get('glm_multimodal_ocr') || integrationByName.get('glm_llama')} />
           <EngineCard engine="qwen" item={integrationByName.get('qwen_llama')} title={t('admin.qwenMetadata')} detail={t('admin.qwenMetadataDetail')} />
         </div>
         <div className="model-config-form">
-          <label>Collection
+          <label>{t('dashboard.collection')}
             <select value={selectedCollection?.id || ''} onChange={(event) => setSelectedCollectionId(event.target.value)}>
               {collections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select>
           </label>
-          <label>OCR engine
+          <label>{t('admin.ocrEngine')}
             <select value={modelForm.ocr_engine} onChange={(event) => setModelForm({ ...modelForm, ocr_engine: event.target.value })}>
-              <option value="paddle_vl">PaddleOCR-VL, smart parser</option>
-              <option value="ppocrv6">PP-OCRv6, fast/simple</option>
-              <option value="glm">GLM OCR fallback</option>
-              <option value="fake">Fake/test</option>
+              <option value="paddle_vl">{t('admin.engineOptionPaddle')}</option>
+              <option value="ppocrv6">{t('admin.engineOptionPpocr')}</option>
+              <option value="glm">{t('admin.engineOptionGlm')}</option>
+              <option value="fake">{t('admin.engineOptionFake')}</option>
             </select>
           </label>
-          <label>OCR mode
+          <label>{t('admin.ocrMode')}
             <select value={modelForm.ocr_mode} onChange={(event) => setModelForm({ ...modelForm, ocr_mode: event.target.value })}>
               <option value="redo">{t('admin.ocrModeRedo')}</option>
               <option value="force">{t('admin.ocrModeForce')}</option>
               <option value="skip">{t('admin.ocrModeSkip')}</option>
             </select>
           </label>
-          <label>Language
+          <label>{t('fields.language')}
             <input value={modelForm.language} onChange={(event) => setModelForm({ ...modelForm, language: event.target.value })} />
           </label>
-          <label>Page limit
+          <label>{t('admin.pageLimit')}
             <input type="number" min="1" value={modelForm.page_limit} onChange={(event) => setModelForm({ ...modelForm, page_limit: event.target.value })} />
           </label>
-          <label>DPI
+          <label>{t('admin.dpi')}
             <input type="number" min="72" value={modelForm.image_dpi} onChange={(event) => setModelForm({ ...modelForm, image_dpi: event.target.value })} />
           </label>
-          <label>Output
+          <label>{t('admin.output')}
             <select value={modelForm.output_type} onChange={(event) => setModelForm({ ...modelForm, output_type: event.target.value })}>
               <option value="markdown">markdown</option>
               <option value="text">text</option>
             </select>
           </label>
-          <label>Max image pixels
+          <label>{t('admin.maxImagePixels')}
             <input type="number" min="1000000" value={modelForm.max_image_pixels} onChange={(event) => setModelForm({ ...modelForm, max_image_pixels: event.target.value })} />
           </label>
           <button type="button" className="primary" onClick={() => void saveModelConfig()}><Save size={17} /> {t('admin.saveConfig')}</button>
@@ -497,9 +497,10 @@ function toNumber(value: string, fallback: string) {
 function EngineCard({ engine, item, note, title, detail }: { engine: string; item: IntegrationSummary['integrations'][number] | undefined; note?: string; title?: string; detail?: string }) {
   const { t } = useI18n()
   const meta = engineLabels[engine] || { title: title || engine, detail: detail || '' }
+  const translatedDetail = detail || t(`admin.engineDetail.${engine}`, meta.detail)
   return (
     <article className="engine-card">
-      <div><strong>{title || meta.title}</strong><p>{detail || meta.detail}</p></div>
+      <div><strong>{title || meta.title}</strong><p>{translatedDetail}</p></div>
       <TechnicalPill state={item ? item.ok ? 'ok' : 'down' : 'info'} label={item ? item.ok ? t('admin.up') : t('admin.down') : t('admin.configuredStandalone')} />
       {item?.detail && <small>{translateIntegrationDetail(item.detail, t)}</small>}
       {note && <small>{note}</small>}

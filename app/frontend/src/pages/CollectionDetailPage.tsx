@@ -50,7 +50,7 @@ export default function CollectionDetailPage({ slug, onOpenRecord, onOpenDocumen
       {error && <p className="error">{error}</p>}
       <section className="collection-detail-hero workflow-card">
         <div>
-          <span className="eyebrow">Collection</span>
+          <span className="eyebrow">{t('dashboard.collection')}</span>
           <h2>{data?.collection.name || slug}</h2>
           <p>{records.length} visible records, {totalDocs} searchable document OCR units.</p>
         </div>

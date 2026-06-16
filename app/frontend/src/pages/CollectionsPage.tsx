@@ -131,10 +131,10 @@ export default function CollectionsPage({ onOpenCollection, onSchemas }: Collect
               <StatusPills counts={item.status_counts} />
 
               <div className="collection-schema-strip">
-                <span className="schema-field-pill">title rule</span>
-                <span className="schema-field-pill">custom fields</span>
-                <span className="schema-field-pill">OCR config</span>
-                <span className="schema-field-pill">search defaults</span>
+                <span className="schema-field-pill">{t('collections.titleRule')}</span>
+                <span className="schema-field-pill">{t('collections.customFields')}</span>
+                <span className="schema-field-pill">{t('collections.ocrConfig')}</span>
+                <span className="schema-field-pill">{t('collections.searchDefaults')}</span>
               </div>
 
               <div className="collection-mini-docs" aria-label={`${item.collection.name} recent documents`}>
