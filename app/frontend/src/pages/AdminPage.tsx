@@ -130,10 +130,10 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
     try {
       const saved = await api.saveModelSetup(runtimeSetup)
       setRuntimeSetup(saved)
-      setMessage('Model setup saved. New OCR and metadata jobs will use it.')
+      setMessage(t('admin.modelSetupSaved'))
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save model setup')
+      setError(err instanceof Error ? err.message : t('admin.modelSetupSaveFailed'))
     } finally {
       setSetupBusy(false)
     }
@@ -147,7 +147,7 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
     try {
       setEndpointTest(await api.testModelEndpoint({ base_url, model, timeout_seconds: runtimeSetup.timeout_seconds }))
     } catch (err) {
-      setEndpointTest({ ok: false, detail: err instanceof Error ? err.message : 'Endpoint test failed', available_models: [] })
+      setEndpointTest({ ok: false, detail: err instanceof Error ? err.message : t('admin.endpointTestFailed'), available_models: [] })
     } finally {
       setSetupBusy(false)
     }
@@ -224,18 +224,18 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
           <TechnicalPill state={runtimeSetup.ocr_provider === 'fake' ? 'info' : 'ok'} label={runtimeSetup.ocr_provider} />
         </div>
         <div className="model-config-form runtime-model-form">
-          <label>Setup mode
+          <label>{t('admin.setupMode')}
             <select value={runtimeSetup.mode} onChange={(event) => {
               const mode = event.target.value
               const provider = mode === 'local' ? 'ppocrv6' : mode === 'smart' ? 'paddle_vl' : 'fake'
               setRuntimeSetup({ ...runtimeSetup, mode, ocr_provider: provider })
             }}>
-              <option value="fake">Demo / fake OCR</option>
-              <option value="local">Local CPU OCR / PP-OCRv6</option>
-              <option value="smart">External smart OCR endpoint</option>
+              <option value="fake">{t('admin.modeFake')}</option>
+              <option value="local">{t('admin.modeLocal')}</option>
+              <option value="smart">{t('admin.modeSmart')}</option>
             </select>
           </label>
-          <label>Default OCR provider
+          <label>{t('admin.defaultOcrProvider')}
             <select value={runtimeSetup.ocr_provider} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_provider: event.target.value })}>
               <option value="fake">fake</option>
               <option value="ppocrv6">ppocrv6</option>
@@ -243,36 +243,36 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
               <option value="glm">glm</option>
             </select>
           </label>
-          <label>PaddleOCR-VL base URL
+          <label>{t('admin.paddleBaseUrl')}
             <input value={runtimeSetup.paddle_vl_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, paddle_vl_base_url: event.target.value })} placeholder="http://host.docker.internal:1234/v1" />
           </label>
-          <label>PaddleOCR-VL model
+          <label>{t('admin.paddleModel')}
             <input value={runtimeSetup.paddle_vl_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, paddle_vl_model: event.target.value })} placeholder="paddleocr-vl" />
           </label>
-          <label>GLM base URL
+          <label>{t('admin.glmBaseUrl')}
             <input value={runtimeSetup.glm_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, glm_base_url: event.target.value })} placeholder="http://host.docker.internal:1234/v1" />
           </label>
-          <label>GLM model
+          <label>{t('admin.glmModel')}
             <input value={runtimeSetup.glm_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, glm_model: event.target.value })} placeholder="glm" />
           </label>
-          <label className="check runtime-check"><input type="checkbox" checked={runtimeSetup.qwen_enabled} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_enabled: event.target.checked })} /> Enable Qwen metadata</label>
-          <label>Qwen base URL
+          <label className="check runtime-check"><input type="checkbox" checked={runtimeSetup.qwen_enabled} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_enabled: event.target.checked })} /> {t('admin.enableQwenMetadata')}</label>
+          <label>{t('admin.qwenBaseUrl')}
             <input value={runtimeSetup.qwen_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_base_url: event.target.value })} placeholder="http://host.docker.internal:1234/v1" />
           </label>
-          <label>Qwen model
+          <label>{t('admin.qwenModel')}
             <input value={runtimeSetup.qwen_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_model: event.target.value })} placeholder="qwen" />
           </label>
-          <label>Timeout seconds
+          <label>{t('admin.timeoutSeconds')}
             <input type="number" min="5" value={runtimeSetup.timeout_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, timeout_seconds: Number(event.target.value) || 120 })} />
           </label>
         </div>
         <div className="button-row form-actions runtime-setup-actions">
-          <button type="button" onClick={() => void testRuntimeEndpoint('paddle')} disabled={setupBusy}>Test PaddleOCR-VL</button>
-          <button type="button" onClick={() => void testRuntimeEndpoint('glm')} disabled={setupBusy}>Test GLM</button>
-          <button type="button" onClick={() => void testRuntimeEndpoint('qwen')} disabled={setupBusy}>Test Qwen</button>
-          <button type="button" className="primary" onClick={() => void saveRuntimeSetup()} disabled={setupBusy}><Save size={17} /> Save model setup</button>
+          <button type="button" onClick={() => void testRuntimeEndpoint('paddle')} disabled={setupBusy}>{t('admin.testPaddle')}</button>
+          <button type="button" onClick={() => void testRuntimeEndpoint('glm')} disabled={setupBusy}>{t('admin.testGlm')}</button>
+          <button type="button" onClick={() => void testRuntimeEndpoint('qwen')} disabled={setupBusy}>{t('admin.testQwen')}</button>
+          <button type="button" className="primary" onClick={() => void saveRuntimeSetup()} disabled={setupBusy}><Save size={17} /> {t('admin.saveModelSetup')}</button>
         </div>
-        {endpointTest && <p className={endpointTest.ok ? 'success-message' : 'error'}>{endpointTest.detail}{endpointTest.available_models.length ? ` · Models: ${endpointTest.available_models.join(', ')}` : ''}</p>}
+        {endpointTest && <p className={endpointTest.ok ? 'success-message' : 'error'}>{endpointTest.detail}{endpointTest.available_models.length ? ` · ${t('admin.models')}: ${endpointTest.available_models.join(', ')}` : ''}</p>}
       </section>
 
       <section className="admin-card model-config-card">
@@ -336,18 +336,18 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
         <div className="section-heading-row">
           <div>
             <h2>{t('admin.maintenance')}</h2>
-            <p>Manual recovery and bulk reprocessing actions.</p>
+            <p>{t('admin.maintenanceCopy')}</p>
           </div>
         </div>
         <div className="admin-actions technical-actions">
-          <button onClick={() => void runAction(api.reconcile, 'Reconciliation queued.')}><Wrench size={18} /> {t('admin.reconcileStuck')}</button>
-          <button onClick={() => void runAction(api.retryFailed, 'Failed docs retried.')}><RotateCcw size={18} /> {t('admin.retryFailed')}</button>
+          <button onClick={() => void runAction(api.reconcile, t('admin.reconciliationQueued'))}><Wrench size={18} /> {t('admin.reconcileStuck')}</button>
+          <button onClick={() => void runAction(api.retryFailed, t('admin.failedDocsRetried'))}><RotateCcw size={18} /> {t('admin.retryFailed')}</button>
           <select value={collection} onChange={(event) => setCollection(event.target.value)}>
             <option>Belege</option>
             <option>Eingangsrechnung</option>
             <option>Ausgangsrechnung</option>
           </select>
-          <button onClick={() => void runAction(() => api.reextractCollection(collection, false), `Reextract queued for ${collection}.`)}>{t('admin.reextractCollection')}</button>
+          <button onClick={() => void runAction(() => api.reextractCollection(collection, false), `${t('admin.reextractQueuedFor')} ${collection}.`)}>{t('admin.reextractCollection')}</button>
         </div>
       </section>
 
@@ -357,8 +357,8 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
           {integrations?.integrations.map((item) => (
             <div key={item.name} className="admin-row technical-row">
               <strong>{item.name}</strong>
-              <TechnicalPill state={item.ok ? 'ok' : 'down'} label={item.ok ? 'Up' : 'Down'} />
-              <span>{item.detail}</span>
+              <TechnicalPill state={item.ok ? 'ok' : 'down'} label={item.ok ? t('admin.up') : t('admin.down')} />
+              <span>{translateIntegrationDetail(item.detail, t)}</span>
               <small>{item.latency_ms ?? ''}{item.latency_ms !== null ? ' ms' : ''}</small>
             </div>
           ))}
@@ -366,31 +366,31 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
       </section>
 
       <section className="admin-card">
-        <div className="section-heading-row"><h2>{t('admin.ingestionSources')}</h2><TechnicalPill state="info" label={`${sources.length} configured`} /></div>
+        <div className="section-heading-row"><h2>{t('admin.ingestionSources')}</h2><TechnicalPill state="info" label={`${sources.length} ${t('admin.configured')}`} /></div>
         <div className="admin-actions technical-actions">
           <input placeholder={t('admin.sourceName')} value={sourceForm.name} onChange={(event) => setSourceForm({ ...sourceForm, name: event.target.value })} />
           <input placeholder={t('admin.consumeFolderPath')} value={sourceForm.path} onChange={(event) => setSourceForm({ ...sourceForm, path: event.target.value })} />
           <select value={sourceForm.collection_id} onChange={(event) => setSourceForm({ ...sourceForm, collection_id: event.target.value })}>
             {collections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
-          <label className="check"><input type="checkbox" checked={sourceForm.recursive} onChange={(event) => setSourceForm({ ...sourceForm, recursive: event.target.checked })} /> Recursive</label>
-          <button onClick={() => void addSource()}>Add source</button>
-          <button onClick={() => void runAction(api.scanAllIngestionSources, 'Ingestion scan started.')}>{t('admin.scanAll')}</button>
+          <label className="check"><input type="checkbox" checked={sourceForm.recursive} onChange={(event) => setSourceForm({ ...sourceForm, recursive: event.target.checked })} /> {t('admin.recursive')}</label>
+          <button onClick={() => void addSource()}>{t('admin.addSource')}</button>
+          <button onClick={() => void runAction(api.scanAllIngestionSources, t('admin.ingestionScanStarted'))}>{t('admin.scanAll')}</button>
         </div>
         <div className="admin-list technical-list">
           {sources.map((source) => (
             <div key={source.id} className="admin-row technical-row">
               <strong>{source.name}</strong>
-              <TechnicalPill state={source.enabled ? 'ok' : 'down'} label={source.enabled ? 'Enabled' : 'Disabled'} />
+              <TechnicalPill state={source.enabled ? 'ok' : 'down'} label={source.enabled ? t('status.enabled') : t('status.disabled')} />
               <span>{source.path} · {source.record_grouping}</span>
-              <button onClick={() => void runAction(() => api.scanIngestionSource(source.id), `Scan started for ${source.name}.`)}>{t('admin.scan')}</button>
+              <button onClick={() => void runAction(() => api.scanIngestionSource(source.id), `${t('admin.scanStartedFor')} ${source.name}.`)}>{t('admin.scan')}</button>
             </div>
           ))}
         </div>
       </section>
 
       <section className="admin-card">
-        <div className="section-heading-row"><h2>{t('admin.processingHooks')}</h2><TechnicalPill state="info" label={`${hooks.length} configured`} /></div>
+        <div className="section-heading-row"><h2>{t('admin.processingHooks')}</h2><TechnicalPill state="info" label={`${hooks.length} ${t('admin.configured')}`} /></div>
         <div className="admin-actions technical-actions">
           <input placeholder={t('admin.hookName')} value={hookForm.name} onChange={(event) => setHookForm({ ...hookForm, name: event.target.value })} />
           <select value={hookForm.stage} onChange={(event) => setHookForm({ ...hookForm, stage: event.target.value })}>
@@ -403,16 +403,16 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
           </select>
           <input placeholder={t('admin.command')} value={hookForm.command} onChange={(event) => setHookForm({ ...hookForm, command: event.target.value })} />
           <input placeholder={t('admin.webhookUrl')} value={hookForm.webhook_url} onChange={(event) => setHookForm({ ...hookForm, webhook_url: event.target.value })} />
-          <label className="check"><input type="checkbox" checked={hookForm.blocking} onChange={(event) => setHookForm({ ...hookForm, blocking: event.target.checked })} /> Blocking</label>
-          <button onClick={() => void addHook()}>Add hook</button>
+          <label className="check"><input type="checkbox" checked={hookForm.blocking} onChange={(event) => setHookForm({ ...hookForm, blocking: event.target.checked })} /> {t('admin.blocking')}</label>
+          <button onClick={() => void addHook()}>{t('admin.addHook')}</button>
         </div>
         <div className="admin-list technical-list">
           {hooks.map((hook) => (
             <div key={hook.id} className="admin-row technical-row">
               <strong>{hook.name}</strong>
-              <TechnicalPill state={hook.enabled ? 'ok' : 'down'} label={hook.enabled ? 'Enabled' : 'Disabled'} />
+              <TechnicalPill state={hook.enabled ? 'ok' : 'down'} label={hook.enabled ? t('status.enabled') : t('status.disabled')} />
               <span>{hook.stage} · {hook.hook_kind}</span>
-              <button onClick={() => void runAction(() => api.testHook(hook.id), `Hook test queued for ${hook.name}.`)}>{t('admin.testHook')}</button>
+              <button onClick={() => void runAction(() => api.testHook(hook.id), `${t('admin.hookTestQueuedFor')} ${hook.name}.`)}>{t('admin.testHook')}</button>
             </div>
           ))}
         </div>
@@ -421,20 +421,20 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
       <section className="admin-card operational-card">
         <div className="section-heading-row"><h2>{t('admin.operationalQueues')}</h2><p>{t('admin.operationalQueuesCopy')}</p></div>
         <details>
-          <summary>Ingestion jobs ({ingestionJobs.length})</summary>
+          <summary>{t('admin.ingestionJobs')} ({ingestionJobs.length})</summary>
           <div className="admin-list technical-list compact-list">
             {ingestionJobs.slice(0, 20).map((job) => (
               <div key={job.id} className="admin-row technical-row">
                 <button disabled={!job.document_id} onClick={() => job.document_id && onOpenDocument(job.document_id)}>{job.discovered_path}</button>
                 <TechnicalPill state={job.status === 'failed' ? 'down' : job.status === 'imported' || job.status === 'skipped' ? 'ok' : 'info'} label={job.status} />
                 <span>{job.error_message || job.sha256 || ''}</span>
-                <button onClick={() => void runAction(() => api.retryIngestionJob(job.id), 'Ingestion job retried.')}>{t('common.retry')}</button>
+                <button onClick={() => void runAction(() => api.retryIngestionJob(job.id), t('admin.ingestionJobRetried'))}>{t('common.retry')}</button>
               </div>
             ))}
           </div>
         </details>
         <details>
-          <summary>Failed documents ({failed.length})</summary>
+          <summary>{t('admin.failedDocuments')} ({failed.length})</summary>
           <div className="admin-list technical-list compact-list">
             {failed.map((job) => (
               <div key={job.document_id} className="admin-row technical-row">
@@ -447,20 +447,20 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
           </div>
         </details>
         <details>
-          <summary>Duplicates ({duplicates.length})</summary>
+          <summary>{t('admin.duplicates')} ({duplicates.length})</summary>
           <div className="admin-list technical-list compact-list">
             {duplicates.map((doc) => (
               <div key={doc.id} className="admin-row technical-row">
                 <button onClick={() => onOpenDocument(doc.id)}>{doc.manual_title_override || doc.extracted_title || doc.original_filename}</button>
-                <TechnicalPill state="info" label="duplicate" />
-                <span>Duplicate of {doc.duplicate_of_document_id}</span>
+                <TechnicalPill state="info" label={t('admin.duplicate')} />
+                <span>{t('admin.duplicateOf')} {doc.duplicate_of_document_id}</span>
                 <button className="icon-button" title={t('admin.forceRetryOcr')} onClick={() => void retry(doc.id)}><RotateCcw size={18} /></button>
               </div>
             ))}
           </div>
         </details>
         <details>
-          <summary>Recent jobs ({jobs.length})</summary>
+          <summary>{t('admin.recentJobs')} ({jobs.length})</summary>
           <div className="admin-list technical-list compact-list">
             {jobs.map((job) => (
               <div key={job.document_id} className="admin-row technical-row">
@@ -495,15 +495,25 @@ function toNumber(value: string, fallback: string) {
 }
 
 function EngineCard({ engine, item, note, title, detail }: { engine: string; item: IntegrationSummary['integrations'][number] | undefined; note?: string; title?: string; detail?: string }) {
+  const { t } = useI18n()
   const meta = engineLabels[engine] || { title: title || engine, detail: detail || '' }
   return (
     <article className="engine-card">
       <div><strong>{title || meta.title}</strong><p>{detail || meta.detail}</p></div>
-      <TechnicalPill state={item ? item.ok ? 'ok' : 'down' : 'info'} label={item ? item.ok ? 'Up' : 'Down' : 'Configured'} />
-      {item?.detail && <small>{item.detail}</small>}
+      <TechnicalPill state={item ? item.ok ? 'ok' : 'down' : 'info'} label={item ? item.ok ? t('admin.up') : t('admin.down') : t('admin.configuredStandalone')} />
+      {item?.detail && <small>{translateIntegrationDetail(item.detail, t)}</small>}
       {note && <small>{note}</small>}
     </article>
   )
+}
+
+function translateIntegrationDetail(detail: string, t: (key: string, fallback?: string) => string) {
+  if (detail === 'reachable') return t('admin.detailReachable')
+  if (detail === 'workers reachable') return t('admin.detailWorkersReachable')
+  if (detail === 'PaddleOCR-VL multimodal parser config looks usable') return t('admin.detailPaddleUsable')
+  if (detail === 'multimodal OCR config looks usable') return t('admin.detailMultimodalUsable')
+  if (detail.startsWith('reachable via ')) return `${t('admin.detailReachableVia')} ${detail.replace('reachable via ', '')}`
+  return detail
 }
 
 function TechnicalPill({ state, label }: { state: 'ok' | 'down' | 'info'; label: string }) {

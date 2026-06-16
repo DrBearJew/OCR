@@ -7657,3 +7657,12 @@ main,
   margin-top: 0.9rem;
   flex-wrap: wrap;
 }
+
+
+/* Admin operational i18n spacing: keep status pills and details visually separated. */
+.technical-row .technical-pill {
+  margin-inline: 0.15rem 0.35rem;
+}
+.technical-row > span:not(.technical-pill) {
+  padding-inline-start: 0.15rem;
+}
