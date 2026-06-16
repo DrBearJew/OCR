@@ -10017,3 +10017,144 @@ a.icon-button:not(.danger-button):hover {
     width: 100% !important;
   }
 }
+
+
+/* Missed document action buttons: OCR, re-extract, open record, detail actions. */
+.status-card-row > button,
+.qwen-run-state + button,
+.extracted-list + .link-button,
+.document-detail-panel .detail-actions button:not(.danger-button),
+.document-detail-console .metadata-form .inline-advanced > div button,
+.document-detail-console .metadata-form .button-row > button:not(.danger-button),
+.failed-review-page button:not(.danger-button),
+.processing-page button:not(.danger-button) {
+  position: relative !important;
+  overflow: hidden !important;
+  min-height: 2.75rem !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.52rem !important;
+  padding: 0.58rem 0.86rem !important;
+  border: 1px solid rgba(94, 234, 212, 0.28) !important;
+  border-radius: 13px !important;
+  color: #eafcff !important;
+  background:
+    radial-gradient(circle at 14% 8%, rgba(94, 234, 212, 0.2), transparent 34%),
+    linear-gradient(145deg, rgba(18, 36, 55, 0.98), rgba(8, 17, 29, 0.98)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045), 0 10px 22px rgba(0, 0, 0, 0.16) !important;
+  font-weight: 850 !important;
+  text-align: center !important;
+  white-space: normal !important;
+  line-height: 1.16 !important;
+  transition: transform 140ms ease, border-color 140ms ease, background 140ms ease, box-shadow 140ms ease !important;
+}
+
+.status-card-row > button::after,
+.qwen-run-state + button::after,
+.extracted-list + .link-button::after,
+.document-detail-panel .detail-actions button:not(.danger-button)::after,
+.document-detail-console .metadata-form .inline-advanced > div button::after,
+.document-detail-console .metadata-form .button-row > button:not(.danger-button)::after,
+.failed-review-page button:not(.danger-button)::after,
+.processing-page button:not(.danger-button)::after {
+  content: '';
+  position: absolute;
+  inset: auto -18% -70% 24%;
+  height: 3.8rem;
+  transform: rotate(-12deg);
+  background: linear-gradient(90deg, transparent, rgba(45, 212, 191, 0.11), transparent);
+  pointer-events: none;
+}
+
+.status-card-row > button svg,
+.qwen-run-state + button svg,
+.document-detail-panel .detail-actions button:not(.danger-button) svg,
+.document-detail-console .metadata-form .inline-advanced > div button svg,
+.document-detail-console .metadata-form .button-row > button:not(.danger-button) svg {
+  flex: 0 0 auto !important;
+  width: 1.9rem !important;
+  height: 1.9rem !important;
+  padding: 0.42rem !important;
+  box-sizing: border-box !important;
+  border-radius: 10px !important;
+  color: #07131f !important;
+  background: linear-gradient(145deg, #7dd3fc, #5eead4) !important;
+  box-shadow: 0 8px 18px rgba(45, 212, 191, 0.18) !important;
+}
+
+.status-card-row > button:hover:not(:disabled),
+.qwen-run-state + button:hover:not(:disabled),
+.extracted-list + .link-button:hover:not(:disabled),
+.document-detail-panel .detail-actions button:not(.danger-button):hover:not(:disabled),
+.document-detail-console .metadata-form .inline-advanced > div button:hover:not(:disabled),
+.document-detail-console .metadata-form .button-row > button:not(.danger-button):hover:not(:disabled),
+.failed-review-page button:not(.danger-button):hover:not(:disabled),
+.processing-page button:not(.danger-button):hover:not(:disabled) {
+  transform: translateY(-1px) !important;
+  border-color: rgba(94, 234, 212, 0.8) !important;
+  background:
+    radial-gradient(circle at 14% 8%, rgba(94, 234, 212, 0.32), transparent 34%),
+    linear-gradient(145deg, rgba(22, 47, 70, 1), rgba(10, 24, 40, 1)) !important;
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.12), 0 16px 32px rgba(20, 184, 166, 0.18) !important;
+}
+
+.status-card-row {
+  gap: 0.8rem !important;
+}
+
+.status-card-row > button {
+  flex: 0 0 auto !important;
+}
+
+.qwen-run-state + button,
+.extracted-list + .link-button {
+  margin-top: 0.75rem !important;
+  width: 100% !important;
+}
+
+.document-detail-panel .detail-actions {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 0.6rem !important;
+}
+
+.document-detail-panel .detail-actions button {
+  width: 100% !important;
+}
+
+.document-detail-console .metadata-form .inline-advanced {
+  width: 100% !important;
+}
+
+.document-detail-console .metadata-form .inline-advanced > div {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 0.55rem !important;
+  margin-top: 0.75rem !important;
+}
+
+.document-detail-console .metadata-form .inline-advanced > div button {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.document-detail-console .metadata-form .inline-advanced summary {
+  color: #eaffff !important;
+  font-weight: 900 !important;
+}
+
+@media (max-width: 1350px) {
+  .status-card-row {
+    display: grid !important;
+    grid-template-columns: auto minmax(0, 1fr) !important;
+  }
+  .status-card-row > button {
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
+  }
+  .document-detail-panel .detail-actions,
+  .document-detail-console .metadata-form .inline-advanced > div {
+    grid-template-columns: 1fr !important;
+  }
+}
