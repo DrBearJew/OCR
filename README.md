@@ -90,7 +90,7 @@ For basic local OCR:
 OCR_PROVIDER=ppocrv6
 ```
 
-For smart OCR or Qwen metadata refinement, configure external OpenAI-compatible endpoints in `.env`, for example:
+For smart OCR or Qwen metadata refinement, configure external OpenAI-compatible endpoints in Admin → Model Setup or in `.env`, for example:
 
 ```env
 OCR_PROVIDER=paddle_vl
@@ -108,7 +108,7 @@ LM Studio, llama.cpp server, or another compatible service can provide these end
 
 The Admin UI can configure collection-level OCR defaults, ingestion sources, processing hooks, integration status, and maintenance actions.
 
-Global model endpoint setup is still environment-based. A visual setup screen for LM Studio, llama.cpp, and similar endpoints is planned.
+Global model endpoints can be configured in Admin → Model Setup. Use it to choose fake/local/smart mode, enter LM Studio or llama.cpp-compatible URLs, test endpoints, and save defaults without editing `.env`.
 
 ## More documentation
 

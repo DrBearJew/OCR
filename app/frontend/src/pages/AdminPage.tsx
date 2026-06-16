@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { RefreshCw, RotateCcw, Save, Wrench } from 'lucide-react'
 import { api } from '../api/client'
-import type { Collection, Document, IngestionJob, IngestionSource, IntegrationSummary, JobInfo, ProcessingHook } from '../types'
+import type { Collection, Document, IngestionJob, IngestionSource, IntegrationSummary, JobInfo, ModelEndpointTestResult, ModelSetup, ProcessingHook } from '../types'
 import { useI18n } from '../i18n'
 
 interface ModelFormState {
@@ -31,6 +31,19 @@ const engineLabels: Record<string, { title: string; detail: string }> = {
   fake: { title: 'Fake OCR', detail: 'Development/test stub only.' }
 }
 
+const defaultRuntimeSetup: ModelSetup = {
+  mode: 'fake',
+  ocr_provider: 'fake',
+  paddle_vl_base_url: 'http://host.docker.internal:1234/v1',
+  paddle_vl_model: 'paddleocr-vl',
+  glm_base_url: 'http://host.docker.internal:1234/v1',
+  glm_model: 'glm',
+  qwen_enabled: false,
+  qwen_base_url: 'http://host.docker.internal:1234/v1',
+  qwen_model: 'qwen',
+  timeout_seconds: 120
+}
+
 export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: string) => void }) {
   const { t } = useI18n()
   const [jobs, setJobs] = useState<JobInfo[]>([])
@@ -44,6 +57,9 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
   const [collection, setCollection] = useState('Belege')
   const [selectedCollectionId, setSelectedCollectionId] = useState('')
   const [modelForm, setModelForm] = useState<ModelFormState>(defaultModelForm)
+  const [runtimeSetup, setRuntimeSetup] = useState<ModelSetup>(defaultRuntimeSetup)
+  const [endpointTest, setEndpointTest] = useState<ModelEndpointTestResult | null>(null)
+  const [setupBusy, setSetupBusy] = useState(false)
   const [sourceForm, setSourceForm] = useState({ name: '', path: '', collection_id: '', recursive: false })
   const [hookForm, setHookForm] = useState({ name: '', stage: 'pre_consume', hook_kind: 'command', command: '', webhook_url: '', blocking: true })
   const [error, setError] = useState('')
@@ -52,11 +68,12 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
   async function load() {
     setError('')
     try {
-      const [recentJobs, failedDocs, duplicateDocs, integrationStatus, collectionRows, sourceRows, ingestionRows, hookRows] = await Promise.all([
+      const [recentJobs, failedDocs, duplicateDocs, integrationStatus, modelSetup, collectionRows, sourceRows, ingestionRows, hookRows] = await Promise.all([
         api.jobs(),
         api.failed(),
         api.duplicates(),
         api.integrations(),
+        api.modelSetup(),
         api.collections(),
         api.ingestionSources(),
         api.ingestionJobs(),
@@ -66,6 +83,7 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
       setFailed(failedDocs)
       setDuplicates(duplicateDocs)
       setIntegrations(integrationStatus)
+      setRuntimeSetup(modelSetup)
       setCollections(collectionRows)
       setSources(sourceRows)
       setIngestionJobs(ingestionRows)
@@ -104,6 +122,35 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
     await action()
     setMessage(success)
     await load()
+  }
+
+  async function saveRuntimeSetup() {
+    setSetupBusy(true)
+    setMessage('')
+    try {
+      const saved = await api.saveModelSetup(runtimeSetup)
+      setRuntimeSetup(saved)
+      setMessage('Model setup saved. New OCR and metadata jobs will use it.')
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save model setup')
+    } finally {
+      setSetupBusy(false)
+    }
+  }
+
+  async function testRuntimeEndpoint(kind: 'paddle' | 'glm' | 'qwen') {
+    const base_url = kind === 'glm' ? runtimeSetup.glm_base_url : kind === 'qwen' ? runtimeSetup.qwen_base_url : runtimeSetup.paddle_vl_base_url
+    const model = kind === 'glm' ? runtimeSetup.glm_model : kind === 'qwen' ? runtimeSetup.qwen_model : runtimeSetup.paddle_vl_model
+    setSetupBusy(true)
+    setEndpointTest(null)
+    try {
+      setEndpointTest(await api.testModelEndpoint({ base_url, model, timeout_seconds: runtimeSetup.timeout_seconds }))
+    } catch (err) {
+      setEndpointTest({ ok: false, detail: err instanceof Error ? err.message : 'Endpoint test failed', available_models: [] })
+    } finally {
+      setSetupBusy(false)
+    }
   }
 
   async function saveModelConfig() {
@@ -167,6 +214,66 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
       </header>
       {error && <p className="error">{error}</p>}
       {message && <p className="success-message">{message}</p>}
+
+      <section className="admin-card runtime-model-setup-card">
+        <div className="section-heading-row">
+          <div>
+            <h2>Model Setup</h2>
+            <p>Choose the default runtime path. Basic OCR can run locally; smart OCR and Qwen can point to LM Studio, llama.cpp, or a compatible proxy.</p>
+          </div>
+          <TechnicalPill state={runtimeSetup.ocr_provider === 'fake' ? 'info' : 'ok'} label={runtimeSetup.ocr_provider} />
+        </div>
+        <div className="model-config-form runtime-model-form">
+          <label>Setup mode
+            <select value={runtimeSetup.mode} onChange={(event) => {
+              const mode = event.target.value
+              const provider = mode === 'local' ? 'ppocrv6' : mode === 'smart' ? 'paddle_vl' : 'fake'
+              setRuntimeSetup({ ...runtimeSetup, mode, ocr_provider: provider })
+            }}>
+              <option value="fake">Demo / fake OCR</option>
+              <option value="local">Local CPU OCR / PP-OCRv6</option>
+              <option value="smart">External smart OCR endpoint</option>
+            </select>
+          </label>
+          <label>Default OCR provider
+            <select value={runtimeSetup.ocr_provider} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_provider: event.target.value })}>
+              <option value="fake">fake</option>
+              <option value="ppocrv6">ppocrv6</option>
+              <option value="paddle_vl">paddle_vl</option>
+              <option value="glm">glm</option>
+            </select>
+          </label>
+          <label>PaddleOCR-VL base URL
+            <input value={runtimeSetup.paddle_vl_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, paddle_vl_base_url: event.target.value })} placeholder="http://host.docker.internal:1234/v1" />
+          </label>
+          <label>PaddleOCR-VL model
+            <input value={runtimeSetup.paddle_vl_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, paddle_vl_model: event.target.value })} placeholder="paddleocr-vl" />
+          </label>
+          <label>GLM base URL
+            <input value={runtimeSetup.glm_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, glm_base_url: event.target.value })} placeholder="http://host.docker.internal:1234/v1" />
+          </label>
+          <label>GLM model
+            <input value={runtimeSetup.glm_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, glm_model: event.target.value })} placeholder="glm" />
+          </label>
+          <label className="check runtime-check"><input type="checkbox" checked={runtimeSetup.qwen_enabled} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_enabled: event.target.checked })} /> Enable Qwen metadata</label>
+          <label>Qwen base URL
+            <input value={runtimeSetup.qwen_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_base_url: event.target.value })} placeholder="http://host.docker.internal:1234/v1" />
+          </label>
+          <label>Qwen model
+            <input value={runtimeSetup.qwen_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_model: event.target.value })} placeholder="qwen" />
+          </label>
+          <label>Timeout seconds
+            <input type="number" min="5" value={runtimeSetup.timeout_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, timeout_seconds: Number(event.target.value) || 120 })} />
+          </label>
+        </div>
+        <div className="button-row form-actions runtime-setup-actions">
+          <button type="button" onClick={() => void testRuntimeEndpoint('paddle')} disabled={setupBusy}>Test PaddleOCR-VL</button>
+          <button type="button" onClick={() => void testRuntimeEndpoint('glm')} disabled={setupBusy}>Test GLM</button>
+          <button type="button" onClick={() => void testRuntimeEndpoint('qwen')} disabled={setupBusy}>Test Qwen</button>
+          <button type="button" className="primary" onClick={() => void saveRuntimeSetup()} disabled={setupBusy}><Save size={17} /> Save model setup</button>
+        </div>
+        {endpointTest && <p className={endpointTest.ok ? 'success-message' : 'error'}>{endpointTest.detail}{endpointTest.available_models.length ? ` · Models: ${endpointTest.available_models.join(', ')}` : ''}</p>}
+      </section>
 
       <section className="admin-card model-config-card">
         <div className="section-heading-row">

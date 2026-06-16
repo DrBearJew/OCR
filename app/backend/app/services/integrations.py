@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.services.ocr_glm import list_llama_model_ids, llama_health_urls
+from app.services.model_setup import settings_with_model_setup
 
 
 logger = logging.getLogger(__name__)
@@ -163,7 +164,7 @@ def check_celery_workers(settings: Settings | None = None) -> IntegrationStatus:
 
 
 def collect_integrations(db: Session, settings: Settings | None = None) -> dict[str, Any]:
-    settings = settings or get_settings()
+    settings = settings or settings_with_model_setup(db, get_settings())
     statuses = [
         check_database(db),
         check_redis(settings),

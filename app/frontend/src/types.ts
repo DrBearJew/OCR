@@ -213,6 +213,27 @@ export interface IntegrationStatus {
   metadata: Record<string, unknown>
 }
 
+export interface ModelSetup {
+  mode: string
+  ocr_provider: string
+  paddle_vl_base_url: string
+  paddle_vl_model: string
+  glm_base_url: string
+  glm_model: string
+  qwen_enabled: boolean
+  qwen_base_url: string
+  qwen_model: string
+  timeout_seconds: number
+}
+
+export interface ModelEndpointTestResult {
+  ok: boolean
+  detail: string
+  available_models: string[]
+  base_url?: string | null
+  model?: string | null
+}
+
 export interface IntegrationSummary {
   ok: boolean
   integrations: IntegrationStatus[]

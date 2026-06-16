@@ -22,6 +22,7 @@ from app.services.llm_enrichment import (
     qwen_generate_metadata_candidates,
 )
 from app.services.llm_qwen import build_qwen_provider
+from app.services.model_setup import settings_with_model_setup
 from app.services.ocr_glm import OCRProvider, build_ocr_provider
 from app.services.ocr_pipeline import resolve_ocr_config, store_effective_ocr_trace
 from app.services.paperless_metadata import apply_paperless_metadata
@@ -149,11 +150,11 @@ def mark_document_failed(db: Session, document: Document, message: str) -> None:
     update_record_status(db, document.record_id)
 
 
-def processing_options(document: Document, **overrides: Any) -> dict[str, Any]:
+def processing_options(document: Document, settings: Any | None = None, **overrides: Any) -> dict[str, Any]:
     options = {**DEFAULT_PROCESSING_OPTIONS, **(document.processing_options_json or {})}
     options.update({key: value for key, value in overrides.items() if value is not None})
     if options["qwen_enabled"] is None:
-        options["qwen_enabled"] = get_settings().llm_metadata_refinement_enabled
+        options["qwen_enabled"] = (settings or get_settings()).llm_metadata_refinement_enabled
     if options.get("qwen_enrichment_enabled") is None:
         options["qwen_enrichment_enabled"] = bool(options.get("qwen_enabled"))
     return options
@@ -750,7 +751,8 @@ def run_ocr_for_document(
         return document
     if ocr_mode:
         document.ocr_mode = OCRMode(ocr_mode)
-    config = resolve_ocr_config(document)
+    runtime_settings = settings_with_model_setup(db)
+    config = resolve_ocr_config(document, settings=runtime_settings)
     if force:
         config.ocr_mode = OCRMode.force
         document.ocr_mode = OCRMode.force
@@ -772,7 +774,7 @@ def run_ocr_for_document(
 
             publish_document_task(db, document.id, extract_metadata_task, args=[str(document.id)], task_id=metadata_task_id, queue="metadata", stage="metadata")
         return document
-    provider = provider or build_ocr_provider(provider_name=config.ocr_engine)
+    provider = provider or build_ocr_provider(runtime_settings, provider_name=config.ocr_engine)
     try:
         document.processing_state = DocumentState.ocr_processing
         document.final_state = DocumentState.ocr_processing
@@ -950,8 +952,10 @@ def run_metadata_for_document(
         record_event(db, document, "metadata_skipped_active", "Metadata task skipped because another worker is active")
         db.commit()
         return document
+    runtime_settings = settings_with_model_setup(db)
     options = processing_options(
         document,
+        settings=runtime_settings,
         qwen_enabled=qwen_enabled,
         overwrite_manual_values=overwrite_manual_values,
         skip_metadata=skip_metadata,
@@ -1026,7 +1030,7 @@ def run_metadata_for_document(
         qwen_suggestion: dict[str, Any] | None = None
         qwen_enabled_for_run = qwen_metadata_enabled(options)
         if qwen_enabled_for_run:
-            qwen_provider = qwen_provider if qwen_provider is not None else build_qwen_provider()
+            qwen_provider = qwen_provider if qwen_provider is not None else build_qwen_provider(runtime_settings)
             record_event(db, document, "qwen_started", "Qwen metadata brain started")
             qwen_debug = qwen_generate_metadata_candidates(
                 db,
@@ -1160,7 +1164,12 @@ def run_metadata_for_document(
         document.metadata_state = StageState.done
         missing_required = missing_required_core_fields(document, merged)
         warnings = review_warnings(document, merged, sources, qwen_suggestion, deterministic)
-        if not missing_required and not warnings and document.review_state == ReviewState.needs_review:
+        if (
+            not missing_required
+            and not warnings
+            and document.review_state == ReviewState.needs_review
+            and not str(document.review_reason or "").startswith("Qwen metadata brain")
+        ):
             document.review_state = ReviewState.unreviewed
             document.review_reason = None
         document.processing_state = determine_next_processing_state(document, missing_required)
@@ -1230,7 +1239,8 @@ def run_full_process_for_document(
         db.commit()
         return document
 
-    options = processing_options(document)
+    runtime_settings = settings_with_model_setup(db)
+    options = processing_options(document, settings=runtime_settings)
     document.current_stage = "process"
     document.last_processing_heartbeat_at = datetime.now(timezone.utc)
     record_event(db, document, "process_started", "Full document processing started", metadata={"force": force, "processing_options": options})
@@ -1250,7 +1260,7 @@ def run_full_process_for_document(
     document = db.get(Document, document_id)
     if document is None:
         raise ValueError(f"Document disappeared during processing: {document_id}")
-    options = processing_options(document)
+    options = processing_options(document, settings=runtime_settings)
     if force or document.metadata_state not in {StageState.done, StageState.skipped}:
         if document.ocr_state not in {StageState.done, StageState.skipped}:
             record_event(db, document, "process_waiting_for_ocr", "Full processing stopped because OCR is not complete")
@@ -1265,7 +1275,7 @@ def run_full_process_for_document(
             document_id,
             force=force,
             qwen_provider=qwen_provider,
-            qwen_enabled=qwen_metadata_enabled(options),
+            qwen_enabled=(qwen_provider is not None or qwen_metadata_enabled(options)),
             overwrite_manual_values=bool(options.get("overwrite_manual_values")),
             skip_metadata=bool(options.get("skip_metadata")),
             task_id=task_id,

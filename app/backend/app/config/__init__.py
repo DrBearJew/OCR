@@ -126,17 +126,25 @@ class Settings(BaseSettings):
     def result_backend(self) -> str:
         return self.celery_result_backend or self.redis_url
 
+    def _model_name_from_config(self, value: str) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return text
+        if text.startswith("/") or text.lower().endswith(".gguf") or "\\" in text:
+            return Path(text).name
+        return text
+
     @property
     def glm_model_name(self) -> str:
-        return Path(self.glm_model_path).name
+        return self._model_name_from_config(self.glm_model_path)
 
     @property
     def qwen_model_name(self) -> str:
-        return Path(self.qwen_model_path).name
+        return self._model_name_from_config(self.qwen_model_path)
 
     @property
     def paddle_vl_model_name(self) -> str:
-        return Path(self.paddle_vl_model_path).name
+        return self._model_name_from_config(self.paddle_vl_model_path)
 
     @property
     def allowed_extensions_set(self) -> set[str]:

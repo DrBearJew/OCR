@@ -1,4 +1,4 @@
-import type { ActivityItem, AdminActionResult, Batch, BatchDetail, Collection, CollectionPageData, CollectionSummary, CustomFieldDefinition, DashboardSummary, Document, DocumentCustomFieldValue, DocumentEvent, DocumentPage, FailedReviewSummary, Folder, IngestionJob, IngestionSource, IntegrationSummary, JobInfo, PaperlessMetadata, ProcessingHook, ProcessingSummary, RecordRow, SavedView, SearchResult } from '../types'
+import type { ActivityItem, AdminActionResult, Batch, BatchDetail, Collection, CollectionPageData, CollectionSummary, CustomFieldDefinition, DashboardSummary, Document, DocumentCustomFieldValue, DocumentEvent, DocumentPage, FailedReviewSummary, Folder, IngestionJob, IngestionSource, IntegrationSummary, ModelEndpointTestResult, ModelSetup, JobInfo, PaperlessMetadata, ProcessingHook, ProcessingSummary, RecordRow, SavedView, SearchResult } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 const TOKEN_KEY = 'dokocr_token'
@@ -199,6 +199,10 @@ export const api = {
   jobs: () => request<JobInfo[]>('/api/admin/jobs'),
   failed: () => request<JobInfo[]>('/api/admin/failed'),
   integrations: () => request<IntegrationSummary>('/api/admin/integrations'),
+  modelSetup: () => request<ModelSetup>('/api/admin/model-setup'),
+  saveModelSetup: (payload: ModelSetup) => request<ModelSetup>('/api/admin/model-setup', { method: 'PATCH', body: JSON.stringify(payload) }),
+  testModelEndpoint: (payload: { base_url: string; model?: string; timeout_seconds?: number }) =>
+    request<ModelEndpointTestResult>('/api/admin/model-setup/test', { method: 'POST', body: JSON.stringify(payload) }),
   reconcile: () => request<AdminActionResult>('/api/admin/reconcile', { method: 'POST' }),
   retryFailed: () => request<AdminActionResult>('/api/admin/retry-failed', { method: 'POST' }),
   reextractCollection: (collectionName: string, force = false) =>

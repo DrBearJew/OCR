@@ -7640,3 +7640,20 @@ main,
     grid-template-columns: minmax(0, 1fr) !important;
   }
 }
+
+
+/* Admin model setup wizard */
+.runtime-model-setup-card {
+  border-color: rgba(45, 212, 191, 0.26);
+}
+.runtime-model-form {
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+}
+.runtime-check {
+  align-self: end;
+  min-height: 3.35rem;
+}
+.runtime-setup-actions {
+  margin-top: 0.9rem;
+  flex-wrap: wrap;
+}

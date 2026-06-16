@@ -481,6 +481,37 @@ class AdminActionResult(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
+class ModelSetupRead(BaseModel):
+    mode: str = "fake"
+    ocr_provider: str = "fake"
+    paddle_vl_base_url: str = ""
+    paddle_vl_model: str = "paddleocr-vl"
+    glm_base_url: str = ""
+    glm_model: str = "glm"
+    qwen_enabled: bool = False
+    qwen_base_url: str = ""
+    qwen_model: str = "qwen"
+    timeout_seconds: float = 120.0
+
+
+class ModelSetupWrite(ModelSetupRead):
+    pass
+
+
+class ModelEndpointTestPayload(BaseModel):
+    base_url: str
+    model: str = ""
+    timeout_seconds: float | None = None
+
+
+class ModelEndpointTestResult(BaseModel):
+    ok: bool
+    detail: str
+    available_models: list[str] = Field(default_factory=list)
+    base_url: str | None = None
+    model: str | None = None
+
+
 class FolderRead(BaseModel):
     id: uuid.UUID
     parent_id: uuid.UUID | None = None

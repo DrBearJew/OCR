@@ -18,6 +18,10 @@ from app.models import (
 )
 from app.models import ProcessingHook, StoragePathRule, Tag
 from app.schemas import (
+    ModelEndpointTestPayload,
+    ModelEndpointTestResult,
+    ModelSetupRead,
+    ModelSetupWrite,
     AdminActionResult,
     IngestionJobRead,
     IngestionSourceRead,
@@ -32,6 +36,7 @@ from app.services.collections import slugify
 from app.services.hooks import execute_hook
 from app.services.ingestion import retry_ingestion_job, scan_enabled_sources, scan_source
 from app.services.integrations import collect_integrations
+from app.services.model_setup import get_model_setup, save_model_setup, check_model_endpoint
 from app.services.reconciliation import reconcile_stuck_documents, reextract_collection, retry_failed_documents
 from app.services.storage_integrity import scan_storage_integrity
 
@@ -73,6 +78,21 @@ def failed_documents(db: Session = Depends(get_db)) -> list[JobInfo]:
 @router.get("/integrations")
 def integrations(db: Session = Depends(get_db)) -> dict:
     return collect_integrations(db)
+
+
+@router.get("/model-setup", response_model=ModelSetupRead)
+def read_model_setup(db: Session = Depends(get_db)) -> ModelSetupRead:
+    return ModelSetupRead(**get_model_setup(db))
+
+
+@router.patch("/model-setup", response_model=ModelSetupRead)
+def update_model_setup(payload: ModelSetupWrite, db: Session = Depends(get_db)) -> ModelSetupRead:
+    return ModelSetupRead(**save_model_setup(db, payload.model_dump()))
+
+
+@router.post("/model-setup/test", response_model=ModelEndpointTestResult)
+def test_model_setup_endpoint(payload: ModelEndpointTestPayload) -> ModelEndpointTestResult:
+    return ModelEndpointTestResult(**check_model_endpoint(payload.model_dump()))
 
 
 @router.post("/reconcile", response_model=AdminActionResult)
