@@ -461,7 +461,7 @@ function RecordSetupCard({ collectionName, setCollectionName, value, setValue, f
     ? `${value.sharedTitleBase || 'Telekom'}_B_10/24_90,74_Karte`
     : `${value.sharedTitleBase || 'Telekom'}_12345_12/10/2024_90,74`
   return (
-    <details open className="workflow-card shared-title-card record-setup-panel">
+    <details className="workflow-card shared-title-card record-setup-panel">
       <summary><span><ChevronDown size={16} /> {t('dashboard.recordSetup')}</span></summary>
       <p>{t('dashboard.recordSetupCopy')}</p>
       <div className="shared-title-controls">
@@ -508,7 +508,7 @@ function MetadataForm({ metadata, setMetadata, busy, selected, collectionName, s
   const { t } = useI18n()
   const set = (key: keyof MetadataFormState, value: string | string[]) => setMetadata({ ...metadata, [key]: value })
   return (
-    <details open className="workflow-card metadata-card metadata-collapsible-panel">
+    <details className="workflow-card metadata-card metadata-collapsible-panel">
       <summary><span><ChevronDown size={16} /> {t('dashboard.documentInformation')}</span></summary>
       <div className="metadata-grid">
         <FormField label={t('dashboard.recordCollection')} source={selected?.metadataSources.collection}><select value={collectionName} onChange={(event) => setCollectionName(event.target.value)}><option>Dokumente</option><option>Eingangsrechnung</option><option>Ausgangsrechnung</option><option>Belege</option></select></FormField>
