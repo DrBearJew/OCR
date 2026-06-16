@@ -77,18 +77,11 @@ Each document can keep its original file, preview, OCR text, extracted metadata,
 
 ## 🧭 Pipeline
 
-```mermaid
-flowchart LR
-  A[Upload or consume folder] --> B[Validate and store]
-  B --> C[Preview and thumbnail]
-  C --> D[OCR]
-  D --> E[Metadata and title extraction]
-  E --> F{Needs review?}
-  F -- yes --> G[Review queue]
-  F -- no --> H[Complete record]
-  G --> H
-  H --> I[Search index]
-```
+<p align="center">
+  <img src="docs/assets/dok-ocr-pipeline-hero.png" alt="Dok OCR upload to OCR to metadata to review to search pipeline" width="100%"/>
+</p>
+
+**Upload → OCR → Metadata → Review → Search**
 
 The pipeline can run automatically after upload. Manual controls remain available for retrying OCR, forcing OCR, re-extracting metadata, locking fields, and rebuilding search.
 
