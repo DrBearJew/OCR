@@ -380,14 +380,27 @@ export default function DashboardPage({ onOpenRecord, onOpenDocument }: Dashboar
         </div>
       </header>
       {message && <p className={message.toLowerCase().includes('failed') || message.toLowerCase().includes(t('dashboard.message.addFiles').toLowerCase().slice(0, 8)) ? 'error' : 'success-message'}>{message}</p>}
-      <form className="upload-dashboard-grid" onSubmit={submit}>
-        <section className="workflow-main">
+      <form className="upload-dashboard-grid upload-redesign-grid" onSubmit={submit}>
+        <aside className="upload-queue-rail">
           <UploadDropzone inputRef={inputRef} files={files} busy={busy} onFiles={addFiles} />
-          <RecordSetupCard collectionName={collectionName} setCollectionName={setCollectionName} value={sharedTitle} setValue={setSharedTitle} folderPath={folderPath} setFolderPath={setFolderPath} />
-          <section className="workflow-two-col">
-            <MetadataForm metadata={metadata} setMetadata={updateSelectedMetadata} busy={busy} selected={selected} collectionName={collectionName} setCollectionName={setCollectionName} />
-            <FilePreviewCard selected={selected} files={files} selectedId={selectedId} setSelectedId={setSelectedId} onAddMore={() => inputRef.current?.click()} />
+        </aside>
+
+        <section className="upload-review-workspace">
+          <section className="workflow-card review-combo-card">
+            <div className="card-title-row"><h2>{t('dashboard.previewAndOcr')}</h2><span>{selected?.filename || t('dashboard.noFileSelected')}</span></div>
+            <div className="review-combo-grid">
+              <FilePreviewCard selected={selected} files={files} selectedId={selectedId} setSelectedId={setSelectedId} onAddMore={() => inputRef.current?.click()} />
+              <OCRTextPreview selected={selected} />
+            </div>
           </section>
+          <RecordSetupCard collectionName={collectionName} setCollectionName={setCollectionName} value={sharedTitle} setValue={setSharedTitle} folderPath={folderPath} setFolderPath={setFolderPath} />
+        </section>
+
+        <aside className="metadata-redesign-rail">
+          <MetadataForm metadata={metadata} setMetadata={updateSelectedMetadata} busy={busy} selected={selected} collectionName={collectionName} setCollectionName={setCollectionName} />
+        </aside>
+
+        <section className="workflow-bottom-bar">
           <ProcessingOptionsPanel options={processingOptions} setOptions={setProcessingOptions} qwenStatus={qwenStatus} />
           <NextActionsBar
             disabled={Boolean(actionBusy) || busy}
@@ -399,12 +412,6 @@ export default function DashboardPage({ onOpenRecord, onOpenDocument }: Dashboar
             onReview={() => void runSelected('review')}
           />
         </section>
-        <aside className="workflow-inspector">
-          <OCRStatusCard selected={selected} onRunAgain={() => void runSelected('ocr')} />
-          <MetadataExtractionCard selected={selected} qwenStatus={qwenStatus} qwenEnabled={(processingOptions.qwenAutofill || processingOptions.qwenEnrichment) && qwenAvailable} onRunAgain={() => void runSelected('metadata')} />
-          <ExtractedMetadataPreview metadata={metadata} sources={selected?.metadataSources || {}} />
-          <OCRTextPreview selected={selected} />
-        </aside>
       </form>
     </main>
   )
@@ -535,11 +542,12 @@ function ProcessingOptionsPanel({ options, setOptions, qwenStatus }: { options: 
   const set = (patch: Partial<ProcessingOptionsState>) => setOptions({ ...options, ...patch })
   const qwenAvailable = qwenStatus === 'available'
   return (
-    <section className="workflow-card processing-options-card">
-      <div className="card-title-row">
-        <h2>{t('dashboard.processingOptions')}</h2>
+    <details className="workflow-card processing-options-card collapsed-ocr-options">
+      <summary>
+        <span><ChevronDown size={17} /> {t('dashboard.processingOptions')}</span>
+        <small>{t('dashboard.processingOptionsCollapsed')}</small>
         {qwenStatus !== 'available' && <span className="option-warning">{qwenStatus === 'checking' ? t('dashboard.checkingQwen') : t('dashboard.qwenUnavailable')}</span>}
-      </div>
+      </summary>
       <p>{t('dashboard.qwenProcessingCopy')}</p>
       <div className="processing-options-grid">
         <Toggle label={t('dashboard.autoProcess')} checked={options.autoProcess} onChange={(checked) => set({ autoProcess: checked })} />
@@ -555,7 +563,7 @@ function ProcessingOptionsPanel({ options, setOptions, qwenStatus }: { options: 
         <Toggle label={t('dashboard.extractTables')} checked={options.extractTables} onChange={(checked) => set({ extractTables: checked })} />
         <Toggle label={t('dashboard.collectionRules')} checked={options.collectionRules} onChange={(checked) => set({ collectionRules: checked })} />
       </div>
-    </section>
+    </details>
   )
 }
 

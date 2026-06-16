@@ -636,5 +636,8 @@ export const en: Record<string, string> = {
   'status.duplicate': 'Duplicate',
   'admin.internalGatewayHelp': 'Recommended local setup: use the internal model gateway. It hides the technical proxy service and handles OCR/metadata routing and output cleanup automatically.',
   'admin.useInternalGateway': 'Use internal gateway',
-  'admin.detailInternalGatewayReachable': 'Internal model gateway reachable'
+  'admin.detailInternalGatewayReachable': 'Internal model gateway reachable',
+  'dashboard.previewAndOcr': 'Preview & OCR Markdown',
+  'dashboard.noFileSelected': 'No file selected',
+  'dashboard.processingOptionsCollapsed': 'OCR, Qwen, tables, language and collection rules'
 }
