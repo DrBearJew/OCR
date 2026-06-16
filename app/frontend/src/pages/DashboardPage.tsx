@@ -814,11 +814,12 @@ function ExtractedMetadataPreview({ metadata, sources }: { metadata: MetadataFor
 
 function OCRTextPreview({ selected }: { selected?: UploadDraftFile }) {
   const { t } = useI18n()
+  const copyOcrText = () => navigator.clipboard?.writeText(selected?.ocrSnippet || '')
   return (
     <details className="workflow-card inspector-card collapsed-side-panel ocr-side-panel">
       <summary><span><ChevronDown size={16} /> {t('dashboard.ocrTextPreview')}</span><small>{t('fields.confidence')}: {selected?.confidence || 0}%</small></summary>
       <pre className="ocr-preview">{selected?.ocrSnippet || ''}</pre>
-      <div className="ocr-footer"><strong>{t('fields.confidence')}: {selected?.confidence || 0}%</strong><button type="button" onClick={() => navigator.clipboard?.writeText(selected?.ocrSnippet || '')}><Copy size={16} /> {t('common.copyText')}</button></div>
+      <div className="ocr-footer"><strong>{t('fields.confidence')}: {selected?.confidence || 0}%</strong><button type="button" className="ocr-copy-button" onClick={copyOcrText}><Copy size={16} /> {t('common.copyText')}</button></div>
     </details>
   )
 }
