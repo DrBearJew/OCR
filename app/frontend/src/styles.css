@@ -8942,3 +8942,51 @@ main,
   margin-left: 0.85rem !important;
   margin-right: 0.85rem !important;
 }
+
+
+/* Upload right rail record setup: reserve full open height before following panels. */
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .record-setup-panel {
+  display: block !important;
+  grid-column: 1 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: auto !important;
+  overflow: visible !important;
+  contain: none !important;
+  position: relative !important;
+  z-index: 0 !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .record-setup-panel[open] {
+  min-height: 34rem !important;
+  padding-bottom: 0.95rem !important;
+  margin-bottom: 0.75rem !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .record-setup-panel > p,
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .record-setup-panel .shared-title-controls,
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .record-setup-panel .shared-title-preview,
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .record-setup-panel .shared-title-hint {
+  position: static !important;
+  display: grid !important;
+  width: auto !important;
+  max-width: none !important;
+  margin-left: 0.85rem !important;
+  margin-right: 0.85rem !important;
+  box-sizing: border-box !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .record-setup-panel .shared-title-controls {
+  grid-template-columns: 1fr !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .record-setup-panel .shared-title-preview {
+  margin-top: 0.75rem !important;
+  margin-bottom: 0 !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .metadata-collapsible-panel {
+  position: relative !important;
+  z-index: 0 !important;
+  clear: both !important;
+}
