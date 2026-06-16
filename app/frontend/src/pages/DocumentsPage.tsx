@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Download, FileText, Maximize2, Minus, Plus, RefreshCw, Search, Trash2, UploadCloud } from 'lucide-react'
-import type { MouseEvent, ReactNode } from 'react'
+import type { KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import { api, downloadUrl, previewUrl, thumbnailUrl } from '../api/client'
 import SavedViewsBar from '../components/SavedViewsBar'
 import StatusBadge from '../components/StatusBadge'
@@ -198,6 +198,25 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
     }
   }
 
+  function isMobileDocumentsViewport() {
+    return typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches
+  }
+
+  function handleDocumentRowClick(document: Document) {
+    setSelectedId(document.id)
+    if (!document.id.startsWith('demo-') && isMobileDocumentsViewport()) {
+      onOpenDocument(document.id)
+    }
+  }
+
+  function handleDocumentRowKeyDown(event: KeyboardEvent<HTMLDivElement>, document: Document) {
+    const target = event.target as HTMLElement
+    if (target.closest('input, button, a, select, textarea')) return
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    handleDocumentRowClick(document)
+  }
+
   return (
     <main className="documents-console">
       <header className="page-header console-header">
@@ -256,8 +275,16 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
               <span>{t('documents.ocrConfidenceShort')}</span>
             </div>
             {documents.map((document) => (
-              <button key={document.id} className={`doc-table-row ${document.id === selected?.id ? 'selected' : ''}`} onClick={() => setSelectedId(document.id)}>
-                <input type="checkbox" checked={selectedIds.has(document.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => {
+              <div
+                key={document.id}
+                role="button"
+                tabIndex={0}
+                aria-label={`${t('common.open')} ${document.manual_title_override || document.extracted_title || document.original_filename}`}
+                className={`doc-table-row ${document.id === selected?.id ? 'selected' : ''}`}
+                onClick={() => handleDocumentRowClick(document)}
+                onKeyDown={(event) => handleDocumentRowKeyDown(event, document)}
+              >
+                <input type="checkbox" checked={selectedIds.has(document.id)} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()} onChange={(event) => {
                   const next = new Set(selectedIds)
                   if (event.target.checked) next.add(document.id)
                   else next.delete(document.id)
@@ -269,7 +296,7 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
                 <span>{document.extracted_date || new Date(document.created_at).toLocaleDateString()}</span>
                 <span>{document.extracted_amount || 'NA'}</span>
                 <span className={document.processing_state === 'failed' ? 'ocr-low' : 'ocr-good'}>{document.processing_state === 'failed' ? '-' : `${document.id.startsWith('demo-') ? '98' : '95'}%`}</span>
-              </button>
+              </div>
             ))}
           </div>
         </section>
