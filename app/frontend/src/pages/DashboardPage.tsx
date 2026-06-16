@@ -624,6 +624,23 @@ function ProcessingOptionsPanel({ options, setOptions, qwenStatus }: { options: 
 
 function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore }: { selected?: UploadDraftFile; files: UploadDraftFile[]; selectedId: string; setSelectedId: (id: string) => void; onAddMore: () => void }) {
   const { t } = useI18n()
+  const [zoom, setZoom] = useState(100)
+  const [rotation, setRotation] = useState(0)
+  const [showOcr, setShowOcr] = useState(true)
+  const zoomLevels = [75, 100, 125, 150, 200]
+  const cycleZoom = () => setZoom((value) => zoomLevels[(zoomLevels.indexOf(value) + 1) % zoomLevels.length] || 100)
+  const preview = selected?.serverPreviewUrl && selected.kind === 'pdf' ? (
+    <iframe src={selected.serverPreviewUrl} title={selected.filename} />
+  ) : selected?.serverPreviewUrl && selected.kind === 'image' ? (
+    <img src={selected.serverPreviewUrl} alt={selected.filename} />
+  ) : selected?.previewUrl ? (
+    <img src={selected.previewUrl} alt={selected.filename} />
+  ) : selected?.kind === 'pdf' ? (
+    <PdfMockup />
+  ) : (
+    <InvoiceMockup />
+  )
+
   return (
     <section className="file-preview-card document-preview-card">
       <div className="document-preview-heading">
@@ -632,26 +649,19 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
       </div>
       <div className="document-preview-toolbar">
         <span><Maximize2 size={16} /> Zoom</span>
-        <button type="button">100% <ChevronDown size={14} /></button>
+        <button type="button" onClick={cycleZoom} aria-label="Zoom ändern">{zoom}% <ChevronDown size={14} /></button>
         <i />
-        <button type="button"><RefreshCw size={16} /> {t('dashboard.rotate')}</button>
+        <button type="button" onClick={() => setRotation((value) => (value + 90) % 360)}><RefreshCw size={16} /> {t('dashboard.rotate')}</button>
         <i />
-        <label>{t('dashboard.showOcr')}<input type="checkbox" defaultChecked /></label>
+        <label>{t('dashboard.showOcr')}<input type="checkbox" checked={showOcr} onChange={(event) => setShowOcr(event.target.checked)} /></label>
       </div>
       <div className="document-preview-layout">
         <AttachmentStrip files={files} selectedId={selectedId} onSelect={setSelectedId} onAddMore={onAddMore} />
-        <div className="document-preview-surface">
-          {selected?.serverPreviewUrl && selected.kind === 'pdf' ? (
-            <iframe src={selected.serverPreviewUrl} title={selected.filename} />
-          ) : selected?.serverPreviewUrl && selected.kind === 'image' ? (
-            <img src={selected.serverPreviewUrl} alt={selected.filename} />
-          ) : selected?.previewUrl ? (
-            <img src={selected.previewUrl} alt={selected.filename} />
-          ) : selected?.kind === 'pdf' ? (
-            <PdfMockup />
-          ) : (
-            <InvoiceMockup />
-          )}
+        <div className={`document-preview-surface ${showOcr ? 'show-ocr-overlay' : ''}`}>
+          <div className="document-preview-stage" style={{ transform: `scale(${zoom / 100}) rotate(${rotation}deg)` }}>
+            {preview}
+          </div>
+          {showOcr && selected?.ocrSnippet && <pre className="document-preview-ocr-overlay">{selected.ocrSnippet}</pre>}
         </div>
       </div>
     </section>
