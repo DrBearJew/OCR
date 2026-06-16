@@ -14,6 +14,8 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [busyAction, setBusyAction] = useState<string | null>(null)
   const [selectedDetail, setSelectedDetail] = useState<Document | null>(null)
   const [selectedEvents, setSelectedEvents] = useState<DocumentEvent[]>([])
   const [selectedPages, setSelectedPages] = useState<DocumentPage[]>([])
@@ -29,6 +31,33 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
       setError(t('documents.demoWarning'))
       setDocuments(demoDocuments)
       setSelectedId((current) => current || demoDocuments[0].id)
+    }
+  }
+
+  async function loadDetail(documentId: string) {
+    if (!documentId || documentId.startsWith('demo-')) {
+      setSelectedDetail(null)
+      setSelectedEvents([])
+      setSelectedPages([])
+      setDetailLoading(false)
+      return
+    }
+    setDetailLoading(true)
+    try {
+      const [documentRow, eventRows, pageRows] = await Promise.all([
+        api.document(documentId),
+        api.documentEvents(documentId),
+        api.documentPages(documentId)
+      ])
+      setSelectedDetail(documentRow)
+      setSelectedEvents(eventRows)
+      setSelectedPages(pageRows)
+    } catch {
+      setSelectedDetail(null)
+      setSelectedEvents([])
+      setSelectedPages([])
+    } finally {
+      setDetailLoading(false)
     }
   }
 
@@ -87,9 +116,38 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
   async function bulk(action: string, extra: Record<string, unknown> = {}) {
     const ids = Array.from(selectedIds).filter((id) => !id.startsWith('demo-'))
     if (!ids.length) return
-    await api.bulkDocuments({ action, document_ids: ids, ...extra })
-    setSelectedIds(new Set())
-    await load()
+    setError('')
+    setMessage('')
+    setBusyAction(action)
+    try {
+      await api.bulkDocuments({ action, document_ids: ids, ...extra })
+      setSelectedIds(new Set())
+      await load()
+      if (selectedId && ids.includes(selectedId)) await loadDetail(selectedId)
+      setMessage(action === 'set_review_state' ? t('activity.message.reviewUpdated') : t('processing.queued'))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Bulk action failed')
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  async function markReviewed(document: Document) {
+    if (document.id.startsWith('demo-')) return
+    setError('')
+    setMessage('')
+    setBusyAction('mark_reviewed')
+    try {
+      const updated = await api.patchDocument(document.id, { review_state: 'reviewed', review_reason: null })
+      setDocuments((rows) => rows.map((row) => row.id === updated.id ? updated : row))
+      setSelectedDetail(updated)
+      await loadDetail(updated.id)
+      setMessage(t('activity.message.reviewUpdated'))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Mark reviewed failed')
+    } finally {
+      setBusyAction(null)
+    }
   }
 
   async function deleteSelectedDocuments() {
@@ -138,6 +196,7 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
         </div>
       </header>
       {error && <p className="warning">{error}</p>}
+      {message && <p className="success-message">{message}</p>}
       <section className="doc-kpi-grid">
         <KpiCard icon={<FileText size={25} />} label={t('documents.kpiTotal')} value={stats.total} detail={t('documents.kpiTotalDetail')} tone="green" />
         <KpiCard icon={<RefreshCw size={25} />} label={t('documents.kpiProcessing')} value={stats.processing} detail={t('documents.kpiProcessingDetail')} tone="blue" />
@@ -165,11 +224,11 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
           </div>
           <div className="bulk-bar console-bulk">
             <span>{selectedIds.size} {t('documents.selected')}</span>
-            <button onClick={() => void bulk('retry')}>{t('common.retryOcr')}</button>
-            <button onClick={() => void bulk('reextract')}>{t('common.reextract')}</button>
-            <button onClick={() => void bulk('set_review_state', { review_state: 'needs_review', review_reason: 'Bulk marked for review' })}>{t('common.needsReview')}</button>
-            <button onClick={() => void bulk('set_review_state', { review_state: 'reviewed' })}>{t('common.reviewed')}</button>
-            <button className="danger-button" onClick={() => void deleteSelectedDocuments()}><Trash2 size={16} /> {t('documents.deleteSelected')}</button>
+            <button disabled={Boolean(busyAction)} onClick={() => void bulk('retry')}>{t('common.retryOcr')}</button>
+            <button disabled={Boolean(busyAction)} onClick={() => void bulk('reextract')}>{t('common.reextract')}</button>
+            <button disabled={Boolean(busyAction)} onClick={() => void bulk('set_review_state', { review_state: 'needs_review', review_reason: 'Bulk marked for review' })}>{t('common.needsReview')}</button>
+            <button disabled={Boolean(busyAction)} onClick={() => void bulk('set_review_state', { review_state: 'reviewed', review_reason: null })}>{t('common.reviewed')}</button>
+            <button className="danger-button" disabled={Boolean(busyAction)} onClick={() => void deleteSelectedDocuments()}><Trash2 size={16} /> {t('documents.deleteSelected')}</button>
           </div>
           <div className="document-console-table">
             <div className="doc-table-head">
@@ -200,7 +259,7 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
           </div>
         </section>
         {selected && <DocumentPreviewPanel document={selected} pages={selectedPages} loading={detailLoading} onOpenDocument={onOpenDocument} />}
-        {selected && <DocumentInspector document={selected} events={selectedEvents} loading={detailLoading} onOpenDocument={onOpenDocument} onOpenRecord={onOpenRecord} onDelete={() => void deleteDocument(selected)} />}
+        {selected && <DocumentInspector document={selected} events={selectedEvents} loading={detailLoading} busy={Boolean(busyAction)} onOpenDocument={onOpenDocument} onOpenRecord={onOpenRecord} onMarkReviewed={() => void markReviewed(selected)} onDelete={() => void deleteDocument(selected)} />}
       </section>
     </main>
   )
@@ -358,7 +417,7 @@ function LayoutPreview({ pages, loading }: { pages: DocumentPage[]; loading: boo
   )
 }
 
-function DocumentInspector({ document, events, loading, onOpenDocument, onOpenRecord, onDelete }: { document: Document; events: DocumentEvent[]; loading: boolean; onOpenDocument: (id: string) => void; onOpenRecord: (id: string) => void; onDelete: () => void }) {
+function DocumentInspector({ document, events, loading, busy, onOpenDocument, onOpenRecord, onMarkReviewed, onDelete }: { document: Document; events: DocumentEvent[]; loading: boolean; busy: boolean; onOpenDocument: (id: string) => void; onOpenRecord: (id: string) => void; onMarkReviewed: () => void; onDelete: () => void }) {
   const { t } = useI18n()
   const [activeTab, setActiveTab] = useState<InspectorTab>('details')
 
@@ -379,7 +438,7 @@ function DocumentInspector({ document, events, loading, onOpenDocument, onOpenRe
       <div className="detail-actions">
         <button type="button" onClick={() => onOpenDocument(document.id)}>{t('common.open')}</button>
         {document.record_id && <button type="button" onClick={() => onOpenRecord(document.record_id!)}>{t('common.record')}</button>}
-        <button type="button" className="primary">{t('documents.markReviewed')}</button>
+        <button type="button" className="primary" disabled={busy || document.id.startsWith('demo-') || document.review_state === 'reviewed'} onClick={onMarkReviewed}>{t('documents.markReviewed')}</button>
         <button type="button" className="danger-button" disabled={document.id.startsWith('demo-')} onClick={onDelete}><Trash2 size={16} /> {t('common.delete')}</button>
       </div>
     </aside>

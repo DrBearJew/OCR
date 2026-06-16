@@ -16,7 +16,8 @@ export default function DocumentDetailPage({ id }: { id: string }) {
   const [preview, setPreview] = useState<Record<string, unknown> | null>(null)
   const [form, setForm] = useState<Partial<Document>>({})
   const [error, setError] = useState('')
-  const [busy, setBusy] = useState<'process' | 'delete' | null>(null)
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState<string | null>(null)
   const [previewZoom, setPreviewZoom] = useState(100)
 
   async function load() {
@@ -53,20 +54,44 @@ export default function DocumentDetailPage({ id }: { id: string }) {
       review_state: form.review_state || 'unreviewed',
       review_reason: form.review_reason || null
     }
-    setDocument(await api.patchDocument(document.id, payload))
+    setError('')
+    setMessage('')
+    try {
+      setDocument(await api.patchDocument(document.id, payload))
+      setMessage(t('activity.message.reviewUpdated'))
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Save failed')
+    }
   }
 
   async function retry() {
     if (!document) return
-    setDocument(await api.retryDocument(document.id))
+    setError('')
+    setMessage('')
+    setBusy('retry')
+    try {
+      setDocument(await api.retryDocument(document.id))
+      setMessage(t('processing.queued'))
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Retry failed')
+    } finally {
+      setBusy(null)
+    }
   }
 
   async function processDocument() {
     if (!document) return
+    setError('')
+    setMessage('')
     setBusy('process')
     try {
       setDocument(await api.processDocument(document.id))
+      setMessage(t('processing.queued'))
       await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Process failed')
     } finally {
       setBusy(null)
     }
@@ -86,32 +111,81 @@ export default function DocumentDetailPage({ id }: { id: string }) {
 
   async function reextract(force: boolean) {
     if (!document) return
-    setDocument(await api.reextractDocument(document.id, force))
-    await load()
+    setError('')
+    setMessage('')
+    setBusy(force ? 'reextract_force' : 'reextract')
+    try {
+      setDocument(await api.reextractDocument(document.id, force))
+      setMessage(t('processing.queued'))
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Re-extract failed')
+    } finally {
+      setBusy(null)
+    }
   }
 
   async function runOcr(mode: 'skip' | 'redo' | 'force') {
     if (!document) return
-    setDocument(await api.runDocumentOcr(document.id, mode))
-    await load()
+    setError('')
+    setMessage('')
+    setBusy(`ocr_${mode}`)
+    try {
+      setDocument(await api.runDocumentOcr(document.id, mode))
+      setMessage(t('processing.queued'))
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'OCR action failed')
+    } finally {
+      setBusy(null)
+    }
   }
 
   async function previewExtraction() {
     if (!document) return
-    setPreview(await api.extractionPreview(document.id))
+    setError('')
+    setMessage('')
+    setBusy('preview_extraction')
+    try {
+      setPreview(await api.extractionPreview(document.id))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Preview extraction failed')
+    } finally {
+      setBusy(null)
+    }
   }
 
   async function applyPreview() {
     if (!document) return
-    setDocument(await api.applyExtractionPreview(document.id))
-    setPreview(null)
-    await load()
+    setError('')
+    setMessage('')
+    setBusy('apply_preview')
+    try {
+      setDocument(await api.applyExtractionPreview(document.id))
+      setPreview(null)
+      setMessage(t('activity.message.reviewUpdated'))
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Apply preview failed')
+    } finally {
+      setBusy(null)
+    }
   }
 
   async function reindex() {
     if (!document) return
-    setDocument(await api.reindexDocument(document.id))
-    await load()
+    setError('')
+    setMessage('')
+    setBusy('reindex')
+    try {
+      setDocument(await api.reindexDocument(document.id))
+      setMessage(t('activity.message.ocrSettingsUpdated'))
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Reindex failed')
+    } finally {
+      setBusy(null)
+    }
   }
 
   if (!document) return <main className="document-detail-console">{error || t('documentDetail.loading')}</main>
@@ -140,6 +214,7 @@ export default function DocumentDetailPage({ id }: { id: string }) {
         </div>
       </header>
       {error && <p className="error">{error}</p>}
+      {message && <p className="success-message">{message}</p>}
       {document.error_message && <p className="error">{document.error_message}</p>}
       {document.duplicate_of_document_id && <p className="warning">{t('documentDetail.duplicateOf')} {document.duplicate_of_document_id}; {t('documentDetail.duplicateLinked')}</p>}
 
@@ -187,14 +262,14 @@ export default function DocumentDetailPage({ id }: { id: string }) {
             <details className="advanced-actions inline-advanced">
               <summary>{t('documentDetail.advancedActions')}</summary>
               <div>
-                <button type="button" onClick={retry}><RotateCcw size={18} /> {t('common.retryOcr')}</button>
-                <button type="button" onClick={() => void runOcr('skip')}>{t('documentDetail.ocrSkip')}</button>
-                <button type="button" onClick={() => void runOcr('redo')}>{t('documentDetail.ocrRedo')}</button>
-                <button type="button" onClick={() => void runOcr('force')}>{t('documentDetail.ocrForce')}</button>
-                <button type="button" onClick={() => void reextract(false)}>{t('common.reextract')}</button>
-                <button type="button" onClick={() => void reextract(true)}>{t('documentDetail.forceReextract')}</button>
-                <button type="button" onClick={() => void previewExtraction()}>{t('documentDetail.previewExtraction')}</button>
-                <button type="button" onClick={() => void reindex()}>{t('documentDetail.reindex')}</button>
+                <button type="button" disabled={Boolean(busy)} onClick={() => void retry()}><RotateCcw size={18} /> {t('common.retryOcr')}</button>
+                <button type="button" disabled={Boolean(busy)} onClick={() => void runOcr('skip')}>{t('documentDetail.ocrSkip')}</button>
+                <button type="button" disabled={Boolean(busy)} onClick={() => void runOcr('redo')}>{t('documentDetail.ocrRedo')}</button>
+                <button type="button" disabled={Boolean(busy)} onClick={() => void runOcr('force')}>{t('documentDetail.ocrForce')}</button>
+                <button type="button" disabled={Boolean(busy)} onClick={() => void reextract(false)}>{t('common.reextract')}</button>
+                <button type="button" disabled={Boolean(busy)} onClick={() => void reextract(true)}>{t('documentDetail.forceReextract')}</button>
+                <button type="button" disabled={Boolean(busy)} onClick={() => void previewExtraction()}>{t('documentDetail.previewExtraction')}</button>
+                <button type="button" disabled={Boolean(busy)} onClick={() => void reindex()}>{t('documentDetail.reindex')}</button>
               </div>
             </details>
           </div>
