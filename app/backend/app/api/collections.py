@@ -3,12 +3,12 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import require_admin
 from app.db import get_db
-from app.models import Collection, CustomFieldDefinition
+from app.models import Collection, CustomFieldDefinition, Document, Record
 from app.schemas import (
     CollectionCreate,
     CollectionRead,
@@ -16,7 +16,7 @@ from app.schemas import (
     CustomFieldDefinitionRead,
     CustomFieldDefinitionWrite,
 )
-from app.services.collections import ensure_collection, seed_default_collections, slugify
+from app.services.collections import DEFAULT_COLLECTIONS, ensure_collection, seed_default_collections, slugify
 
 
 router = APIRouter(prefix="/api/collections", tags=["collections"], dependencies=[Depends(require_admin)])
@@ -47,6 +47,36 @@ def create_collection(payload: CollectionCreate, db: Session = Depends(get_db)) 
     db.commit()
     db.refresh(collection)
     return CollectionRead.model_validate(collection)
+
+
+@router.delete("/{collection_id}", response_model=CollectionRead)
+def delete_collection(collection_id: uuid.UUID, db: Session = Depends(get_db)) -> CollectionRead:
+    collection = db.get(Collection, collection_id)
+    if collection is None:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    if collection.name in DEFAULT_COLLECTIONS:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Default schemas cannot be deleted")
+    record_count = db.scalar(
+        select(func.count())
+        .select_from(Record)
+        .where(Record.collection_id == collection.id)
+        .where(Record.deleted_at.is_(None))
+    ) or 0
+    document_count = db.scalar(
+        select(func.count())
+        .select_from(Document)
+        .where(Document.collection_name == collection.name)
+        .where(Document.deleted_at.is_(None))
+    ) or 0
+    if record_count or document_count:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Only unused schemas can be deleted; found {record_count} records and {document_count} documents",
+        )
+    deleted = CollectionRead.model_validate(collection)
+    db.delete(collection)
+    db.commit()
+    return deleted
 
 
 @router.patch("/{collection_id}", response_model=CollectionRead)

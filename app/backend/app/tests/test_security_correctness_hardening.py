@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.collections import create_collection, update_collection
+from app.api.collections import create_collection, delete_collection, update_collection
 from app.api.documents import patch_document
 from app.api.folders import delete_folder, folder_contents, update_folder
 from app.api.records import patch_record
@@ -174,6 +174,35 @@ def test_folder_contents_are_paginated_and_filterable(db_session: Session, tmp_p
     record_page = folder_contents(kind="records", scope="unfiled", q="Record", db=db_session)
     assert record_page.total_estimate >= 1
     assert all(item.kind == "record" for item in record_page.items)
+
+
+def test_delete_collection_only_allows_unused_non_default_schema(db_session: Session, tmp_path: Path) -> None:
+    unused = ensure_collection(db_session, "Unused Schema")
+    db_session.commit()
+    deleted = delete_collection(unused.id, db_session)
+    assert deleted.id == unused.id
+    assert db_session.get(Collection, unused.id) is None
+
+    default = ensure_collection(db_session, "Belege")
+    db_session.commit()
+    try:
+        delete_collection(default.id, db_session)
+    except HTTPException as exc:
+        assert exc.status_code == 409
+    else:  # pragma: no cover
+        raise AssertionError("default schema delete should be blocked")
+
+    used = ensure_collection(db_session, "Used Schema")
+    db_session.commit()
+    doc = make_doc(db_session, tmp_path, "used", collection_name="Used Schema")
+    try:
+        delete_collection(used.id, db_session)
+    except HTTPException as exc:
+        assert exc.status_code == 409
+    else:  # pragma: no cover
+        raise AssertionError("used schema delete should be blocked")
+    assert db_session.get(Collection, used.id) is not None
+    assert doc.deleted_at is None
 
 
 def test_delete_folder_can_soft_delete_contained_documents(db_session: Session, tmp_path: Path) -> None:

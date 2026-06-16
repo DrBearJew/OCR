@@ -63,6 +63,8 @@ const checks = [
   ['Collections page calls createCollection API', collectionsPage, 'api.createCollection'],
   ['Schemas page exposes create collection action', schemaPage, 'collections.create'],
   ['Schemas page calls createCollection API', schemaPage, 'api.createCollection'],
+  ['Schemas page calls deleteCollection API', `${schemaPage}\n${client}`, 'api.deleteCollection'],
+  ['Schemas page exposes schema delete button', schemaPage, 'schema-delete-button'],
   ['Schemas page has dark scoped page class', schemaPage, 'className="schema-page"'],
   ['Admin page has dark scoped page class', adminPage, 'className="admin-page admin-console"'],
   ['Processing page has dark scoped page class', processingPage, 'className="processing-page"'],

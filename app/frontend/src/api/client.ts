@@ -101,6 +101,7 @@ export const api = {
   collections: () => request<Collection[]>('/api/collections'),
   createCollection: (payload: Partial<Collection>) => request<Collection>('/api/collections', { method: 'POST', body: JSON.stringify(payload) }),
   patchCollection: (id: string, payload: Partial<Collection>) => request<Collection>(`/api/collections/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteCollection: (id: string) => request<Collection>(`/api/collections/${id}`, { method: 'DELETE' }),
   dashboard: () => request<DashboardSummary>('/api/dashboard'),
   activity: (params: Record<string, string> = {}) => request<ActivityItem[]>(`/api/activity?${new URLSearchParams(params).toString()}`),
   processing: () => request<ProcessingSummary>('/api/processing'),

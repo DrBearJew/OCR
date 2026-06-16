@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { Plus, RefreshCw } from 'lucide-react'
+import { Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { api } from '../api/client'
 import type { Collection, CustomFieldDefinition, CustomFieldType, PaperlessMetadata } from '../types'
 import { useI18n } from '../i18n'
@@ -23,6 +23,7 @@ export default function SchemaPage() {
   const [metadataTemplate, setMetadataTemplate] = useState('{collection}/{year}')
   const [collectionForm, setCollectionForm] = useState({ name: '', slug: '', icon: '', color: '#22c55e' })
   const [error, setError] = useState('')
+  const [busyDelete, setBusyDelete] = useState('')
   const collectionNameById = useMemo(() => new Map(collections.map((item) => [item.id, item.name])), [collections])
 
   async function load() {
@@ -86,6 +87,24 @@ export default function SchemaPage() {
     }
   }
 
+  async function deleteSchema(collection: Collection) {
+    if (!confirm(t('schemas.deleteConfirm', 'Delete unused schema "{name}"? This also removes its fields and schema-only metadata.').replace('{name}', collection.name))) return
+    setError('')
+    setBusyDelete(collection.id)
+    try {
+      await api.deleteCollection(collection.id)
+      const rows = await api.collections()
+      setCollections(rows)
+      const nextId = selected === collection.id ? rows[0]?.id || '' : selected
+      setSelected(nextId)
+      setFields(nextId ? await api.customFields(nextId) : [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('schemas.deleteError', 'Could not delete schema. Only unused custom schemas can be deleted.'))
+    } finally {
+      setBusyDelete('')
+    }
+  }
+
   async function addMetadata(event: FormEvent) {
     event.preventDefault()
     if (!metadataName.trim()) return
@@ -119,10 +138,13 @@ export default function SchemaPage() {
         <aside className="workflow-card schema-collections">
           <h2>{t('collections.title')}</h2>
           {collections.map((collection) => (
-            <button key={collection.id} className={selected === collection.id ? 'active' : ''} onClick={() => setSelected(collection.id)}>
-              <strong>{collection.name}</strong>
-              <span>{collection.slug}</span>
-            </button>
+            <div className="schema-collection-row" key={collection.id}>
+              <button type="button" className={selected === collection.id ? 'active' : ''} onClick={() => setSelected(collection.id)}>
+                <strong>{collection.name}</strong>
+                <span>{collection.slug}</span>
+              </button>
+              <button type="button" className="schema-delete-button" title={t('schemas.delete', 'Delete schema')} disabled={busyDelete === collection.id} onClick={() => void deleteSchema(collection)}><Trash2 size={14} /></button>
+            </div>
           ))}
         </aside>
         <section className="schema-editor-stack">
