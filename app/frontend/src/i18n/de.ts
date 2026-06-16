@@ -639,5 +639,19 @@ export const de: Record<string, string> = {
   'admin.detailInternalGatewayReachable': 'Internes Modell-Gateway erreichbar',
   'dashboard.previewAndOcr': 'Vorschau & OCR-Markdown',
   'dashboard.noFileSelected': 'Keine Datei ausgewählt',
-  'dashboard.processingOptionsCollapsed': 'OCR, Qwen, Tabellen, Sprache und Sammlungsregeln'
+  'dashboard.processingOptionsCollapsed': 'OCR, Qwen, Tabellen, Sprache und Sammlungsregeln',
+  'dashboard.processingProfiles': 'Verarbeitungsprofile',
+  'dashboard.processingProfilesCopy': 'Wähle den normalen Ablauf; Detailoptionen bleiben rechts.',
+  'dashboard.profileQuick': 'Schnellscan',
+  'dashboard.profileQuickCopy': 'Schnelle OCR mit weniger Smart-Schritten.',
+  'dashboard.profileQuickTag': 'Für einfache Dateien',
+  'dashboard.profileStandard': 'Standard',
+  'dashboard.profileStandardCopy': 'Ausgewogene OCR und Metadatenerkennung.',
+  'dashboard.profileStandardTag': 'Für den Alltag',
+  'dashboard.profileAccuracy': 'Hohe Genauigkeit',
+  'dashboard.profileAccuracyCopy': 'Beste OCR plus Qwen-Anreicherung.',
+  'dashboard.profileAccuracyTag': 'Für wichtige Dokumente',
+  'dashboard.profileArchive': 'Archivierung',
+  'dashboard.profileArchiveCopy': 'Manuelle Felder und Sammlungsregeln erhalten.',
+  'dashboard.profileArchiveTag': 'Für langfristige Ablage'
 }

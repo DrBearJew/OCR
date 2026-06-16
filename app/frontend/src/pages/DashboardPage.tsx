@@ -392,7 +392,6 @@ export default function DashboardPage({ onOpenRecord, onOpenDocument }: Dashboar
               <FilePreviewCard selected={selected} files={files} selectedId={selectedId} setSelectedId={setSelectedId} onAddMore={() => inputRef.current?.click()} />
             </div>
           </section>
-          <RecordSetupCard collectionName={collectionName} setCollectionName={setCollectionName} value={sharedTitle} setValue={setSharedTitle} folderPath={folderPath} setFolderPath={setFolderPath} />
         </section>
 
         <aside className="metadata-redesign-rail">
@@ -405,10 +404,13 @@ export default function DashboardPage({ onOpenRecord, onOpenDocument }: Dashboar
             onExtract={() => void runSelected('metadata')}
             onReview={() => void runSelected('review')}
           />
+          <RecordSetupCard collectionName={collectionName} setCollectionName={setCollectionName} value={sharedTitle} setValue={setSharedTitle} folderPath={folderPath} setFolderPath={setFolderPath} />
           <MetadataForm metadata={metadata} setMetadata={updateSelectedMetadata} busy={busy} selected={selected} collectionName={collectionName} setCollectionName={setCollectionName} />
           <OCRTextPreview selected={selected} />
           <ProcessingOptionsPanel options={processingOptions} setOptions={setProcessingOptions} qwenStatus={qwenStatus} />
         </aside>
+
+        <ProcessingProfilePanel options={processingOptions} setOptions={setProcessingOptions} qwenStatus={qwenStatus} />
       </form>
     </main>
   )
@@ -459,11 +461,9 @@ function RecordSetupCard({ collectionName, setCollectionName, value, setValue, f
     ? `${value.sharedTitleBase || 'Telekom'}_B_10/24_90,74_Karte`
     : `${value.sharedTitleBase || 'Telekom'}_12345_12/10/2024_90,74`
   return (
-    <section className="workflow-card shared-title-card">
-      <div>
-        <h2>{t('dashboard.recordSetup')}</h2>
-        <p>{t('dashboard.recordSetupCopy')}</p>
-      </div>
+    <details open className="workflow-card shared-title-card record-setup-panel">
+      <summary><span><ChevronDown size={16} /> {t('dashboard.recordSetup')}</span></summary>
+      <p>{t('dashboard.recordSetupCopy')}</p>
       <div className="shared-title-controls">
         <label>
           {t('dashboard.collection')}
@@ -500,7 +500,7 @@ function RecordSetupCard({ collectionName, setCollectionName, value, setValue, f
       {value.sharedTitleBase.trim() && !value.applySharedTitleToDocuments && (
         <small className="shared-title-hint">{t('dashboard.sharedTitleHint')}</small>
       )}
-    </section>
+    </details>
   )
 }
 
@@ -531,6 +531,65 @@ function MetadataForm({ metadata, setMetadata, busy, selected, collectionName, s
         <button type="button"><RotateCcw size={17} /> {t('common.reset')}</button>
       </div>
     </details>
+  )
+}
+
+function ProcessingProfilePanel({ options, setOptions, qwenStatus }: { options: ProcessingOptionsState; setOptions: (value: ProcessingOptionsState) => void; qwenStatus: QwenStatus }) {
+  const { t } = useI18n()
+  const qwenAvailable = qwenStatus === 'available'
+  const profiles = [
+    {
+      key: 'quick',
+      title: t('dashboard.profileQuick'),
+      copy: t('dashboard.profileQuickCopy'),
+      tag: t('dashboard.profileQuickTag'),
+      icon: <RefreshCw size={24} />,
+      active: options.ocrEngine === 'ppocrv6' && options.ocrPageMode === 'first_n',
+      patch: { ocrEngine: 'ppocrv6' as const, ocrPageMode: 'first_n' as const, ocrPageLimit: 3, qwenAutofill: false, qwenEnrichment: false, extractTables: false }
+    },
+    {
+      key: 'standard',
+      title: t('dashboard.profileStandard'),
+      copy: t('dashboard.profileStandardCopy'),
+      tag: t('dashboard.profileStandardTag'),
+      icon: <FileText size={24} />,
+      active: options.ocrEngine === 'paddle_vl' && options.qwenAutofill && !options.qwenEnrichment,
+      patch: { ocrEngine: 'paddle_vl' as const, ocrPageMode: 'all' as const, ocrPageLimit: 100, qwenAutofill: qwenAvailable, qwenEnrichment: false, extractTables: true, collectionRules: true }
+    },
+    {
+      key: 'accuracy',
+      title: t('dashboard.profileAccuracy'),
+      copy: t('dashboard.profileAccuracyCopy'),
+      tag: t('dashboard.profileAccuracyTag'),
+      icon: <Sparkles size={24} />,
+      active: options.ocrEngine === 'paddle_vl' && options.qwenAutofill && options.qwenEnrichment,
+      patch: { ocrEngine: 'paddle_vl' as const, ocrPageMode: 'all' as const, ocrPageLimit: 100, qwenAutofill: qwenAvailable, qwenEnrichment: qwenAvailable, extractTables: true, collectionRules: true, preserveLockedFields: true }
+    },
+    {
+      key: 'archive',
+      title: t('dashboard.profileArchive'),
+      copy: t('dashboard.profileArchiveCopy'),
+      tag: t('dashboard.profileArchiveTag'),
+      icon: <ClipboardCheck size={24} />,
+      active: options.collectionRules && options.preserveLockedFields && !options.overwriteManualValues,
+      patch: { collectionRules: true, preserveLockedFields: true, overwriteManualValues: false, extractTables: true }
+    }
+  ]
+  return (
+    <section className="workflow-card processing-profile-card">
+      <div className="card-title-row"><h2>{t('dashboard.processingProfiles')}</h2><span>{t('dashboard.processingProfilesCopy')}</span></div>
+      <div className="processing-profile-grid">
+        {profiles.map((profile) => (
+          <button type="button" key={profile.key} className={`processing-profile-tile ${profile.active ? 'active' : ''}`} onClick={() => setOptions({ ...options, ...profile.patch })}>
+            <span className="profile-icon">{profile.icon}</span>
+            <strong>{profile.title}</strong>
+            <small>{profile.copy}</small>
+            <em>{profile.tag}</em>
+            {profile.active && <b><Check size={15} /></b>}
+          </button>
+        ))}
+      </div>
+    </section>
   )
 }
 
