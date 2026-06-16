@@ -6,6 +6,7 @@ const dashboard = readFileSync(resolve(root, 'src/pages/DashboardPage.tsx'), 'ut
 const client = readFileSync(resolve(root, 'src/api/client.ts'), 'utf8')
 const searchPage = readFileSync(resolve(root, 'src/pages/SearchPage.tsx'), 'utf8')
 const documentsPage = readFileSync(resolve(root, 'src/pages/DocumentsPage.tsx'), 'utf8')
+const foldersPage = readFileSync(resolve(root, 'src/pages/FoldersPage.tsx'), 'utf8')
 const collectionsPage = readFileSync(resolve(root, 'src/pages/CollectionsPage.tsx'), 'utf8')
 const schemaPage = readFileSync(resolve(root, 'src/pages/SchemaPage.tsx'), 'utf8')
 const adminPage = readFileSync(resolve(root, 'src/pages/AdminPage.tsx'), 'utf8')
@@ -42,6 +43,11 @@ const checks = [
   ['Documents mobile rows no longer use a button wrapper', documentsPage, '<button key={document.id}', true],
   ['Documents mobile CSS removes desktop row min-width', styles, 'Documents mobile: keep rows inside the viewport'],
   ['Documents inspector exposes delete action', documentsPage, 'onDelete'],
+  ['Folders page can move records', foldersPage, 'api.moveRecordToFolder'],
+  ['Folders page can move documents', foldersPage, 'api.moveDocumentToFolder'],
+  ['Folders page can rename or move folders', foldersPage, 'api.updateFolder'],
+  ['Folders page exposes unfiled filing workflow', foldersPage, 'showUnfiledOnly'],
+  ['Folders page has filing cockpit styles', styles, 'Folders page: make folders a working filing cockpit'],
   ['Collections page exposes create collection action', collectionsPage, 'collections.create'],
   ['Collections page calls createCollection API', collectionsPage, 'api.createCollection'],
   ['Schemas page exposes create collection action', schemaPage, 'collections.create'],
