@@ -631,5 +631,7 @@ export const en: Record<string, string> = {
   'schemas.template': 'Template',
   'schemas.global': 'global',
   'common.yes': 'yes',
-  'common.no': 'no'
+  'common.no': 'no',
+  'folders.newInside': 'New inside',
+  'status.duplicate': 'Duplicate'
 }

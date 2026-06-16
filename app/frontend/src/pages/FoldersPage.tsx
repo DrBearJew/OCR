@@ -162,7 +162,7 @@ export default function FoldersPage({ onOpenRecord, onOpenDocument }: Props) {
           </div>
           <div className="folder-tree-list">{renderFolderRows(null)}</div>
           <form className="folder-create-form" onSubmit={create}>
-            <input value={name} onChange={(event) => setName(event.target.value)} placeholder={selected ? `New inside ${selected.name}` : t('folders.newFolder')} />
+            <input value={name} onChange={(event) => setName(event.target.value)} placeholder={selected ? `${t('folders.newInside')} ${selected.name}` : t('folders.newFolder')} />
             <button className="primary"><FolderPlus size={15} /> {t('common.create')}</button>
           </form>
         </aside>
@@ -180,7 +180,7 @@ export default function FoldersPage({ onOpenRecord, onOpenDocument }: Props) {
             {records.slice(0, 12).map((record) => (
               <button key={record.id} className="list-row" onClick={() => onOpenRecord(record.id)}>
                 <span className="folder-item-title">{record.title}</span>
-                <small className="folder-item-meta">{record.document_count} docs · {record.status}</small>
+                <small className="folder-item-meta">{record.document_count} {record.document_count === 1 ? t('records.documentSingular') : t('records.documentPlural')} · {t(`status.${record.status}`, record.status.replace(/_/g, ' '))}</small>
               </button>
             ))}
           </div>
@@ -189,7 +189,7 @@ export default function FoldersPage({ onOpenRecord, onOpenDocument }: Props) {
             {documents.slice(0, 12).map((document) => (
               <button key={document.id} className="list-row" onClick={() => onOpenDocument(document.id)}>
                 <span className="folder-item-title">{document.manual_title_override || document.extracted_title || document.original_filename}</span>
-                <small className="folder-item-meta">{document.collection_name} · {document.processing_state}</small>
+                <small className="folder-item-meta">{document.collection_name} · {t(`status.${document.processing_state}`, document.processing_state.replace(/_/g, ' '))}</small>
               </button>
             ))}
           </div>
