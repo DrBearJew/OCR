@@ -130,7 +130,7 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
       <header className="page-header console-header">
         <div>
           <h1>{t('documents.title')}</h1>
-          <p>Browse OCR units with record context, preview, metadata, and review actions.</p>
+          <p>{t('documents.subtitle')}</p>
         </div>
         <div className="button-row">
           <button className="primary"><UploadCloud size={18} /> {t('documents.upload')}</button>

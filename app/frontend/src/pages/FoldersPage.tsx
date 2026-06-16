@@ -145,7 +145,7 @@ export default function FoldersPage({ onOpenRecord, onOpenDocument }: Props) {
       <section className="panel page-header-panel">
         <div>
           <h1>{t('folders.title')}</h1>
-          <p>Manual folder organization for records and OCR documents.</p>
+          <p>{t('folders.subtitle')}</p>
         </div>
         <button type="button" onClick={() => void load()}><RefreshCw size={16} /> {t('common.refresh')}</button>
       </section>

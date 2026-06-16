@@ -208,7 +208,7 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
       <header className="page-header">
         <div>
           <h1>{t('admin.title')}</h1>
-          <p>Technical model, OCR, ingestion, and maintenance configuration.</p>
+          <p>{t('admin.subtitle')}</p>
         </div>
         <button className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={18} /></button>
       </header>
@@ -218,8 +218,8 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
       <section className="admin-card runtime-model-setup-card">
         <div className="section-heading-row">
           <div>
-            <h2>Model Setup</h2>
-            <p>Choose the default runtime path. Basic OCR can run locally; smart OCR and Qwen can point to LM Studio, llama.cpp, or a compatible proxy.</p>
+            <h2>{t('admin.modelSetup')}</h2>
+            <p>{t('admin.modelSetupCopy')}</p>
           </div>
           <TechnicalPill state={runtimeSetup.ocr_provider === 'fake' ? 'info' : 'ok'} label={runtimeSetup.ocr_provider} />
         </div>

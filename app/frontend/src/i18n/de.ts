@@ -424,5 +424,12 @@ export const de: Record<string, string> = {
   'dashboard.validateData': 'Daten validieren',
   'dashboard.rebuildSearchSync': 'Suche neu aufbauen / synchronisieren',
   'dashboard.sending': 'Senden...',
-  'dashboard.sendToReview': 'Zur Prüfung senden'
+  'dashboard.sendToReview': 'Zur Prüfung senden',
+  'admin.subtitle': 'Technische Konfiguration für Modelle, OCR, Import und Wartung.',
+  'admin.modelSetup': 'Modell-Einrichtung',
+  'admin.modelSetupCopy': 'Wähle den Standardpfad für die Laufzeit. Basis-OCR kann lokal laufen; Smart-OCR und Qwen können auf LM Studio, llama.cpp oder einen kompatiblen Proxy zeigen.',
+  'schemas.subtitle': 'Sammlungsschemata und benutzerdefinierte Dokumentfelder verwalten.',
+  'documents.subtitle': 'OCR-Dokumente mit Vorgangskontext, Vorschau, Metadaten und Prüfaktionen durchsuchen.',
+  'records.subtitle': 'Sammlungen als Vorgangszeilen durchsuchen, während jede Datei ein separates Dokument bleibt.',
+  'folders.subtitle': 'Manuelle Ordnerorganisation für Vorgänge und OCR-Dokumente.'
 }

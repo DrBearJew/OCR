@@ -424,5 +424,12 @@ export const en: Record<string, string> = {
   'dashboard.validateData': 'Validate Data',
   'dashboard.rebuildSearchSync': 'Rebuild Search / Sync',
   'dashboard.sending': 'Sending...',
-  'dashboard.sendToReview': 'Send to Review'
+  'dashboard.sendToReview': 'Send to Review',
+  'admin.subtitle': 'Technical model, OCR, ingestion, and maintenance configuration.',
+  'admin.modelSetup': 'Model Setup',
+  'admin.modelSetupCopy': 'Choose the default runtime path. Basic OCR can run locally; smart OCR and Qwen can point to LM Studio, llama.cpp, or a compatible proxy.',
+  'schemas.subtitle': 'Manage collection schemas and custom document fields.',
+  'documents.subtitle': 'Browse OCR units with record context, preview, metadata, and review actions.',
+  'records.subtitle': 'Browse collections as record rows while each file stays a separate document.',
+  'folders.subtitle': 'Manual folder organization for records and OCR documents.'
 }

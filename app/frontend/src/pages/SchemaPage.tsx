@@ -102,7 +102,7 @@ export default function SchemaPage() {
       <header className="page-header">
         <div>
           <h1>{t('schemas.title')}</h1>
-          <p>Manage PocketBase-like collection schemas and custom document fields.</p>
+          <p>{t('schemas.subtitle')}</p>
         </div>
         <button className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={18} /></button>
       </header>

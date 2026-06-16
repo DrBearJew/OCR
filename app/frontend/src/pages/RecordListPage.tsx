@@ -89,7 +89,7 @@ export default function RecordListPage({ onOpenRecord }: { onOpenRecord: (id: st
       <header className="page-header console-header">
         <div>
           <h1>{t('records.title')}</h1>
-          <p>Browse collections as record rows while each file stays a separate document.</p>
+          <p>{t('records.subtitle')}</p>
         </div>
         <button className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={18} /></button>
       </header>
