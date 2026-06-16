@@ -76,6 +76,33 @@ Open:
 
 Default development login is defined in `app/.env.example`. Change it before real use.
 
+
+## One-click smart PaddleOCR-VL stack
+
+For a full smart OCR setup on a host that already has Docker and a llama.cpp `llama-server` binary, run:
+
+```bash
+sudo scripts/install-smart-paddlevl.sh
+```
+
+The installer is idempotent. It writes a managed smart-stack directory, installs the smart-proxy container, installs the PaddleOCR-VL chat template with OpenAI `image_url` support, writes the llama.cpp model preset, starts/reuses the model manager when possible, and prints the Admin values to save.
+
+If the PaddleOCR-VL GGUF files are not already present under `/root/llm-models`, provide download URLs or place the files manually:
+
+```bash
+sudo DOKOCR_PADDLE_MODEL_URL=https://example/paddleocr-vl-q8_0.gguf \
+     DOKOCR_PADDLE_MMPROJ_URL=https://example/paddleocr-vl-mmproj.gguf \
+     scripts/install-smart-paddlevl.sh
+```
+
+After it finishes, open **Admin → Model Setup**, click **Use internal gateway**, test **PaddleOCR-VL**, and save.
+
+Safe preview mode:
+
+```bash
+scripts/install-smart-paddlevl.sh --dry-run --skip-download --no-start
+```
+
 ## OCR and model endpoints
 
 For UI/dev without a real OCR model:
