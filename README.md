@@ -14,6 +14,10 @@ Upload files, run OCR, extract metadata, generate titles, route exceptions, and 
 ![i18n](https://img.shields.io/badge/UI-English%20%2F%20German-0f766e)
 ![Self hosted](https://img.shields.io/badge/self--hosted-private%20documents-111827)
 
+<br/>
+
+<img src="docs/assets/dok-ocr-hero.svg" alt="Dok OCR private document intelligence cockpit" width="100%"/>
+
 </div>
 
 ---
@@ -35,23 +39,47 @@ Each document can keep its original file, preview, OCR text, extracted metadata,
 
 ---
 
-## Highlights
+## 🚀 Key Features
 
-| Area | What you get |
-| --- | --- |
-| **Smart OCR** | PaddleOCR-VL-style multimodal OCR through the internal model gateway or any OpenAI-compatible llama.cpp/LM Studio endpoint. |
-| **Local OCR** | PP-OCRv6 CPU OCR path for simple deployments without a GPU. |
-| **Fallbacks** | GLM OCR fallback and PP-OCRv6 recovery when smart OCR returns empty output. |
-| **Metadata workflow** | Deterministic extraction plus optional Qwen metadata refinement. |
-| **Review cockpit** | Failed, duplicate, incomplete, and manually corrected documents stay visible and retryable. |
-| **Collections** | Per-collection OCR defaults, schema rules, title rules, search defaults, and custom metadata. |
-| **Search** | PostgreSQL-backed full-text search over OCR text, titles, metadata, records, and collections. |
-| **Admin setup** | Visual model setup wizard for fake/local/smart OCR modes and endpoint testing. |
-| **German/English UI** | App shell and core workflows are localized for English and German users. |
+### 📄 Smart document OCR
+
+> Turn messy PDFs, scans, screenshots, and receipts into Markdown-friendly OCR text.
+
+- **PaddleOCR-VL path:** smart multimodal parsing through the internal model gateway or any OpenAI-compatible llama.cpp/LM Studio endpoint.
+- **PP-OCRv6 local path:** CPU-friendly local OCR for basic deployments without a GPU.
+- **Recovery path:** if smart OCR returns empty text, Dok OCR can fall back to PP-OCRv6 instead of silently failing.
+
+### 🧠 Metadata and title workflow
+
+> OCR is only the first step. Dok OCR keeps the document workflow moving.
+
+- **Deterministic extraction:** titles, dates, correspondents, document types, tags, and collection fields.
+- **Optional Qwen refinement:** local text reasoning for metadata cleanup when enabled.
+- **Field locking:** manual corrections can be preserved during reprocessing.
+
+### 🧾 Review cockpit
+
+> Every document has a visible state, history, and retry path.
+
+- **Failure queues:** failed, duplicate, incomplete, and review-needed documents stay visible.
+- **Per-document events:** validation, storage, OCR, metadata, indexing, and retry events are traceable.
+- **Manual controls:** rerun OCR, force OCR, re-extract metadata, preview extraction, or rebuild search.
+
+### 🔎 Searchable private archive
+
+> Keep documents searchable without giving up control of where they live.
+
+- **PostgreSQL full-text search:** OCR text, titles, metadata, records, and collections.
+- **Collection model:** per-collection OCR defaults, schema rules, title rules, and search defaults.
+- **German/English UI:** app shell and core workflows are localized for English and German users.
+
+<p align="center">
+  <img src="docs/assets/dok-ocr-feature-map.svg" alt="Dok OCR feature map" width="100%"/>
+</p>
 
 ---
 
-## Pipeline
+## 🧭 Pipeline
 
 ```mermaid
 flowchart LR
@@ -70,7 +98,7 @@ The pipeline can run automatically after upload. Manual controls remain availabl
 
 ---
 
-## Choose your runtime
+## ⚙️ Choose your runtime
 
 | Mode | Best for | Default provider | Notes |
 | --- | --- | --- | --- |
@@ -84,7 +112,7 @@ The pipeline can run automatically after upload. Manual controls remain availabl
 
 ---
 
-## Quick start: basic local app
+## ⚡ Quick start: basic local app
 
 ```bash
 cd app
@@ -105,7 +133,7 @@ Prerequisites: Docker Compose and outbound network access for container images, 
 
 ---
 
-## One-click smart PaddleOCR-VL stack
+## 🚀 One-click smart PaddleOCR-VL stack
 
 For a full smart OCR setup on a host that already has Docker and a llama.cpp `llama-server` binary, run:
 
@@ -138,7 +166,7 @@ After the installer finishes:
 
 ---
 
-## Admin setup wizard
+## 🛠️ Admin setup wizard
 
 The Admin page includes **Model Setup**, a visual runtime wizard for normal users:
 
@@ -152,7 +180,7 @@ There is also a separate **Model Configuration** area for collection-level OCR d
 
 ---
 
-## OCR and model endpoints
+## 🔌 OCR and model endpoints
 
 For UI/dev without real OCR:
 
@@ -182,7 +210,7 @@ LM Studio, llama.cpp server, or another OpenAI-compatible service can provide th
 
 ---
 
-## Architecture
+## 🏗️ Architecture
 
 ```mermaid
 flowchart TB
@@ -214,7 +242,7 @@ Repository stack:
 
 ---
 
-## What is production-ready and what is not
+## ✅ What is production-ready and what is not
 
 Ready today:
 
@@ -233,7 +261,7 @@ Still environment-dependent:
 
 ---
 
-## More documentation
+## 📚 More documentation
 
 Detailed setup and operations notes are in [`app/README.md`](app/README.md), including upload limits, optional converters, reverse proxy settings, migrations, tests, API routes, and the document model.
 
