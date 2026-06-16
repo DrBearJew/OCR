@@ -5,11 +5,12 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.api.app_shell import activity, dashboard, failed_and_review, processing
-from app.api.documents import bulk_documents
+from app.api.documents import bulk_documents, patch_document
 from app.models import Batch, Document, DocumentState, ReviewState, SavedView, StageState
-from app.schemas import DocumentBulkAction
+from app.schemas import DocumentBulkAction, DocumentPatch
 from app.services.collections import create_record_for_upload, ensure_collection
 from app.services.events import record_event
+from app.services.status import derive_parent_status
 
 
 def make_shell_document(db: Session, tmp_path: Path, *, state: DocumentState = DocumentState.complete) -> Document:
@@ -66,7 +67,10 @@ def test_dashboard_processing_failed_and_activity_shell_endpoints(db_session: Se
 
 
 def test_bulk_review_action_and_saved_view_model(db_session: Session, tmp_path: Path) -> None:
-    doc = make_shell_document(db_session, tmp_path)
+    doc = make_shell_document(db_session, tmp_path, state=DocumentState.needs_review)
+    doc.review_state = ReviewState.needs_review
+    doc.review_reason = "Needs human confirmation"
+    db_session.commit()
     result = bulk_documents(
         DocumentBulkAction(
             document_ids=[doc.id],
@@ -79,6 +83,9 @@ def test_bulk_review_action_and_saved_view_model(db_session: Session, tmp_path: 
     db_session.refresh(doc)
     assert result["updated"] == 1
     assert doc.review_state == ReviewState.reviewed
+    assert doc.review_reason is None
+    assert doc.processing_state == DocumentState.complete
+    assert doc.final_state == DocumentState.complete
     assert doc.reviewed_by == "admin"
     assert any(event.event_type == "review_state_updated" for event in doc.events)
 
@@ -86,3 +93,34 @@ def test_bulk_review_action_and_saved_view_model(db_session: Session, tmp_path: 
     db_session.add(view)
     db_session.commit()
     assert db_session.query(SavedView).filter_by(section="documents").one().filters_json["review_state"] == "needs_review"
+
+
+def test_patch_reviewed_promotes_needs_review_document_to_complete(db_session: Session, tmp_path: Path) -> None:
+    doc = make_shell_document(db_session, tmp_path, state=DocumentState.needs_review)
+    doc.review_state = ReviewState.needs_review
+    doc.review_reason = "Needs human confirmation"
+    db_session.commit()
+
+    result = patch_document(
+        doc.id,
+        DocumentPatch(review_state=ReviewState.reviewed, review_reason=None),
+        db_session,
+        _admin="admin",
+    )
+    db_session.refresh(doc)
+
+    assert result.review_state == ReviewState.reviewed
+    assert doc.review_state == ReviewState.reviewed
+    assert doc.review_reason is None
+    assert doc.processing_state == DocumentState.complete
+    assert doc.final_state == DocumentState.complete
+    assert doc.reviewed_by == "admin"
+
+
+def test_reviewed_document_overrides_review_only_record_warnings(db_session: Session, tmp_path: Path) -> None:
+    doc = make_shell_document(db_session, tmp_path, state=DocumentState.complete)
+    doc.review_state = ReviewState.reviewed
+    doc.metadata_json = {"title_schema_valid": False}
+    db_session.commit()
+
+    assert derive_parent_status([doc]).value == "complete"

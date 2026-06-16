@@ -180,6 +180,9 @@ def bulk_documents(
             if payload.review_state == ReviewState.reviewed:
                 document.reviewed_by = "admin"
                 document.reviewed_at = datetime.now(timezone.utc)
+                if document.processing_state == DocumentState.needs_review:
+                    document.processing_state = DocumentState.complete
+                    document.final_state = DocumentState.complete
             record_event(db, document, "review_state_updated", "Review state updated", actor="admin", source="manual", old_value=old_value, new_value={"review_state": payload.review_state.value, "review_reason": payload.review_reason})
             update_record_status(db, document.record_id)
             updated += 1
@@ -250,6 +253,9 @@ def patch_document(
     if updates.get("review_state") == ReviewState.reviewed:
         document.reviewed_by = "admin"
         document.reviewed_at = datetime.now(timezone.utc)
+        if document.processing_state == DocumentState.needs_review:
+            document.processing_state = DocumentState.complete
+            document.final_state = DocumentState.complete
     if "review_state" in updates:
         update_record_status(db, document.record_id)
     record_event(

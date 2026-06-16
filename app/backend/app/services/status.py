@@ -20,6 +20,8 @@ SUCCESS_TERMINAL_STATES = {
 
 
 def document_needs_review(document: Document) -> bool:
+    if document.review_state == ReviewState.reviewed:
+        return False
     return (
         document.processing_state == DocumentState.needs_review
         or document.review_state == ReviewState.needs_review
