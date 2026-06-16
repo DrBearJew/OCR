@@ -9667,3 +9667,95 @@ main,
     grid-template-columns: 1fr !important;
   }
 }
+
+
+/* Upload advanced actions: polished compact action tiles. */
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .next-actions .advanced-actions {
+  border-top: 1px solid rgba(45, 212, 191, 0.22) !important;
+  padding-top: 0.7rem !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .next-actions .advanced-actions summary {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.35rem !important;
+  color: #eaffff !important;
+  font-weight: 900 !important;
+  letter-spacing: 0.01em !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .next-actions .advanced-actions > div {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 0.65rem !important;
+  margin-top: 0.75rem !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .next-actions .advanced-actions button {
+  position: relative !important;
+  min-height: 4.25rem !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr) !important;
+  align-items: center !important;
+  justify-content: stretch !important;
+  gap: 0.55rem !important;
+  padding: 0.72rem 0.78rem !important;
+  overflow: hidden !important;
+  border: 1px solid rgba(94, 234, 212, 0.26) !important;
+  border-radius: 14px !important;
+  color: #eafcff !important;
+  text-align: left !important;
+  white-space: normal !important;
+  line-height: 1.13 !important;
+  font-weight: 850 !important;
+  background:
+    radial-gradient(circle at 18% 10%, rgba(94, 234, 212, 0.26), transparent 34%),
+    linear-gradient(145deg, rgba(18, 36, 55, 0.98), rgba(8, 17, 29, 0.98)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 12px 26px rgba(0, 0, 0, 0.2) !important;
+  transition: transform 140ms ease, border-color 140ms ease, background 140ms ease, box-shadow 140ms ease !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .next-actions .advanced-actions button::after {
+  content: '';
+  position: absolute;
+  inset: auto -20% -55% 28%;
+  height: 4.5rem;
+  transform: rotate(-10deg);
+  background: linear-gradient(90deg, transparent, rgba(45, 212, 191, 0.12), transparent);
+  pointer-events: none;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .next-actions .advanced-actions button svg {
+  width: 2rem !important;
+  height: 2rem !important;
+  padding: 0.42rem !important;
+  box-sizing: border-box !important;
+  border-radius: 11px !important;
+  color: #07131f !important;
+  background: linear-gradient(145deg, #7dd3fc, #5eead4) !important;
+  box-shadow: 0 8px 18px rgba(45, 212, 191, 0.18) !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .next-actions .advanced-actions button:hover:not(:disabled),
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .next-actions .advanced-actions button:focus-visible:not(:disabled) {
+  transform: translateY(-1px) !important;
+  border-color: rgba(94, 234, 212, 0.78) !important;
+  background:
+    radial-gradient(circle at 18% 10%, rgba(94, 234, 212, 0.34), transparent 34%),
+    linear-gradient(145deg, rgba(22, 47, 70, 1), rgba(10, 24, 40, 1)) !important;
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.1), 0 16px 32px rgba(20, 184, 166, 0.18) !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .next-actions .advanced-actions button:disabled {
+  opacity: 0.52 !important;
+  cursor: not-allowed !important;
+  filter: saturate(0.75) !important;
+}
+
+@media (max-width: 1280px) {
+  .upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .next-actions .advanced-actions > div {
+    grid-template-columns: 1fr !important;
+  }
+}
