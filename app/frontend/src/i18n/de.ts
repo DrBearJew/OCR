@@ -653,5 +653,7 @@ export const de: Record<string, string> = {
   'dashboard.profileAccuracyTag': 'Für wichtige Dokumente',
   'dashboard.profileArchive': 'Archivierung',
   'dashboard.profileArchiveCopy': 'Manuelle Felder und Sammlungsregeln erhalten.',
-  'dashboard.profileArchiveTag': 'Für langfristige Ablage'
+  'dashboard.profileArchiveTag': 'Für langfristige Ablage',
+  'dashboard.rotate': 'Drehen',
+  'dashboard.showOcr': 'OCR anzeigen'
 }

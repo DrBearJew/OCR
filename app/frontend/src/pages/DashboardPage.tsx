@@ -386,11 +386,8 @@ export default function DashboardPage({ onOpenRecord, onOpenDocument }: Dashboar
         </aside>
 
         <section className="upload-review-workspace">
-          <section className="workflow-card review-combo-card">
-            <div className="card-title-row"><h2>{t('dashboard.filePreview')}</h2><span>{selected?.filename || t('dashboard.noFileSelected')}</span></div>
-            <div className="review-combo-grid preview-only-grid">
-              <FilePreviewCard selected={selected} files={files} selectedId={selectedId} setSelectedId={setSelectedId} onAddMore={() => inputRef.current?.click()} />
-            </div>
+          <section className="workflow-card review-combo-card document-preview-shell">
+            <FilePreviewCard selected={selected} files={files} selectedId={selectedId} setSelectedId={setSelectedId} onAddMore={() => inputRef.current?.click()} />
           </section>
         </section>
 
@@ -626,22 +623,35 @@ function ProcessingOptionsPanel({ options, setOptions, qwenStatus }: { options: 
 function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore }: { selected?: UploadDraftFile; files: UploadDraftFile[]; selectedId: string; setSelectedId: (id: string) => void; onAddMore: () => void }) {
   const { t } = useI18n()
   return (
-    <section className="workflow-card file-preview-card">
-      <div className="card-title-row"><h2>{t('dashboard.filePreview')}</h2><div className="zoom-controls"><button type="button"><Maximize2 size={16} /></button><button type="button"><Minus size={16} /></button><span>50%</span><button type="button"><Plus size={16} /></button></div></div>
-      <div className="document-preview-surface">
-        {selected?.serverPreviewUrl && selected.kind === 'pdf' ? (
-          <iframe src={selected.serverPreviewUrl} title={selected.filename} />
-        ) : selected?.serverPreviewUrl && selected.kind === 'image' ? (
-          <img src={selected.serverPreviewUrl} alt={selected.filename} />
-        ) : selected?.previewUrl ? (
-          <img src={selected.previewUrl} alt={selected.filename} />
-        ) : selected?.kind === 'pdf' ? (
-          <PdfMockup />
-        ) : (
-          <InvoiceMockup />
-        )}
+    <section className="file-preview-card document-preview-card">
+      <div className="document-preview-heading">
+        <h2>{t('dashboard.filePreview')}</h2>
+        <span>{selected?.filename || t('dashboard.noFileSelected')}</span>
       </div>
-      <AttachmentStrip files={files} selectedId={selectedId} onSelect={setSelectedId} onAddMore={onAddMore} />
+      <div className="document-preview-toolbar">
+        <span><Maximize2 size={16} /> Zoom</span>
+        <button type="button">100% <ChevronDown size={14} /></button>
+        <i />
+        <button type="button"><RefreshCw size={16} /> {t('dashboard.rotate')}</button>
+        <i />
+        <label>{t('dashboard.showOcr')}<input type="checkbox" defaultChecked /></label>
+      </div>
+      <div className="document-preview-layout">
+        <AttachmentStrip files={files} selectedId={selectedId} onSelect={setSelectedId} onAddMore={onAddMore} />
+        <div className="document-preview-surface">
+          {selected?.serverPreviewUrl && selected.kind === 'pdf' ? (
+            <iframe src={selected.serverPreviewUrl} title={selected.filename} />
+          ) : selected?.serverPreviewUrl && selected.kind === 'image' ? (
+            <img src={selected.serverPreviewUrl} alt={selected.filename} />
+          ) : selected?.previewUrl ? (
+            <img src={selected.previewUrl} alt={selected.filename} />
+          ) : selected?.kind === 'pdf' ? (
+            <PdfMockup />
+          ) : (
+            <InvoiceMockup />
+          )}
+        </div>
+      </div>
     </section>
   )
 }
