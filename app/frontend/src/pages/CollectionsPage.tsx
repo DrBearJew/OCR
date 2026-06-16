@@ -171,13 +171,14 @@ function SummaryCard({ icon, label, value, detail, tone = 'green' }: { icon: Rea
 }
 
 function StatusPills({ counts }: { counts: Record<string, number> }) {
+  const { t } = useI18n()
   const entries = [
-    ['complete', 'Complete'],
-    ['processing', 'Processing'],
-    ['needs_review', 'Needs review'],
-    ['partially_failed', 'Partial fail']
+    ['complete', t('status.complete')],
+    ['processing', t('status.processing')],
+    ['needs_review', t('status.needs_review')],
+    ['partially_failed', t('status.partially_failed')]
   ].filter(([key]) => counts[key])
-  if (!entries.length) entries.push(['pending', 'Pending'])
+  if (!entries.length) entries.push(['pending', t('status.pending')])
   return (
     <div className="status-pill-row">
       {entries.map(([key, label]) => <span className={`status-pill status-pill-${key}`} key={key}>{label}: {counts[key] || 0}</span>)}

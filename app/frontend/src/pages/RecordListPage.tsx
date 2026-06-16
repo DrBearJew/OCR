@@ -28,7 +28,7 @@ function Thumb({ document }: { document: Document }) {
 }
 
 export default function RecordListPage({ onOpenRecord }: { onOpenRecord: (id: string) => void }) {
-  const { t } = useI18n()
+  const { t, language } = useI18n()
   const [records, setRecords] = useState<RecordRow[]>([])
   const [collection, setCollection] = useState(collections[0])
   const [label, setLabel] = useState('')
@@ -118,12 +118,12 @@ export default function RecordListPage({ onOpenRecord }: { onOpenRecord: (id: st
           </label>
           <input placeholder={t('common.collection')} value={filters.collection || ''} onChange={(event) => setFilters({ ...filters, collection: event.target.value })} />
           <select value={filters.status || ''} onChange={(event) => setFilters({ ...filters, status: event.target.value })}>
-            <option value="">Any status</option>
-            <option value="pending">Pending</option>
-            <option value="processing">Processing</option>
-            <option value="partially_failed">Partially failed</option>
-            <option value="complete">Complete</option>
-            <option value="needs_review">Needs review</option>
+            <option value="">{t('search.anyStatus')}</option>
+            <option value="pending">{t('status.pending')}</option>
+            <option value="processing">{t('status.processing')}</option>
+            <option value="partially_failed">{t('status.partially_failed')}</option>
+            <option value="complete">{t('status.complete')}</option>
+            <option value="needs_review">{t('status.needs_review')}</option>
           </select>
           <SavedViewsBar section="records" filters={filters} onApply={setFilters} />
         </div>
@@ -134,8 +134,8 @@ export default function RecordListPage({ onOpenRecord }: { onOpenRecord: (id: st
                 <span className="record-type-icon"><Layers3 size={18} /></span>
                 <div>
                   <strong>{record.title}</strong>
-                  <span>{record.collection?.name || record.collection_id} · {record.document_count} documents · updated {new Date(record.updated_at).toLocaleString()}</span>
-                  <small>{String(record.summary_metadata?.invoice_number || record.summary_metadata?.amount || 'Document metadata stays per file')}</small>
+                  <span>{record.collection?.name || record.collection_id} · {record.document_count} {record.document_count === 1 ? t('records.documentSingular') : t('records.documentPlural')} · {t('records.updated')} {new Date(record.updated_at).toLocaleString(language === 'de' ? 'de-DE' : undefined)}</span>
+                  <small>{String(record.summary_metadata?.invoice_number || record.summary_metadata?.amount || t('records.metadataPerFile'))}</small>
                 </div>
               </div>
               <div className="thumb-strip" onClick={(event) => event.stopPropagation()}>
@@ -145,7 +145,7 @@ export default function RecordListPage({ onOpenRecord }: { onOpenRecord: (id: st
               <StatusBadge value={record.status} />
             </button>
           ))}
-          {!visibleRecords.length && <p className="muted-empty">No records match the current filters.</p>}
+          {!visibleRecords.length && <p className="muted-empty">{t('records.noMatches')}</p>}
         </div>
       </section>
     </main>
