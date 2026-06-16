@@ -8868,3 +8868,77 @@ main,
     min-height: 2.7rem !important;
   }
 }
+
+
+/* Upload right rail panel reset: prevent generic workflow grids from leaking into compact rail. */
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .next-actions {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  grid-auto-flow: row !important;
+  gap: 0.65rem !important;
+  padding: 0.9rem !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .next-actions h2,
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .next-actions .primary-process-row,
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .next-actions .advanced-actions {
+  grid-column: 1 !important;
+  min-width: 0 !important;
+  width: 100% !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .next-actions .primary-process-row {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 0.55rem !important;
+  align-items: stretch !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .next-actions .process-button {
+  width: 100% !important;
+  min-width: 0 !important;
+  justify-content: center !important;
+  white-space: normal !important;
+  line-height: 1.25 !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .next-actions .advanced-actions {
+  border-top: 1px solid var(--border-soft) !important;
+  padding-top: 0.35rem !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .metadata-collapsible-panel {
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .metadata-collapsible-panel .metadata-grid,
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .metadata-collapsible-panel .form-actions {
+  margin-left: 0.85rem !important;
+  margin-right: 0.85rem !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .metadata-collapsible-panel[open] .metadata-grid {
+  max-height: none !important;
+  overflow: visible !important;
+  padding-right: 0 !important;
+  margin-top: 0.85rem !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .metadata-collapsible-panel .metadata-grid label,
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .metadata-collapsible-panel .metadata-grid input,
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .metadata-collapsible-panel .metadata-grid select,
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .metadata-collapsible-panel .metadata-grid textarea,
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .metadata-collapsible-panel .tag-input {
+  min-width: 0 !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .collapsed-side-panel .ocr-preview,
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .collapsed-side-panel .ocr-footer,
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .collapsed-ocr-options > p,
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .collapsed-ocr-options > .processing-options-grid {
+  margin-left: 0.85rem !important;
+  margin-right: 0.85rem !important;
+}
