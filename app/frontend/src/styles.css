@@ -8719,3 +8719,103 @@ main,
     grid-column: auto !important;
   }
 }
+
+
+/* Upload layout hard reset: explicit top-level placement, no stale named areas. */
+.upload-dashboard-grid.upload-redesign-grid {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) clamp(380px, 24vw, 460px) !important;
+  grid-template-rows: auto !important;
+  grid-template-areas: none !important;
+  gap: 1rem !important;
+  align-items: start !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .upload-left-workspace {
+  grid-area: auto !important;
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  min-width: 0 !important;
+  display: grid !important;
+  grid-template-columns: minmax(330px, 470px) minmax(520px, 1fr) !important;
+  grid-template-areas:
+    "queue review"
+    "profiles profiles" !important;
+  gap: 1rem !important;
+  align-items: start !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail {
+  grid-area: auto !important;
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  position: sticky !important;
+  top: 0.85rem !important;
+  align-self: start !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 0.65rem !important;
+  height: calc(100vh - 7.5rem) !important;
+  max-height: calc(100vh - 7.5rem) !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  contain: layout paint !important;
+  scrollbar-gutter: stable !important;
+}
+
+.upload-left-workspace > .upload-queue-rail {
+  grid-area: queue !important;
+}
+
+.upload-left-workspace > .upload-review-workspace {
+  grid-area: review !important;
+}
+
+.upload-left-workspace > .processing-profile-card {
+  grid-area: profiles !important;
+  margin-top: 0 !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail .next-actions,
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail .metadata-card,
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail .collapsed-side-panel,
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail .collapsed-ocr-options {
+  grid-column: 1 !important;
+  width: 100% !important;
+}
+
+@media (max-width: 1180px) {
+  .upload-dashboard-grid.upload-redesign-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .upload-dashboard-grid.upload-redesign-grid > .upload-left-workspace,
+  .upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail {
+    grid-column: 1 !important;
+    position: static !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    contain: none !important;
+  }
+
+  .upload-dashboard-grid.upload-redesign-grid > .upload-left-workspace {
+    grid-row: 1 !important;
+  }
+
+  .upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail {
+    grid-row: 2 !important;
+  }
+}
+
+@media (max-width: 980px) {
+  .upload-dashboard-grid.upload-redesign-grid > .upload-left-workspace {
+    grid-template-columns: 1fr !important;
+    grid-template-areas:
+      "queue"
+      "review"
+      "profiles" !important;
+  }
+}
