@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight, FolderOpen, FolderPlus, FolderTree, RefreshCw, Search, Trash2 } from 'lucide-react'
-import { api, thumbnailUrl } from '../api/client'
+import { api, previewUrl, thumbnailUrl } from '../api/client'
 import type { Folder, FolderContentsItem, FolderContentsPage } from '../types'
 import { useI18n } from '../i18n'
 
@@ -260,6 +260,7 @@ export default function FoldersPage({ onOpenDocument }: Props) {
   function renderDocumentShortcut(document: FolderContentsItem) {
     const extension = (document.original_filename || document.title).split('.').pop()?.slice(0, 5).toUpperCase() || 'DOC'
     const statusLabel = t(`status.${document.status}`, String(document.status || '').replace(/_/g, ' '))
+    const hoverPreviewUrl = document.mime_type?.startsWith('image/') ? previewUrl(document.id) : thumbnailUrl(document.id)
     return (
       <article key={document.id} className="folder-document-shortcut">
         <button type="button" className="folder-shortcut-button" onClick={() => onOpenDocument(document.id)}>
@@ -270,7 +271,7 @@ export default function FoldersPage({ onOpenDocument }: Props) {
           <small>{statusLabel}</small>
           <span className="folder-shortcut-preview" role="tooltip">
             <span className="folder-shortcut-preview-media">
-              {document.thumbnail_path ? <img src={thumbnailUrl(document.id)} alt="" /> : <span>{extension}</span>}
+              {document.thumbnail_path ? <img src={hoverPreviewUrl} alt="" /> : <span>{extension}</span>}
             </span>
             <span className="folder-shortcut-preview-text">
               <strong>{document.original_filename || document.title}</strong>
