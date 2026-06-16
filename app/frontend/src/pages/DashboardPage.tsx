@@ -732,7 +732,7 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
       </div>
       <div className="document-preview-layout">
         <AttachmentStrip files={files} selectedId={selectedId} onSelect={setSelectedId} onAddMore={onAddMore} />
-        <div ref={previewSurfaceRef} className={`document-preview-surface upload-zoomable-preview ${showOcr ? 'show-ocr-overlay' : ''}`} onClick={handlePreviewClick}>
+        <div ref={previewSurfaceRef} className={`document-preview-surface upload-zoomable-preview ${zoom <= 100 ? 'fit-preview' : 'zoomed-preview'} ${showOcr ? 'show-ocr-overlay' : ''}`} onClick={handlePreviewClick}>
           <div className="document-preview-stage">
             <div className="document-preview-object" style={previewObjectStyle}>
               {preview}
