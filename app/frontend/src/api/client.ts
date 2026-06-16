@@ -236,7 +236,7 @@ export const api = {
   },
   createFolder: (payload: Partial<Folder>) => request<Folder>('/api/folders', { method: 'POST', body: JSON.stringify(payload) }),
   updateFolder: (id: string, payload: Partial<Folder>) => request<Folder>(`/api/folders/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
-  deleteFolder: (id: string) => request<Folder>(`/api/folders/${id}`, { method: 'DELETE' }),
+  deleteFolder: (id: string, deleteContents = false) => request<Folder>(`/api/folders/${id}${deleteContents ? '?delete_contents=true' : ''}`, { method: 'DELETE' }),
   restoreFolder: (id: string) => request<Folder>(`/api/folders/${id}/restore`, { method: 'POST' }),
   moveDocumentToFolder: (documentId: string, folderId: string | null) =>
     request<Document>(`/api/folders/move-document/${documentId}`, { method: 'POST', body: JSON.stringify({ folder_id: folderId }) }),

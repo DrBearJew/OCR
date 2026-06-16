@@ -161,11 +161,16 @@ export default function FoldersPage({ onOpenDocument }: Props) {
   }
 
   async function remove(folder: Folder) {
-    if (!confirm(`Delete folder "${folder.path}"? Documents remain stored, but the folder will be hidden.`)) return
+    const containsDocuments = folder.document_count > 0
+    const containsContents = containsDocuments || folder.record_count > 0
+    const prompt = containsContents
+      ? t('folders.deleteFolderWithFilesConfirm', 'Delete folder "{name}" and move its contained files to trash?').replace('{name}', folder.path)
+      : t('folders.deleteFolderConfirm', 'Delete folder "{name}"?').replace('{name}', folder.path)
+    if (!confirm(prompt)) return
     setError('')
     setBusy(`delete-folder:${folder.id}`)
     try {
-      await api.deleteFolder(folder.id)
+      await api.deleteFolder(folder.id, containsContents)
       setSelectedId(null)
       setExpandedIds((current) => {
         const next = new Set(current)
@@ -174,6 +179,22 @@ export default function FoldersPage({ onOpenDocument }: Props) {
       })
       setMessage(`${t('folders.deletedFolder', 'Deleted folder')}: ${folder.path}`)
       await load(null, false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.failed'))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function deleteDocumentShortcut(document: FolderContentsItem) {
+    const name = document.original_filename || document.title
+    if (!confirm(t('folders.deleteFileConfirm', 'Delete file "{name}"?').replace('{name}', name))) return
+    setError('')
+    setBusy(`delete-document:${document.id}`)
+    try {
+      await api.deleteDocument(document.id)
+      setMessage(`${t('folders.deletedFile', 'Deleted file')}: ${name}`)
+      await load(selectedId, showUnfiledOnly, appliedQuery)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.failed'))
     } finally {
@@ -281,6 +302,7 @@ export default function FoldersPage({ onOpenDocument }: Props) {
             </span>
           </span>
         </button>
+        <button type="button" className="folder-shortcut-delete" title={t('folders.deleteFile', 'Delete file')} disabled={busy === `delete-document:${document.id}`} onClick={() => void deleteDocumentShortcut(document)}><Trash2 size={14} /></button>
         {renderDestinationSelect(document, (folderId) => void moveDocument(document, folderId))}
       </article>
     )
@@ -310,7 +332,7 @@ export default function FoldersPage({ onOpenDocument }: Props) {
               <span className="folder-name" style={{ paddingLeft: `${depth * 12}px` }}>{folder.name}</span>
               {totalCount > 0 && <small className="folder-count" title={t('folders.subtreeCountTitle')}>{totalCount}</small>}
             </button>
-            <button type="button" className="folder-delete" title={t('folders.deleteFolder')} disabled={Boolean(folder.record_count || folder.document_count || busy)} onClick={() => void remove(folder)}><Trash2 size={14} /></button>
+            <button type="button" className="folder-delete" title={t('folders.deleteFolder')} disabled={Boolean(busy)} onClick={() => void remove(folder)}><Trash2 size={14} /></button>
           </div>
           {hasChildren && expanded && renderFolderRows(folder.id, depth + 1)}
         </div>

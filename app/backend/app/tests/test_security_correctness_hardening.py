@@ -176,6 +176,29 @@ def test_folder_contents_are_paginated_and_filterable(db_session: Session, tmp_p
     assert all(item.kind == "record" for item in record_page.items)
 
 
+def test_delete_folder_can_soft_delete_contained_documents(db_session: Session, tmp_path: Path) -> None:
+    parent = create_folder(db_session, "DeleteMe")
+    child = create_folder(db_session, "Nested", parent_id=parent.id)
+    document = make_doc(db_session, tmp_path, "delete folder contents")
+    document.folder_id = child.id
+    db_session.commit()
+
+    try:
+        delete_folder(parent.id, db=db_session)
+    except HTTPException as exc:
+        assert exc.status_code == 409
+    else:  # pragma: no cover
+        raise AssertionError("non-empty folder delete should require delete_contents")
+
+    deleted = delete_folder(parent.id, delete_contents=True, db=db_session)
+    assert deleted.deleted_at is not None
+    db_session.refresh(document)
+    db_session.refresh(child)
+    assert document.deleted_at is not None
+    assert child.deleted_at is not None
+
+
+
 def test_search_filters_coerce_enums_and_distinct_combined_filters(db_session: Session, tmp_path: Path) -> None:
     doc = make_doc(db_session, tmp_path, "AlphaNeedle", "Dokumente")
     collection = doc.record.collection

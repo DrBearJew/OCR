@@ -13,7 +13,8 @@ from app.auth import require_admin
 from app.db import get_db
 from app.models import Collection, Document, Folder, Record
 from app.schemas import DocumentRead, FolderContentsItem, FolderContentsPage, FolderMovePayload, FolderRead, FolderWrite, RecordRead
-from app.services.folders import create_folder, folder_counts, move_folder, rename_folder
+from app.services.collections import update_record_status
+from app.services.folders import create_folder, folder_counts, move_folder, rename_folder, soft_delete_document
 
 
 router = APIRouter(prefix="/api/folders", tags=["folders"], dependencies=[Depends(require_admin)])
@@ -98,13 +99,15 @@ def update_folder(folder_id: uuid.UUID, payload: FolderWrite, db: Session = Depe
 
 
 @router.delete("/{folder_id}", response_model=FolderRead)
-def delete_folder(folder_id: uuid.UUID, db: Session = Depends(get_db)) -> FolderRead:
+def delete_folder(folder_id: uuid.UUID, db: Session = Depends(get_db), delete_contents: bool = False) -> FolderRead:
     folder = db.get(Folder, folder_id)
     if folder is None or folder.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Folder not found")
     doc_count, record_count = _subtree_counts(db, folder)
     if doc_count or record_count:
-        raise HTTPException(status_code=409, detail="Folder contains records or documents")
+        if not delete_contents:
+            raise HTTPException(status_code=409, detail="Folder contains records or documents")
+        _delete_folder_contents(db, folder)
     _soft_delete_folder(folder)
     db.commit()
     db.refresh(folder)
@@ -154,6 +157,35 @@ def move_record_to_folder(record_id: uuid.UUID, payload: FolderMovePayload, db: 
     db.commit()
     db.refresh(record)
     return RecordRead.model_validate(record)
+
+
+def _delete_folder_contents(db: Session, folder: Folder) -> None:
+    folder_ids = _subtree_folder_ids(db, folder.id)
+    if not folder_ids:
+        return
+    affected_record_ids: set[uuid.UUID] = set()
+    documents = db.scalars(
+        select(Document)
+        .where(Document.folder_id.in_(folder_ids))
+        .where(Document.deleted_at.is_(None))
+    ).all()
+    for document in documents:
+        if document.record_id:
+            affected_record_ids.add(document.record_id)
+        soft_delete_document(db, document)
+
+    # Record folder assignment is legacy/internal; do not delete whole records here
+    # because a record may group documents outside the folder being removed.
+    records = db.scalars(
+        select(Record)
+        .where(Record.folder_id.in_(folder_ids))
+        .where(Record.deleted_at.is_(None))
+    ).all()
+    for record in records:
+        record.folder_id = None
+
+    for record_id in affected_record_ids:
+        update_record_status(db, record_id)
 
 
 def _folder_read(db: Session, folder: Folder) -> FolderRead:

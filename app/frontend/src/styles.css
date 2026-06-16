@@ -10858,3 +10858,25 @@ a.icon-button:not(.danger-button):hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.folders-page .folder-shortcut-delete {
+  position: absolute;
+  top: 0.38rem;
+  right: 0.38rem;
+  z-index: 2;
+  width: 2rem;
+  height: 2rem;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 999px;
+  border-color: rgba(248, 113, 113, 0.35);
+  background: rgba(127, 29, 29, 0.78);
+  color: #fecaca;
+}
+
+.folders-page .folder-shortcut-delete:hover:not(:disabled) {
+  border-color: rgba(248, 113, 113, 0.75);
+  background: rgba(185, 28, 28, 0.9);
+  color: #fff;
+}
