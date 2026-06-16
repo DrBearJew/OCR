@@ -9158,3 +9158,26 @@ main,
 .document-preview-layout .document-preview-object > .invoice-mock {
   flex: 0 0 auto;
 }
+
+
+/* Compact sidebar: do not paint an empty full-height block below logout. */
+@media (min-width: 901px) {
+  .app-shell {
+    align-items: start !important;
+  }
+
+  .sidebar {
+    align-self: start !important;
+    position: sticky !important;
+    top: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: calc(100vh - 0.5rem) !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+  }
+
+  .sidebar .logout {
+    margin-top: 0 !important;
+  }
+}
