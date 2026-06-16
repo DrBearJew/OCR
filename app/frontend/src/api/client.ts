@@ -1,4 +1,4 @@
-import type { ActivityItem, AdminActionResult, Batch, BatchDetail, Collection, CollectionPageData, CollectionSummary, CustomFieldDefinition, DashboardSummary, Document, DocumentCustomFieldValue, DocumentEvent, DocumentPage, FailedReviewSummary, Folder, IngestionJob, IngestionSource, IntegrationSummary, ModelEndpointTestResult, ModelSetup, JobInfo, PaperlessMetadata, ProcessingHook, ProcessingSummary, RecordRow, SavedView, SearchResult } from '../types'
+import type { ActivityItem, AdminActionResult, Batch, BatchDetail, Collection, CollectionPageData, CollectionSummary, CustomFieldDefinition, DashboardSummary, Document, DocumentCustomFieldValue, DocumentEvent, DocumentPage, FailedReviewSummary, Folder, FolderContentsPage, IngestionJob, IngestionSource, IntegrationSummary, ModelEndpointTestResult, ModelSetup, JobInfo, PaperlessMetadata, ProcessingHook, ProcessingSummary, RecordRow, SavedView, SearchResult } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 const TOKEN_KEY = 'dokocr_token'
@@ -224,6 +224,15 @@ export const api = {
   folders: (params: Record<string, string> = {}) => {
     const query = new URLSearchParams(params)
     return request<Folder[]>(`/api/folders${query.toString() ? `?${query.toString()}` : ''}`)
+  },
+  folderContents: (params: { kind: 'records' | 'documents'; scope?: 'all' | 'direct' | 'subtree' | 'unfiled'; folderId?: string | null; q?: string; limit?: number; cursor?: string | null }) => {
+    const query = new URLSearchParams({ kind: params.kind })
+    if (params.scope) query.set('scope', params.scope)
+    if (params.folderId) query.set('folder_id', params.folderId)
+    if (params.q) query.set('q', params.q)
+    if (params.limit) query.set('limit', String(params.limit))
+    if (params.cursor) query.set('cursor', params.cursor)
+    return request<FolderContentsPage>(`/api/folders/contents?${query.toString()}`)
   },
   createFolder: (payload: Partial<Folder>) => request<Folder>('/api/folders', { method: 'POST', body: JSON.stringify(payload) }),
   updateFolder: (id: string, payload: Partial<Folder>) => request<Folder>(`/api/folders/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),

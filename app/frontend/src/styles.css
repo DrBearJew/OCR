@@ -10589,3 +10589,11 @@ a.icon-button:not(.danger-button):hover {
     overflow-wrap: anywhere;
   }
 }
+
+
+.folders-page .folder-load-more {
+  width: 100%;
+  justify-content: center;
+  border-style: dashed;
+  color: #bae6fd;
+}

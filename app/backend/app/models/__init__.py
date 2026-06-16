@@ -207,6 +207,8 @@ class Record(Base):
 
     __table_args__ = (
         Index("ix_records_collection_status", "collection_id", "status"),
+        Index("ix_records_deleted_updated_id", "deleted_at", "updated_at", "id"),
+        Index("ix_records_deleted_folder_updated_id", "deleted_at", "folder_id", "updated_at", "id"),
     )
 
 
@@ -389,6 +391,8 @@ class Document(Base):
 
     __table_args__ = (
         Index("ix_documents_collection_state", "collection_name", "processing_state"),
+        Index("ix_documents_deleted_updated_id", "deleted_at", "updated_at", "id"),
+        Index("ix_documents_deleted_folder_updated_id", "deleted_at", "folder_id", "updated_at", "id"),
     )
 
     @property

@@ -163,6 +163,34 @@ export interface Folder {
   deleted_at: string | null
 }
 
+export interface FolderContentsItem {
+  kind: 'record' | 'document'
+  id: string
+  folder_id: string | null
+  folder_path: string | null
+  collection_id: string | null
+  collection_name: string | null
+  record_id: string | null
+  title: string
+  subtitle: string | null
+  status: string | null
+  review_state: string | null
+  document_count: number | null
+  original_filename: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface FolderContentsPage {
+  kind: 'records' | 'documents'
+  scope: 'all' | 'direct' | 'subtree' | 'unfiled'
+  folder_id: string | null
+  limit: number
+  next_cursor: string | null
+  total_estimate: number
+  items: FolderContentsItem[]
+}
+
 export interface CustomFieldDefinition {
   id: string
   collection_id: string

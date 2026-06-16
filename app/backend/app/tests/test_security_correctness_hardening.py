@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api.collections import create_collection, update_collection
 from app.api.documents import patch_document
-from app.api.folders import delete_folder, update_folder
+from app.api.folders import delete_folder, folder_contents, update_folder
 from app.api.records import patch_record
 from app.config import Settings
 from app.models import Batch, Collection, CustomFieldDefinition, CustomFieldType, Document, DocumentState, DocumentType, Folder, OCRMode, Record, ReviewState, StageState, StoragePathRule, Tag
@@ -139,6 +139,41 @@ def test_folder_descendant_move_and_nonempty_delete_rejected(db_session: Session
         assert exc.status_code == 409
     else:  # pragma: no cover
         raise AssertionError("non-empty folder was deleted")
+
+
+def test_folder_contents_are_paginated_and_filterable(db_session: Session, tmp_path: Path) -> None:
+    parent = create_folder(db_session, "Archive")
+    child = create_folder(db_session, "Invoices", parent_id=parent.id)
+    base_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    docs: list[Document] = []
+    for index in range(3):
+        doc = make_doc(db_session, tmp_path, f"FolderNeedle {index}")
+        doc.folder_id = child.id
+        doc.extracted_title = f"FolderNeedle {index}"
+        doc.updated_at = base_time + timedelta(minutes=index)
+        docs.append(doc)
+    unfiled = make_doc(db_session, tmp_path, "LooseNeedle")
+    unfiled.extracted_title = "LooseNeedle"
+    unfiled.updated_at = base_time + timedelta(minutes=5)
+    db_session.commit()
+
+    first = folder_contents(kind="documents", scope="subtree", folder_id=parent.id, q="FolderNeedle", limit=2, db=db_session)
+    assert first.total_estimate == 3
+    assert len(first.items) == 2
+    assert first.next_cursor
+    assert all(item.folder_id == child.id for item in first.items)
+
+    second = folder_contents(kind="documents", scope="subtree", folder_id=parent.id, q="FolderNeedle", limit=2, cursor=first.next_cursor, db=db_session)
+    assert len(second.items) == 1
+    assert second.next_cursor is None
+
+    unfiled_page = folder_contents(kind="documents", scope="unfiled", q="LooseNeedle", db=db_session)
+    assert unfiled_page.total_estimate == 1
+    assert unfiled_page.items[0].id == unfiled.id
+
+    record_page = folder_contents(kind="records", scope="unfiled", q="Record", db=db_session)
+    assert record_page.total_estimate >= 1
+    assert all(item.kind == "record" for item in record_page.items)
 
 
 def test_search_filters_coerce_enums_and_distinct_combined_filters(db_session: Session, tmp_path: Path) -> None:

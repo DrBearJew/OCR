@@ -535,3 +535,31 @@ class FolderWrite(BaseModel):
 
 class FolderMovePayload(BaseModel):
     folder_id: uuid.UUID | None = None
+
+
+class FolderContentsItem(BaseModel):
+    kind: str
+    id: uuid.UUID
+    folder_id: uuid.UUID | None = None
+    folder_path: str | None = None
+    collection_id: uuid.UUID | None = None
+    collection_name: str | None = None
+    record_id: uuid.UUID | None = None
+    title: str
+    subtitle: str | None = None
+    status: str | None = None
+    review_state: str | None = None
+    document_count: int | None = None
+    original_filename: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FolderContentsPage(BaseModel):
+    kind: str
+    scope: str
+    folder_id: uuid.UUID | None = None
+    limit: int
+    next_cursor: str | None = None
+    total_estimate: int
+    items: list[FolderContentsItem] = Field(default_factory=list)

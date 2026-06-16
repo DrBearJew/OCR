@@ -1,30 +1,31 @@
 import { FormEvent, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight, FolderOpen, FolderPlus, FolderTree, RefreshCw, Search, Trash2 } from 'lucide-react'
 import { api } from '../api/client'
-import type { Document, Folder, RecordRow } from '../types'
+import type { Folder, FolderContentsItem, FolderContentsPage } from '../types'
 import { useI18n } from '../i18n'
 
 interface Props {
-  onOpenRecord: (id: string) => void
   onOpenDocument: (id: string) => void
 }
 
 const ROOT_PARENT = '__root__'
+const PAGE_LIMIT = 50
 const parentKey = (id: string | null | undefined) => id || ROOT_PARENT
 
-type FolderItemKind = 'record' | 'document'
+type FolderScope = 'all' | 'subtree' | 'unfiled'
 
-export default function FoldersPage({ onOpenRecord, onOpenDocument }: Props) {
+export default function FoldersPage({ onOpenDocument }: Props) {
   const { t } = useI18n()
   const [folders, setFolders] = useState<Folder[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
-  const [allRecords, setAllRecords] = useState<RecordRow[]>([])
-  const [allDocuments, setAllDocuments] = useState<Document[]>([])
+  const [documentPage, setDocumentPage] = useState<FolderContentsPage | null>(null)
+  const [unfiledDocumentCount, setUnfiledDocumentCount] = useState(0)
   const [name, setName] = useState('')
   const [renameName, setRenameName] = useState('')
   const [renameParentId, setRenameParentId] = useState('')
   const [query, setQuery] = useState('')
+  const [appliedQuery, setAppliedQuery] = useState('')
   const [showUnfiledOnly, setShowUnfiledOnly] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -33,34 +34,18 @@ export default function FoldersPage({ onOpenRecord, onOpenDocument }: Props) {
   const selected = useMemo(() => folders.find((folder) => folder.id === selectedId) || null, [folders, selectedId])
   const folderChildren = useMemo(() => buildFolderChildren(folders), [folders])
   const folderById = useMemo(() => new Map(folders.map((folder) => [folder.id, folder])), [folders])
-  const recordById = useMemo(() => new Map(allRecords.map((record) => [record.id, record])), [allRecords])
   const folderOptions = useMemo(
     () => [...folders].sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true, sensitivity: 'base' })),
     [folders]
   )
-  const selectedFolderIds = useMemo(() => selectedId ? descendantFolderIds(selectedId, folders) : null, [folders, selectedId])
   const selectedSubtreeIds = useMemo(() => selectedId ? descendantFolderIds(selectedId, folders) : new Set<string>(), [folders, selectedId])
   const childFolders = useMemo(() => folderChildren.get(parentKey(selectedId)) || [], [folderChildren, selectedId])
   const parentFolderOptions = useMemo(
     () => selected ? folderOptions.filter((folder) => !selectedSubtreeIds.has(folder.id)) : folderOptions,
     [folderOptions, selected, selectedSubtreeIds]
   )
-  const scopedRecords = useMemo(() => {
-    if (selectedFolderIds) return allRecords.filter((record) => record.folder_id && selectedFolderIds.has(record.folder_id))
-    if (showUnfiledOnly) return allRecords.filter((record) => !record.folder_id)
-    return allRecords
-  }, [allRecords, selectedFolderIds, showUnfiledOnly])
-  const scopedDocuments = useMemo(() => {
-    if (selectedFolderIds) return allDocuments.filter((document) => document.folder_id && selectedFolderIds.has(document.folder_id))
-    if (showUnfiledOnly) return allDocuments.filter((document) => !document.folder_id)
-    return allDocuments
-  }, [allDocuments, selectedFolderIds, showUnfiledOnly])
-  const records = useMemo(() => filterRecords(scopedRecords, query, folderById), [scopedRecords, query, folderById])
-  const documents = useMemo(() => filterDocuments(scopedDocuments, query, folderById), [scopedDocuments, query, folderById])
-  const unfiledRecordCount = useMemo(() => allRecords.filter((record) => !record.folder_id).length, [allRecords])
-  const unfiledDocumentCount = useMemo(() => allDocuments.filter((document) => !document.folder_id).length, [allDocuments])
-  const selectedRecordCount = selected ? selected.record_count : scopedRecords.length
-  const selectedDocumentCount = selected ? selected.document_count : scopedDocuments.length
+  const documents = documentPage?.items || []
+  const selectedDocumentCount = documentPage?.total_estimate ?? 0
 
   useEffect(() => {
     void load()
@@ -71,21 +56,56 @@ export default function FoldersPage({ onOpenRecord, onOpenDocument }: Props) {
     setRenameParentId(selected?.parent_id || '')
   }, [selected?.id, selected?.name, selected?.parent_id])
 
-  async function load(folderId = selectedId) {
+  function currentScope(folderId = selectedId, unfiledOnly = showUnfiledOnly): FolderScope {
+    if (folderId) return 'subtree'
+    return unfiledOnly ? 'unfiled' : 'all'
+  }
+
+  async function fetchContents(folderId = selectedId, unfiledOnly = showUnfiledOnly, search = query) {
+    const scope = currentScope(folderId, unfiledOnly)
+    const params = { scope, folderId, q: search, limit: PAGE_LIMIT }
+    const [documentsResult, unfiledDocuments] = await Promise.all([
+      api.folderContents({ ...params, kind: 'documents' }),
+      api.folderContents({ kind: 'documents', scope: 'unfiled', limit: 1 }),
+    ])
+    setAppliedQuery(search)
+    setDocumentPage(documentsResult)
+    setUnfiledDocumentCount(unfiledDocuments.total_estimate)
+  }
+
+  async function load(folderId = selectedId, unfiledOnly = showUnfiledOnly, search = query) {
     setError('')
     try {
-      const [folderRows, recordRows, documentRows] = await Promise.all([
-        api.folders(),
-        api.records(),
-        api.documents()
-      ])
+      const folderRows = await api.folders()
       setFolders(folderRows)
-      setAllRecords(recordRows)
-      setAllDocuments(documentRows)
-      if (folderId && !folderRows.some((folder) => folder.id === folderId)) setSelectedId(null)
+      if (folderId && !folderRows.some((folder) => folder.id === folderId)) {
+        folderId = null
+        setSelectedId(null)
+      }
       setExpandedIds((current) => expandedWithSelectedAncestors(current, folderRows, folderId))
+      await fetchContents(folderId, unfiledOnly, search)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.failed'))
+    }
+  }
+
+  async function loadMore() {
+    if (!documentPage?.next_cursor) return
+    setBusy('load-more:documents')
+    try {
+      const next = await api.folderContents({
+        kind: 'documents',
+        scope: documentPage.scope,
+        folderId: documentPage.folder_id,
+        q: appliedQuery,
+        limit: PAGE_LIMIT,
+        cursor: documentPage.next_cursor,
+      })
+      setDocumentPage({ ...next, items: [...documents, ...next.items] })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.failed'))
+    } finally {
+      setBusy('')
     }
   }
 
@@ -106,7 +126,7 @@ export default function FoldersPage({ onOpenRecord, onOpenDocument }: Props) {
         return next
       })
       setMessage(`${t('folders.createdFolder', 'Created folder')}: ${folder.path}`)
-      await load(folder.id)
+      await load(folder.id, false)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.failed'))
     } finally {
@@ -127,7 +147,7 @@ export default function FoldersPage({ onOpenRecord, onOpenDocument }: Props) {
       })
       setSelectedId(updated.id)
       setMessage(`${t('folders.updatedFolder', 'Updated folder')}: ${updated.path}`)
-      await load(updated.id)
+      await load(updated.id, false)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.failed'))
     } finally {
@@ -136,7 +156,7 @@ export default function FoldersPage({ onOpenRecord, onOpenDocument }: Props) {
   }
 
   async function remove(folder: Folder) {
-    if (!confirm(`Delete folder "${folder.path}"? Records and documents remain stored, but the folder will be hidden.`)) return
+    if (!confirm(`Delete folder "${folder.path}"? Documents remain stored, but the folder will be hidden.`)) return
     setError('')
     setBusy(`delete-folder:${folder.id}`)
     try {
@@ -148,7 +168,7 @@ export default function FoldersPage({ onOpenRecord, onOpenDocument }: Props) {
         return next
       })
       setMessage(`${t('folders.deletedFolder', 'Deleted folder')}: ${folder.path}`)
-      await load(null)
+      await load(null, false)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.failed'))
     } finally {
@@ -156,29 +176,14 @@ export default function FoldersPage({ onOpenRecord, onOpenDocument }: Props) {
     }
   }
 
-  async function moveRecord(record: RecordRow, folderId: string | null) {
-    if ((record.folder_id || '') === (folderId || '')) return
-    setError('')
-    setBusy(`record:${record.id}`)
-    try {
-      await api.moveRecordToFolder(record.id, folderId)
-      setMessage(`${t('folders.movedRecord', 'Moved record')}: ${record.title}`)
-      await load(selectedId)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.failed'))
-    } finally {
-      setBusy('')
-    }
-  }
-
-  async function moveDocument(document: Document, folderId: string | null) {
+  async function moveDocument(document: FolderContentsItem, folderId: string | null) {
     if ((document.folder_id || '') === (folderId || '')) return
     setError('')
     setBusy(`document:${document.id}`)
     try {
       await api.moveDocumentToFolder(document.id, folderId)
-      setMessage(`${t('folders.movedDocument', 'Moved document')}: ${documentTitle(document)}`)
-      await load(selectedId)
+      setMessage(`${t('folders.movedDocument', 'Moved document')}: ${document.title}`)
+      await load(selectedId, showUnfiledOnly)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.failed'))
     } finally {
@@ -192,13 +197,18 @@ export default function FoldersPage({ onOpenRecord, onOpenDocument }: Props) {
     if ((folderChildren.get(folder.id) || []).length) {
       setExpandedIds((current) => new Set(current).add(folder.id))
     }
-    void load(folder.id)
+    void load(folder.id, false)
   }
 
   function selectHome(unfiledOnly = false) {
     setSelectedId(null)
     setShowUnfiledOnly(unfiledOnly)
-    void load(null)
+    void load(null, unfiledOnly)
+  }
+
+  function search(event: FormEvent) {
+    event.preventDefault()
+    void load(selectedId, showUnfiledOnly, query)
   }
 
   function toggleFolder(folder: Folder) {
@@ -222,22 +232,17 @@ export default function FoldersPage({ onOpenRecord, onOpenDocument }: Props) {
     return folderId ? folderById.get(folderId)?.path || t('folders.unknownFolder', 'Unknown folder') : t('folders.home')
   }
 
-  function destinationFoldersForRecord(record: RecordRow) {
-    return folderOptions.filter((folder) => !folder.collection_id || folder.collection_id === record.collection_id)
+  function destinationFoldersForItem(item: FolderContentsItem) {
+    return folderOptions.filter((folder) => !folder.collection_id || !item.collection_id || folder.collection_id === item.collection_id)
   }
 
-  function destinationFoldersForDocument(document: Document) {
-    const record = document.record_id ? recordById.get(document.record_id) : null
-    return folderOptions.filter((folder) => !folder.collection_id || !record || folder.collection_id === record.collection_id)
-  }
-
-  function renderDestinationSelect(kind: FolderItemKind, id: string, value: string | null, options: Folder[], onChange: (folderId: string | null) => void) {
+  function renderDestinationSelect(item: FolderContentsItem, onChange: (folderId: string | null) => void) {
     return (
       <label className="folder-move-select">
         <span>{t('folders.moveToFolder', 'Move to folder')}</span>
-        <select value={value || ''} disabled={busy === `${kind}:${id}`} onChange={(event) => onChange(event.target.value || null)}>
+        <select value={item.folder_id || ''} disabled={busy === `document:${item.id}`} onChange={(event) => onChange(event.target.value || null)}>
           <option value="">{t('folders.home')}</option>
-          {options.map((folder) => <option key={folder.id} value={folder.id}>{folder.path}</option>)}
+          {destinationFoldersForItem(item).map((folder) => <option key={folder.id} value={folder.id}>{folder.path}</option>)}
         </select>
       </label>
     )
@@ -248,7 +253,7 @@ export default function FoldersPage({ onOpenRecord, onOpenDocument }: Props) {
       const children = folderChildren.get(folder.id) || []
       const hasChildren = children.length > 0
       const expanded = expandedIds.has(folder.id)
-      const totalCount = folder.record_count + folder.document_count
+      const totalCount = folder.document_count
       return (
         <div className="folder-tree-branch" key={folder.id}>
           <div className={`folder-row ${hasChildren ? 'has-children' : 'is-leaf'}`}>
@@ -295,7 +300,7 @@ export default function FoldersPage({ onOpenRecord, onOpenDocument }: Props) {
           <h2><FolderTree size={18} /> {t('folders.tree')}</h2>
           <div className="folder-tree-summary">
             <span><strong>{folders.length}</strong> {t('folders.title')}</span>
-            <span><strong>{unfiledRecordCount + unfiledDocumentCount}</strong> {t('folders.unfiled', 'Unfiled')}</span>
+            <span><strong>{unfiledDocumentCount}</strong> {t('folders.unfiled', 'Unfiled')}</span>
           </div>
           <button className={!selectedId && !showUnfiledOnly ? 'active' : ''} onClick={() => selectHome(false)}>{t('folders.home')}</button>
           <button className={!selectedId && showUnfiledOnly ? 'active' : ''} onClick={() => selectHome(true)}>{t('folders.unfiledItems', 'Unfiled items')}</button>
@@ -315,15 +320,15 @@ export default function FoldersPage({ onOpenRecord, onOpenDocument }: Props) {
             <div>
               <div className="breadcrumb">{breadcrumb.map((part, index) => <span key={`${part}-${index}`}>{index ? ' / ' : ''}{part}</span>)}</div>
               <h2>{selected?.path || (showUnfiledOnly ? t('folders.unfiledItems', 'Unfiled items') : t('folders.allFolders'))}</h2>
-              <p>{selected ? t('folders.currentFolderHelp', 'Browse and file records/documents in this folder and its children.') : t('folders.homeHelp', 'Browse all records/documents or use Unfiled to assign items into folders.')}</p>
+              <p>{selected ? t('folders.currentFolderHelp', 'Browse and file documents in this folder and its children.') : t('folders.homeHelp', 'Browse all documents or use Unfiled to assign files into folders.')}</p>
             </div>
           </div>
 
           <div className="stat-grid folder-stat-grid">
-            <div><strong>{selectedRecordCount}</strong><span>{selected ? t('folders.recordsInSubtree') : t('common.records')}</span></div>
             <div><strong>{selectedDocumentCount}</strong><span>{selected ? t('folders.documentsInSubtree') : t('common.documents')}</span></div>
             <div><strong>{childFolders.length}</strong><span>{t('folders.childFolders')}</span></div>
-            <div><strong>{unfiledRecordCount + unfiledDocumentCount}</strong><span>{t('folders.unfiled', 'Unfiled')}</span></div>
+            <div><strong>{unfiledDocumentCount}</strong><span>{t('folders.unfiled', 'Unfiled')}</span></div>
+            <div><strong>{folders.length}</strong><span>{t('folders.title')}</span></div>
           </div>
 
           {selected && (
@@ -339,48 +344,36 @@ export default function FoldersPage({ onOpenRecord, onOpenDocument }: Props) {
             </form>
           )}
 
-          <div className="folder-content-toolbar">
-            <label className="toolbar-search"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('folders.searchPlaceholder', 'Search records, documents, filenames, folders...')} /></label>
-            {!selected && <button type="button" className={!showUnfiledOnly ? 'active' : ''} onClick={() => setShowUnfiledOnly(false)}>{t('folders.allItems', 'All items')}</button>}
-            {!selected && <button type="button" className={showUnfiledOnly ? 'active' : ''} onClick={() => setShowUnfiledOnly(true)}>{t('folders.unfiled', 'Unfiled')}</button>}
-          </div>
+          <form className="folder-content-toolbar" onSubmit={search}>
+            <label className="toolbar-search"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('folders.searchPlaceholder', 'Search documents, filenames, folders...')} /></label>
+            <button type="submit">{t('common.search', 'Search')}</button>
+            {!selected && <button type="button" className={!showUnfiledOnly ? 'active' : ''} onClick={() => selectHome(false)}>{t('folders.allItems', 'All items')}</button>}
+            {!selected && <button type="button" className={showUnfiledOnly ? 'active' : ''} onClick={() => selectHome(true)}>{t('folders.unfiled', 'Unfiled')}</button>}
+          </form>
 
           <div className="table-card folder-child-card">
             <h3><FolderOpen size={16} /> {t('folders.childFolders', 'Child folders')}</h3>
             {childFolders.length ? childFolders.map((folder) => (
               <button key={folder.id} type="button" className="folder-child-row" onClick={() => selectFolder(folder)}>
                 <span>{folder.name}</span>
-                <small>{folder.record_count} {t('common.records')} · {folder.document_count} {t('common.documents')}</small>
+                <small>{folder.document_count} {t('common.documents')}</small>
               </button>
             )) : <p className="empty-state">{t('folders.noChildFoldersInSelection', 'No child folders here yet.')}</p>}
           </div>
 
-          <div className="table-card folder-items-card">
-            <h3>{t('common.records')} <small>{records.length}</small></h3>
-            {records.length ? records.slice(0, 50).map((record) => (
-              <div key={record.id} className="folder-managed-row">
-                <button className="list-row" onClick={() => onOpenRecord(record.id)}>
-                  <span className="folder-item-title">{record.title}</span>
-                  <small className="folder-item-meta">{record.document_count} {record.document_count === 1 ? t('records.documentSingular') : t('records.documentPlural')} · {t(`status.${record.status}`, record.status.replace(/_/g, ' '))} · {folderLabel(record.folder_id)}</small>
-                </button>
-                {renderDestinationSelect('record', record.id, record.folder_id, destinationFoldersForRecord(record), (folderId) => void moveRecord(record, folderId))}
-              </div>
-            )) : <p className="empty-state">{t('folders.noRecords', 'No records match this folder/filter.')}</p>}
-            {records.length > 50 && <p className="folder-list-limit">{t('folders.showingFirst', 'Showing first 50. Use search to narrow the list.')}</p>}
-          </div>
 
           <div className="table-card folder-items-card">
-            <h3>{t('common.documents')} <small>{documents.length}</small></h3>
-            {documents.length ? documents.slice(0, 50).map((document) => (
+            <h3>{t('common.documents')} <small>{documents.length} / {documentPage?.total_estimate ?? 0}</small></h3>
+            {documents.length ? documents.map((document) => (
               <div key={document.id} className="folder-managed-row">
                 <button className="list-row" onClick={() => onOpenDocument(document.id)}>
-                  <span className="folder-item-title">{documentTitle(document)}</span>
-                  <small className="folder-item-meta">{document.collection_name} · {t(`status.${document.processing_state}`, document.processing_state.replace(/_/g, ' '))} · {folderLabel(document.folder_id)}</small>
+                  <span className="folder-item-title">{document.title}</span>
+                  <small className="folder-item-meta">{document.collection_name} · {t(`status.${document.status}`, String(document.status || '').replace(/_/g, ' '))} · {folderLabel(document.folder_id)}</small>
                 </button>
-                {renderDestinationSelect('document', document.id, document.folder_id, destinationFoldersForDocument(document), (folderId) => void moveDocument(document, folderId))}
+                {renderDestinationSelect(document, (folderId) => void moveDocument(document, folderId))}
               </div>
             )) : <p className="empty-state">{t('folders.noDocuments', 'No documents match this folder/filter.')}</p>}
-            {documents.length > 50 && <p className="folder-list-limit">{t('folders.showingFirst', 'Showing first 50. Use search to narrow the list.')}</p>}
+            {documentPage?.next_cursor && <button type="button" className="folder-load-more" disabled={busy === 'load-more:documents'} onClick={() => void loadMore()}>{t('folders.loadMore', 'Load more')}</button>}
           </div>
         </section>
       </section>
@@ -437,31 +430,4 @@ function expandedWithSelectedAncestors(current: Set<string>, folders: Folder[], 
   }
 
   return next
-}
-
-function documentTitle(document: Document) {
-  return document.manual_title_override || document.extracted_title || document.original_filename
-}
-
-function filterRecords(records: RecordRow[], query: string, folderById: Map<string, Folder>) {
-  const needle = query.trim().toLowerCase()
-  if (!needle) return records
-  return records.filter((record) => [
-    record.title,
-    record.status,
-    record.collection?.name,
-    record.folder_id ? folderById.get(record.folder_id)?.path : 'Home',
-  ].some((value) => String(value || '').toLowerCase().includes(needle)))
-}
-
-function filterDocuments(documents: Document[], query: string, folderById: Map<string, Folder>) {
-  const needle = query.trim().toLowerCase()
-  if (!needle) return documents
-  return documents.filter((document) => [
-    documentTitle(document),
-    document.original_filename,
-    document.collection_name,
-    document.processing_state,
-    document.folder_id ? folderById.get(document.folder_id)?.path : 'Home',
-  ].some((value) => String(value || '').toLowerCase().includes(needle)))
 }
