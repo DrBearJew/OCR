@@ -23,7 +23,7 @@ from app.services.llm_enrichment import (
 )
 from app.services.llm_qwen import build_qwen_provider
 from app.services.model_setup import settings_with_model_setup
-from app.services.ocr_glm import OCRProvider, build_ocr_provider
+from app.services.ocr_glm import OCRProvider, OCRProviderError, build_ocr_provider
 from app.services.ocr_pipeline import resolve_ocr_config, store_effective_ocr_trace
 from app.services.paperless_metadata import apply_paperless_metadata
 from app.services.shared_titles import title_is_locked
@@ -789,10 +789,32 @@ def run_ocr_for_document(
         db.commit()
 
         logger.info("OCR started document_id=%s path=%s", document.id, document.storage_path)
-        if _is_pdf_document(document):
-            result = _extract_pdf_pages(provider, document, config)
-        else:
-            result = provider.extract_text(document.storage_path)
+        try:
+            if _is_pdf_document(document):
+                result = _extract_pdf_pages(provider, document, config)
+            else:
+                result = provider.extract_text(document.storage_path)
+        except OCRProviderError as exc:
+            empty_paddle_vl = config.ocr_engine == "paddle_vl" and "empty text" in str(exc).lower()
+            can_fallback = empty_paddle_vl and not _is_pdf_document(document)
+            if not can_fallback:
+                raise
+            record_event(
+                db,
+                document,
+                "ocr_fallback_ppocrv6",
+                "PaddleOCR-VL returned empty text; falling back to local PP-OCRv6",
+                metadata={"error": str(exc), "from_engine": config.ocr_engine, "fallback_engine": "ppocrv6"},
+            )
+            db.commit()
+            logger.warning("PaddleOCR-VL returned empty text for document_id=%s; falling back to PP-OCRv6", document.id)
+            fallback_provider = build_ocr_provider(runtime_settings, provider_name="ppocrv6")
+            result = fallback_provider.extract_text(document.storage_path)
+            result.raw_response = {
+                **(result.raw_response or {}),
+                "fallback_from": config.ocr_engine,
+                "fallback_reason": str(exc),
+            }
         document.ocr_text = result.text
         document.raw_ocr_json = result.raw_response
         _write_page_fragments(db, document, result.text, result.raw_response)

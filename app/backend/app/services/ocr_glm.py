@@ -282,7 +282,7 @@ class PPOCRv6Provider:
                 results = pipeline.predict(str(input_path))
             except Exception as exc:  # noqa: BLE001
                 raise OCRProviderError(f"PP-OCRv6 request failed: {exc}") from exc
-        page_results = [_ppocr_result_to_dict(result) for result in results]
+        page_results = [_ppocr_result_summary(result) for result in results]
         texts: list[str] = []
         scores: list[float] = []
         for result in page_results:
@@ -368,6 +368,36 @@ def _ppocr_result_to_dict(result: object) -> dict:
     except Exception:  # noqa: BLE001
         data = {"raw": repr(result)}
     return _to_jsonable(data)
+
+
+def _ppocr_result_summary(result: object) -> dict:
+    """Return a compact JSON-safe PP-OCR result.
+
+    PaddleOCR result objects can contain very large image/box tensors. Storing the
+    full mapping in PostgreSQL JSONB can exceed the JSONB per-array limit. Keep
+    only the recognized text, scores, and lightweight counts needed for traces.
+    """
+    try:
+        data = dict(result)
+    except Exception:  # noqa: BLE001
+        return {"raw_repr": repr(result)[:1000]}
+    rec_texts = _to_jsonable(data.get("rec_texts") or [])
+    rec_scores = _to_jsonable(data.get("rec_scores") or [])
+    rec_boxes = data.get("rec_boxes")
+    if rec_boxes is None:
+        rec_boxes = data.get("dt_polys")
+    if rec_boxes is None:
+        rec_boxes = []
+    try:
+        box_count = len(rec_boxes)
+    except TypeError:
+        box_count = None
+    return {
+        "rec_texts": rec_texts[:500] if isinstance(rec_texts, list) else rec_texts,
+        "rec_scores": rec_scores[:500] if isinstance(rec_scores, list) else rec_scores,
+        "text_count": len(rec_texts) if isinstance(rec_texts, list) else None,
+        "box_count": box_count,
+    }
 
 
 def _to_jsonable(value):
