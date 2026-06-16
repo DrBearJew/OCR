@@ -625,5 +625,11 @@ export const de: Record<string, string> = {
   'collections.titleRule': 'Titelregel',
   'collections.customFields': 'Benutzerfelder',
   'collections.ocrConfig': 'OCR-Konfiguration',
-  'collections.searchDefaults': 'Suchvorgaben'
+  'collections.searchDefaults': 'Suchvorgaben',
+  'schemas.order': 'Reihenfolge',
+  'schemas.type': 'Typ',
+  'schemas.template': 'Vorlage',
+  'schemas.global': 'global',
+  'common.yes': 'ja',
+  'common.no': 'nein'
 }

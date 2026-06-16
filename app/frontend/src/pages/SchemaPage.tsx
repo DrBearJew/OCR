@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { Plus, RefreshCw } from 'lucide-react'
 import { api } from '../api/client'
 import type { Collection, CustomFieldDefinition, CustomFieldType, PaperlessMetadata } from '../types'
@@ -23,6 +23,7 @@ export default function SchemaPage() {
   const [metadataTemplate, setMetadataTemplate] = useState('{collection}/{year}')
   const [collectionForm, setCollectionForm] = useState({ name: '', slug: '', icon: '', color: '#22c55e' })
   const [error, setError] = useState('')
+  const collectionNameById = useMemo(() => new Map(collections.map((item) => [item.id, item.name])), [collections])
 
   async function load() {
     setError('')
@@ -140,7 +141,7 @@ export default function SchemaPage() {
             </form>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Order</th><th>Name</th><th>Slug</th><th>Type</th><th>Required</th><th>Searchable</th></tr></thead>
+                <thead><tr><th>{t('schemas.order')}</th><th>{t('schemas.name')}</th><th>{t('schemas.slug')}</th><th>{t('schemas.type')}</th><th>{t('schemas.required')}</th><th>{t('schemas.searchable')}</th></tr></thead>
                 <tbody>
                   {fields.map((field) => (
                     <tr key={field.id}>
@@ -148,8 +149,8 @@ export default function SchemaPage() {
                       <td>{field.name}</td>
                       <td>{field.slug}</td>
                       <td>{field.field_type}</td>
-                      <td>{field.required ? 'yes' : 'no'}</td>
-                      <td>{field.searchable ? 'yes' : 'no'}</td>
+                      <td>{field.required ? t('common.yes') : t('common.no')}</td>
+                      <td>{field.searchable ? t('common.yes') : t('common.no')}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -162,7 +163,7 @@ export default function SchemaPage() {
               <select value={metadataKind} onChange={(event) => setMetadataKind(event.target.value as typeof metadataKind)}>
                 <option value="correspondents">{t('schemas.correspondents')}</option>
                 <option value="document-types">{t('schemas.documentTypes')}</option>
-                <option value="tags">Tags</option>
+                <option value="tags">{t('fields.tags')}</option>
                 <option value="storage-paths">{t('schemas.storagePaths')}</option>
               </select>
               <input placeholder={t('schemas.name')} value={metadataName} onChange={(event) => setMetadataName(event.target.value)} />
@@ -171,13 +172,13 @@ export default function SchemaPage() {
             </form>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Name</th><th>Slug</th><th>Collection</th><th>Template</th></tr></thead>
+                <thead><tr><th>{t('schemas.name')}</th><th>{t('schemas.slug')}</th><th>{t('dashboard.collection')}</th><th>{t('schemas.template')}</th></tr></thead>
                 <tbody>
                   {metadataRows.map((row) => (
                     <tr key={row.id}>
                       <td>{row.name}</td>
                       <td>{row.slug}</td>
-                      <td>{row.collection_id || 'global'}</td>
+                      <td>{row.collection_id ? collectionNameById.get(row.collection_id) || row.collection_id : t('schemas.global')}</td>
                       <td>{row.path_template || ''}</td>
                     </tr>
                   ))}
