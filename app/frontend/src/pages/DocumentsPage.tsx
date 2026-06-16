@@ -113,9 +113,24 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
     void load(next)
   }
 
+  function selectedDocumentIdsForActions() {
+    const checkedIds = Array.from(selectedIds).filter((id) => !id.startsWith('demo-'))
+    if (checkedIds.length) return checkedIds
+    return selected?.id && !selected.id.startsWith('demo-') ? [selected.id] : []
+  }
+
+  function bulkTargetLabel() {
+    const checkedIds = Array.from(selectedIds).filter((id) => !id.startsWith('demo-'))
+    if (checkedIds.length) return `${checkedIds.length} ${t('documents.selected')}`
+    return selected?.id && !selected.id.startsWith('demo-') ? t('documents.activeTarget') : `0 ${t('documents.selected')}`
+  }
+
   async function bulk(action: string, extra: Record<string, unknown> = {}) {
-    const ids = Array.from(selectedIds).filter((id) => !id.startsWith('demo-'))
-    if (!ids.length) return
+    const ids = selectedDocumentIdsForActions()
+    if (!ids.length) {
+      setError(t('documents.selectDocumentForAction'))
+      return
+    }
     setError('')
     setMessage('')
     setBusyAction(action)
@@ -223,12 +238,12 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
             <SavedViewsBar section="documents" filters={filters} onApply={(next) => { setFilters(next); void load(next) }} />
           </div>
           <div className="bulk-bar console-bulk">
-            <span>{selectedIds.size} {t('documents.selected')}</span>
-            <button disabled={Boolean(busyAction)} onClick={() => void bulk('retry')}>{t('common.retryOcr')}</button>
-            <button disabled={Boolean(busyAction)} onClick={() => void bulk('reextract')}>{t('common.reextract')}</button>
-            <button disabled={Boolean(busyAction)} onClick={() => void bulk('set_review_state', { review_state: 'needs_review', review_reason: 'Bulk marked for review' })}>{t('common.needsReview')}</button>
-            <button disabled={Boolean(busyAction)} onClick={() => void bulk('set_review_state', { review_state: 'reviewed', review_reason: null })}>{t('common.reviewed')}</button>
-            <button className="danger-button" disabled={Boolean(busyAction)} onClick={() => void deleteSelectedDocuments()}><Trash2 size={16} /> {t('documents.deleteSelected')}</button>
+            <span>{bulkTargetLabel()}</span>
+            <button disabled={Boolean(busyAction) || !selectedDocumentIdsForActions().length} onClick={() => void bulk('retry')}>{t('common.retryOcr')}</button>
+            <button disabled={Boolean(busyAction) || !selectedDocumentIdsForActions().length} onClick={() => void bulk('reextract')}>{t('common.reextract')}</button>
+            <button disabled={Boolean(busyAction) || !selectedDocumentIdsForActions().length} onClick={() => void bulk('set_review_state', { review_state: 'needs_review', review_reason: 'Bulk marked for review' })}>{t('common.needsReview')}</button>
+            <button disabled={Boolean(busyAction) || !selectedDocumentIdsForActions().length} onClick={() => void bulk('set_review_state', { review_state: 'reviewed', review_reason: null })}>{t('common.reviewed')}</button>
+            <button className="danger-button" disabled={Boolean(busyAction) || !Array.from(selectedIds).filter((id) => !id.startsWith('demo-')).length} onClick={() => void deleteSelectedDocuments()}><Trash2 size={16} /> {t('documents.deleteSelected')}</button>
           </div>
           <div className="document-console-table">
             <div className="doc-table-head">

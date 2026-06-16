@@ -35,6 +35,8 @@ const checks = [
   ['PDF upload input is explicitly accepted', dashboard, '.pdf,.jpg,.jpeg,.png,.webp,.tif,.tiff'],
   ['Documents page exposes delete selected action', documentsPage, 'documents.deleteSelected'],
   ['Documents page calls deleteDocument API', documentsPage, 'api.deleteDocument'],
+  ['Documents bulk actions fall back to active row', documentsPage, 'selectedDocumentIdsForActions'],
+  ['Documents bulk bar labels active target', documentsPage, 'documents.activeTarget'],
   ['Documents inspector exposes delete action', documentsPage, 'onDelete'],
   ['Collections page exposes create collection action', collectionsPage, 'collections.create'],
   ['Collections page calls createCollection API', collectionsPage, 'api.createCollection'],

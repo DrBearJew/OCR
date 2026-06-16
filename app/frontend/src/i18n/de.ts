@@ -555,6 +555,8 @@ export const de: Record<string, string> = {
   'documents.kpiSynced': 'Synchronisiert',
   'documents.kpiSyncedDetail': 'bereit',
   'documents.selected': 'ausgewählt',
+  'documents.activeTarget': '1 aktives Dokument',
+  'documents.selectDocumentForAction': 'Wähle zuerst ein Dokument aus.',
   'documents.ocrConfidenceShort': 'OCR-Konf.',
   'fields.invoiceDate': 'Rechnungsdatum',
   'fields.statusReviewState': 'Status / Prüfstatus',
