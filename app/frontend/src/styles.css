@@ -8590,3 +8590,41 @@ main,
     display: none;
   }
 }
+
+
+/* Stabilize upload grid: right rail expands internally instead of pushing profiles/menu. */
+.upload-redesign-grid {
+  align-items: start;
+}
+
+.metadata-redesign-rail {
+  position: sticky;
+  top: 0.85rem;
+  max-height: calc(100vh - 7.5rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 0.2rem;
+  scrollbar-gutter: stable;
+}
+
+.metadata-redesign-rail::-webkit-scrollbar {
+  width: 8px;
+}
+
+.metadata-redesign-rail::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.28);
+}
+
+.processing-profile-card {
+  align-self: start;
+}
+
+@media (max-width: 1300px) {
+  .metadata-redesign-rail {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+}
