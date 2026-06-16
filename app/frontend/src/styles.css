@@ -9759,3 +9759,186 @@ main,
     grid-template-columns: 1fr !important;
   }
 }
+
+
+/* Polished app action buttons: shared premium button language across pages. */
+:where(
+  .button-row,
+  .admin-actions,
+  .collection-actions,
+  .folder-tree-tools,
+  .saved-views,
+  .filter-row,
+  .document-toolbar,
+  .collection-detail-toolbar,
+  .record-toolbar,
+  .schema-form,
+  .search-band,
+  .upload-band,
+  .record-upload-band
+) :where(button, a.icon-button):not(.top-menu):not(.brand-button):not(.logout):not(.notification-button):not(.admin-menu):not(.language-switch button):not(.attachment-tile):not(.processing-profile-tile):not(.zoom-value):not(.danger-button),
+.workflow-card > .button-row :where(button, a.icon-button):not(.danger-button):not(.zoom-value),
+.collection-actions button,
+.admin-actions button,
+.folders-page .folder-tree-tools button,
+.folders-page .folder-tree-panel > button {
+  position: relative;
+  overflow: hidden;
+  min-height: 2.65rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.52rem;
+  border: 1px solid rgba(94, 234, 212, 0.26) !important;
+  border-radius: 13px !important;
+  color: #eafcff !important;
+  background:
+    radial-gradient(circle at 14% 8%, rgba(94, 234, 212, 0.2), transparent 34%),
+    linear-gradient(145deg, rgba(18, 36, 55, 0.96), rgba(8, 17, 29, 0.96)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045), 0 10px 22px rgba(0, 0, 0, 0.16) !important;
+  font-weight: 800;
+  letter-spacing: 0.005em;
+  transition: transform 140ms ease, border-color 140ms ease, background 140ms ease, box-shadow 140ms ease, color 140ms ease;
+}
+
+:where(
+  .button-row,
+  .admin-actions,
+  .collection-actions,
+  .folder-tree-tools,
+  .saved-views,
+  .filter-row,
+  .document-toolbar,
+  .collection-detail-toolbar,
+  .record-toolbar,
+  .schema-form,
+  .search-band,
+  .upload-band,
+  .record-upload-band
+) :where(button, a.icon-button):not(.top-menu):not(.brand-button):not(.logout):not(.notification-button):not(.admin-menu):not(.language-switch button):not(.attachment-tile):not(.processing-profile-tile):not(.zoom-value):not(.danger-button)::after,
+.workflow-card > .button-row :where(button, a.icon-button):not(.danger-button):not(.zoom-value)::after,
+.collection-actions button::after,
+.admin-actions button::after,
+.folders-page .folder-tree-tools button::after,
+.folders-page .folder-tree-panel > button::after {
+  content: '';
+  position: absolute;
+  inset: auto -18% -70% 24%;
+  height: 3.8rem;
+  transform: rotate(-12deg);
+  background: linear-gradient(90deg, transparent, rgba(45, 212, 191, 0.11), transparent);
+  pointer-events: none;
+}
+
+:where(
+  .button-row,
+  .admin-actions,
+  .collection-actions,
+  .folder-tree-tools,
+  .saved-views,
+  .filter-row,
+  .document-toolbar,
+  .collection-detail-toolbar,
+  .record-toolbar,
+  .schema-form,
+  .search-band,
+  .upload-band,
+  .record-upload-band
+) :where(button, a.icon-button):not(.top-menu):not(.brand-button):not(.logout):not(.notification-button):not(.admin-menu):not(.language-switch button):not(.attachment-tile):not(.processing-profile-tile):not(.zoom-value):not(.danger-button):hover:not(:disabled),
+.workflow-card > .button-row :where(button, a.icon-button):not(.danger-button):not(.zoom-value):hover:not(:disabled),
+.collection-actions button:hover:not(:disabled),
+.admin-actions button:hover:not(:disabled),
+.folders-page .folder-tree-tools button:hover:not(:disabled),
+.folders-page .folder-tree-panel > button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(94, 234, 212, 0.76) !important;
+  color: #ffffff !important;
+  background:
+    radial-gradient(circle at 14% 8%, rgba(94, 234, 212, 0.3), transparent 34%),
+    linear-gradient(145deg, rgba(22, 47, 70, 1), rgba(10, 24, 40, 1)) !important;
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.1), 0 14px 30px rgba(20, 184, 166, 0.16) !important;
+}
+
+:where(
+  .button-row,
+  .admin-actions,
+  .collection-actions,
+  .folder-tree-tools,
+  .saved-views,
+  .filter-row,
+  .document-toolbar,
+  .collection-detail-toolbar,
+  .record-toolbar,
+  .schema-form,
+  .search-band,
+  .upload-band,
+  .record-upload-band
+) :where(button, a.icon-button):not(.top-menu):not(.brand-button):not(.logout):not(.notification-button):not(.admin-menu):not(.language-switch button):not(.attachment-tile):not(.processing-profile-tile):not(.zoom-value):not(.danger-button):focus-visible,
+.workflow-card > .button-row :where(button, a.icon-button):not(.danger-button):not(.zoom-value):focus-visible,
+.collection-actions button:focus-visible,
+.admin-actions button:focus-visible,
+.folders-page .folder-tree-tools button:focus-visible,
+.folders-page .folder-tree-panel > button:focus-visible {
+  outline: none;
+  border-color: rgba(94, 234, 212, 0.9) !important;
+  box-shadow: 0 0 0 4px rgba(45, 212, 191, 0.16), 0 14px 30px rgba(20, 184, 166, 0.16) !important;
+}
+
+.primary:not(.process-button):not(.sliced-login-submit) {
+  border-color: rgba(94, 234, 212, 0.72) !important;
+  color: #04201c !important;
+  background:
+    linear-gradient(145deg, #77f2df 0%, #34d399 48%, #14b8a6 100%) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 14px 28px rgba(20, 184, 166, 0.2) !important;
+  font-weight: 900;
+}
+
+.primary:not(.process-button):not(.sliced-login-submit):hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: saturate(1.08) brightness(1.04);
+  box-shadow: 0 0 0 4px rgba(45, 212, 191, 0.14), 0 18px 34px rgba(20, 184, 166, 0.24) !important;
+}
+
+.icon-button:not(.top-menu):not(.notification-button):not(.admin-menu):not(.danger-button),
+a.icon-button:not(.danger-button) {
+  border-color: rgba(94, 234, 212, 0.24) !important;
+  color: #dffcff !important;
+  background: linear-gradient(145deg, rgba(20, 184, 166, 0.18), rgba(59, 130, 246, 0.1)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 8px 18px rgba(0, 0, 0, 0.16) !important;
+}
+
+.icon-button:not(.top-menu):not(.notification-button):not(.admin-menu):not(.danger-button):hover:not(:disabled),
+a.icon-button:not(.danger-button):hover {
+  transform: translateY(-1px);
+  border-color: rgba(94, 234, 212, 0.72) !important;
+  color: #ffffff !important;
+}
+
+.danger-button,
+.icon-button.danger-button {
+  border-color: rgba(248, 113, 113, 0.34) !important;
+  color: #fecaca !important;
+  background: linear-gradient(145deg, rgba(127, 29, 29, 0.36), rgba(31, 15, 20, 0.92)) !important;
+}
+
+.danger-button:hover:not(:disabled),
+.icon-button.danger-button:hover:not(:disabled) {
+  border-color: rgba(248, 113, 113, 0.8) !important;
+  box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.12), 0 14px 30px rgba(127, 29, 29, 0.18) !important;
+}
+
+.folders-page .folder-row .folder-select {
+  border-radius: 12px !important;
+  background:
+    linear-gradient(145deg, rgba(17, 31, 48, 0.95), rgba(9, 18, 31, 0.95)) !important;
+  border-color: rgba(94, 234, 212, 0.16) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035) !important;
+}
+
+.folders-page .folder-row .folder-select:hover,
+.folders-page .folder-row .folder-select.active {
+  border-color: rgba(94, 234, 212, 0.62) !important;
+  background:
+    radial-gradient(circle at 16% 10%, rgba(94, 234, 212, 0.16), transparent 32%),
+    linear-gradient(145deg, rgba(18, 42, 58, 0.98), rgba(9, 20, 34, 0.98)) !important;
+}
