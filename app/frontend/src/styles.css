@@ -9508,3 +9508,54 @@ main,
     padding: 5rem !important;
   }
 }
+
+
+/* Upload preview scroll canvas: no negative left overflow when zoomed. */
+.document-preview-layout .upload-zoomable-preview.document-preview-surface {
+  height: clamp(560px, 66vh, 720px) !important;
+  min-height: 0 !important;
+  max-height: clamp(560px, 66vh, 720px) !important;
+  overflow: auto !important;
+  padding: 0 !important;
+}
+
+.document-preview-layout .upload-zoomable-preview .document-preview-stage {
+  display: block !important;
+  width: 100% !important;
+  min-width: 100% !important;
+  min-height: 100% !important;
+  padding: 10rem !important;
+  box-sizing: border-box !important;
+}
+
+.document-preview-layout .upload-zoomable-preview .document-preview-object {
+  display: block !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  transform-origin: center center !important;
+  transition: transform 160ms ease !important;
+}
+
+.document-preview-layout .upload-zoomable-preview .upload-zoomable-preview-media {
+  display: block !important;
+  width: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+  object-fit: contain !important;
+}
+
+.document-preview-layout .upload-zoomable-preview img.upload-zoomable-preview-media {
+  height: auto !important;
+}
+
+.document-preview-layout .upload-zoomable-preview iframe.upload-zoomable-preview-media {
+  min-height: 620px !important;
+}
+
+@media (max-width: 1200px) {
+  .document-preview-layout .upload-zoomable-preview .document-preview-stage {
+    padding: 5rem !important;
+  }
+}

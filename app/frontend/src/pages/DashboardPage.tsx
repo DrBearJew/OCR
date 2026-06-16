@@ -628,10 +628,11 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
   const [rotation, setRotation] = useState(0)
   const [showOcr, setShowOcr] = useState(true)
   const previewSurfaceRef = useRef<HTMLDivElement | null>(null)
+  const [basePreviewWidth, setBasePreviewWidth] = useState(760)
   const isPdf = selected?.kind === 'pdf'
+  const zoomedPreviewWidth = Math.round(basePreviewWidth * zoom / 100)
   const previewObjectStyle = {
-    width: `${zoom}%`,
-    maxWidth: zoom <= 100 ? '100%' : 'none',
+    width: `${zoomedPreviewWidth}px`,
     transform: `rotate(${rotation}deg)`
   }
   const pdfMediaStyle = { height: `${Math.round(620 * zoom / 100)}px` }
@@ -639,6 +640,21 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
   useEffect(() => {
     setZoom(100)
     setRotation(0)
+  }, [selected?.id])
+
+  useEffect(() => {
+    let frame = 0
+    const updateBaseWidth = () => {
+      const surface = previewSurfaceRef.current
+      if (!surface) return
+      setBasePreviewWidth(Math.max(360, Math.min(920, surface.clientWidth - 180)))
+    }
+    frame = requestAnimationFrame(updateBaseWidth)
+    window.addEventListener('resize', updateBaseWidth)
+    return () => {
+      cancelAnimationFrame(frame)
+      window.removeEventListener('resize', updateBaseWidth)
+    }
   }, [selected?.id])
 
   function clampZoom(value: number) {
