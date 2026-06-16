@@ -270,6 +270,9 @@ def _folder_document_contents(
             status=document.processing_state.value,
             review_state=document.review_state.value,
             original_filename=document.original_filename,
+            mime_type=document.mime_type,
+            thumbnail_path=document.thumbnail_path,
+            ocr_snippet=_compact_ocr_snippet(document.ocr_text),
             created_at=document.created_at,
             updated_at=document.updated_at,
         )
@@ -323,6 +326,13 @@ def _apply_document_query(stmt, q: str | None):
         func.lower(func.coalesce(Document.collection_name, "")).like(like),
         func.lower(func.coalesce(Folder.path, "")).like(like),
     ))
+
+
+def _compact_ocr_snippet(text: str | None, limit: int = 520) -> str | None:
+    if not text:
+        return None
+    compact = " ".join(text.split())
+    return compact[:limit] if compact else None
 
 
 def _apply_cursor(stmt, model, cursor: str | None):

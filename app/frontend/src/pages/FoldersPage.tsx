@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight, FolderOpen, FolderPlus, FolderTree, RefreshCw, Search, Trash2 } from 'lucide-react'
-import { api } from '../api/client'
+import { api, thumbnailUrl } from '../api/client'
 import type { Folder, FolderContentsItem, FolderContentsPage } from '../types'
 import { useI18n } from '../i18n'
 
@@ -11,8 +11,9 @@ interface Props {
 const ROOT_PARENT = '__root__'
 const PAGE_LIMIT = 50
 const parentKey = (id: string | null | undefined) => id || ROOT_PARENT
+const emptyDocumentPage = (): FolderContentsPage => ({ kind: 'documents', scope: 'all', folder_id: null, limit: PAGE_LIMIT, next_cursor: null, total_estimate: 0, items: [] })
 
-type FolderScope = 'all' | 'subtree' | 'unfiled'
+type FolderScope = 'all' | 'direct' | 'unfiled'
 
 export default function FoldersPage({ onOpenDocument }: Props) {
   const { t } = useI18n()
@@ -46,6 +47,7 @@ export default function FoldersPage({ onOpenDocument }: Props) {
   )
   const documents = documentPage?.items || []
   const selectedDocumentCount = documentPage?.total_estimate ?? 0
+  const showDocumentShortcuts = Boolean(selected || showUnfiledOnly || appliedQuery.trim())
 
   useEffect(() => {
     void load()
@@ -57,18 +59,20 @@ export default function FoldersPage({ onOpenDocument }: Props) {
   }, [selected?.id, selected?.name, selected?.parent_id])
 
   function currentScope(folderId = selectedId, unfiledOnly = showUnfiledOnly): FolderScope {
-    if (folderId) return 'subtree'
+    if (folderId) return 'direct'
     return unfiledOnly ? 'unfiled' : 'all'
   }
 
   async function fetchContents(folderId = selectedId, unfiledOnly = showUnfiledOnly, search = query) {
+    const normalizedSearch = search.trim()
+    const isHomeLanding = !folderId && !unfiledOnly && !normalizedSearch
     const scope = currentScope(folderId, unfiledOnly)
-    const params = { scope, folderId, q: search, limit: PAGE_LIMIT }
-    const [documentsResult, unfiledDocuments] = await Promise.all([
-      api.folderContents({ ...params, kind: 'documents' }),
-      api.folderContents({ kind: 'documents', scope: 'unfiled', limit: 1 }),
-    ])
-    setAppliedQuery(search)
+    const unfiledPromise = api.folderContents({ kind: 'documents', scope: 'unfiled', limit: 1 })
+    const documentsPromise = isHomeLanding
+      ? Promise.resolve(emptyDocumentPage())
+      : api.folderContents({ kind: 'documents', scope, folderId, q: normalizedSearch, limit: PAGE_LIMIT })
+    const [documentsResult, unfiledDocuments] = await Promise.all([documentsPromise, unfiledPromise])
+    setAppliedQuery(normalizedSearch)
     setDocumentPage(documentsResult)
     setUnfiledDocumentCount(unfiledDocuments.total_estimate)
   }
@@ -203,7 +207,12 @@ export default function FoldersPage({ onOpenDocument }: Props) {
   function selectHome(unfiledOnly = false) {
     setSelectedId(null)
     setShowUnfiledOnly(unfiledOnly)
-    void load(null, unfiledOnly)
+    if (!unfiledOnly) {
+      setQuery('')
+      void load(null, false, '')
+      return
+    }
+    void load(null, true, query)
   }
 
   function search(event: FormEvent) {
@@ -248,6 +257,33 @@ export default function FoldersPage({ onOpenDocument }: Props) {
     )
   }
 
+  function renderDocumentShortcut(document: FolderContentsItem) {
+    const extension = (document.original_filename || document.title).split('.').pop()?.slice(0, 5).toUpperCase() || 'DOC'
+    const statusLabel = t(`status.${document.status}`, String(document.status || '').replace(/_/g, ' '))
+    return (
+      <article key={document.id} className="folder-document-shortcut">
+        <button type="button" className="folder-shortcut-button" onClick={() => onOpenDocument(document.id)}>
+          <span className="folder-shortcut-icon">
+            {document.thumbnail_path ? <img src={thumbnailUrl(document.id)} alt="" /> : <span>{extension}</span>}
+          </span>
+          <span className="folder-shortcut-title">{document.title}</span>
+          <small>{statusLabel}</small>
+          <span className="folder-shortcut-preview" role="tooltip">
+            <span className="folder-shortcut-preview-media">
+              {document.thumbnail_path ? <img src={thumbnailUrl(document.id)} alt="" /> : <span>{extension}</span>}
+            </span>
+            <span className="folder-shortcut-preview-text">
+              <strong>{document.original_filename || document.title}</strong>
+              <small>{document.collection_name || t('common.document', 'Document')} · {statusLabel} · {folderLabel(document.folder_id)}</small>
+              <p>{document.ocr_snippet || t('folders.noOcrPreview', 'No OCR preview yet.')}</p>
+            </span>
+          </span>
+        </button>
+        {renderDestinationSelect(document, (folderId) => void moveDocument(document, folderId))}
+      </article>
+    )
+  }
+
   function renderFolderRows(parentId: string | null, depth = 0): ReactNode {
     return (folderChildren.get(parentKey(parentId)) || []).map((folder) => {
       const children = folderChildren.get(folder.id) || []
@@ -289,7 +325,7 @@ export default function FoldersPage({ onOpenDocument }: Props) {
           <h1>{t('folders.title')}</h1>
           <p>{t('folders.subtitle')}</p>
         </div>
-        <button type="button" onClick={() => void load()}><RefreshCw size={16} /> {t('common.refresh')}</button>
+        <button type="button" className="primary folder-refresh-button" onClick={() => void load(selectedId, showUnfiledOnly, appliedQuery)}><RefreshCw size={16} /> {t('common.refresh')}</button>
       </section>
 
       {message && <p className="success-message">{message}</p>}
@@ -320,7 +356,7 @@ export default function FoldersPage({ onOpenDocument }: Props) {
             <div>
               <div className="breadcrumb">{breadcrumb.map((part, index) => <span key={`${part}-${index}`}>{index ? ' / ' : ''}{part}</span>)}</div>
               <h2>{selected?.path || (showUnfiledOnly ? t('folders.unfiledItems', 'Unfiled items') : t('folders.allFolders'))}</h2>
-              <p>{selected ? t('folders.currentFolderHelp', 'Browse and file documents in this folder and its children.') : t('folders.homeHelp', 'Browse all documents or use Unfiled to assign files into folders.')}</p>
+              <p>{selected ? t('folders.currentFolderHelp', 'Browse and file documents in this folder and its children.') : showUnfiledOnly ? t('folders.unfiledHelp', 'Assign loose files into folders.') : appliedQuery ? t('folders.searchHelp', 'Search results are paginated. Open a folder to browse it like a file cabinet.') : t('folders.homeFoldersOnly', 'Home shows folder shortcuts only. Open a folder or Unfiled to see document shortcuts.')}</p>
             </div>
           </div>
 
@@ -346,35 +382,34 @@ export default function FoldersPage({ onOpenDocument }: Props) {
 
           <form className="folder-content-toolbar" onSubmit={search}>
             <label className="toolbar-search"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('folders.searchPlaceholder', 'Search documents, filenames, folders...')} /></label>
-            <button type="submit">{t('common.search', 'Search')}</button>
+            <button type="submit" className="primary folder-search-button"><Search size={16} /> {t('common.search', 'Search')}</button>
             {!selected && <button type="button" className={!showUnfiledOnly ? 'active' : ''} onClick={() => selectHome(false)}>{t('folders.allItems', 'All items')}</button>}
             {!selected && <button type="button" className={showUnfiledOnly ? 'active' : ''} onClick={() => selectHome(true)}>{t('folders.unfiled', 'Unfiled')}</button>}
           </form>
 
           <div className="table-card folder-child-card">
-            <h3><FolderOpen size={16} /> {t('folders.childFolders', 'Child folders')}</h3>
-            {childFolders.length ? childFolders.map((folder) => (
-              <button key={folder.id} type="button" className="folder-child-row" onClick={() => selectFolder(folder)}>
-                <span>{folder.name}</span>
-                <small>{folder.document_count} {t('common.documents')}</small>
-              </button>
-            )) : <p className="empty-state">{t('folders.noChildFoldersInSelection', 'No child folders here yet.')}</p>}
-          </div>
-
-
-          <div className="table-card folder-items-card">
-            <h3>{t('common.documents')} <small>{documents.length} / {documentPage?.total_estimate ?? 0}</small></h3>
-            {documents.length ? documents.map((document) => (
-              <div key={document.id} className="folder-managed-row">
-                <button className="list-row" onClick={() => onOpenDocument(document.id)}>
-                  <span className="folder-item-title">{document.title}</span>
-                  <small className="folder-item-meta">{document.collection_name} · {t(`status.${document.status}`, String(document.status || '').replace(/_/g, ' '))} · {folderLabel(document.folder_id)}</small>
-                </button>
-                {renderDestinationSelect(document, (folderId) => void moveDocument(document, folderId))}
+            <h3><FolderOpen size={16} /> {t('folders.folderShortcuts', 'Folder shortcuts')}</h3>
+            {childFolders.length ? (
+              <div className="folder-child-grid">
+                {childFolders.map((folder) => (
+                  <button key={folder.id} type="button" className="folder-child-row" onClick={() => selectFolder(folder)}>
+                    <FolderOpen size={21} />
+                    <span>{folder.name}</span>
+                    <small>{folder.document_count} {t('common.documents')}</small>
+                  </button>
+                ))}
               </div>
-            )) : <p className="empty-state">{t('folders.noDocuments', 'No documents match this folder/filter.')}</p>}
-            {documentPage?.next_cursor && <button type="button" className="folder-load-more" disabled={busy === 'load-more:documents'} onClick={() => void loadMore()}>{t('folders.loadMore', 'Load more')}</button>}
+            ) : <p className="empty-state">{t('folders.noChildFoldersInSelection', 'No child folders here yet.')}</p>}
           </div>
+
+
+          {showDocumentShortcuts && (
+            <div className="table-card folder-items-card">
+              <h3>{t('folders.fileShortcuts', 'File shortcuts')} <small>{documents.length} / {documentPage?.total_estimate ?? 0}</small></h3>
+              {documents.length ? <div className="folder-shortcut-grid">{documents.map(renderDocumentShortcut)}</div> : <p className="empty-state">{t('folders.noDocuments', 'No documents match this folder/filter.')}</p>}
+              {documentPage?.next_cursor && <button type="button" className="folder-load-more primary" disabled={busy === 'load-more:documents'} onClick={() => void loadMore()}>{t('folders.loadMore', 'Load more')}</button>}
+            </div>
+          )}
         </section>
       </section>
     </main>

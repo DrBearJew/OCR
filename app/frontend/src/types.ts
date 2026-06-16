@@ -177,6 +177,9 @@ export interface FolderContentsItem {
   review_state: string | null
   document_count: number | null
   original_filename: string | null
+  mime_type: string | null
+  thumbnail_path: string | null
+  ocr_snippet: string | null
   created_at: string
   updated_at: string
 }
