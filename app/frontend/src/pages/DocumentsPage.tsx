@@ -139,32 +139,32 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
       </header>
       {error && <p className="warning">{error}</p>}
       <section className="doc-kpi-grid">
-        <KpiCard icon={<FileText size={25} />} label="Total Documents" value={stats.total} detail="+18 this week" tone="green" />
-        <KpiCard icon={<RefreshCw size={25} />} label="Processing Queue" value={stats.processing} detail="in progress" tone="blue" />
-        <KpiCard icon={<AlertTriangle size={25} />} label="Needs Review" value={stats.needsReview} detail="high priority" tone="orange" />
-        <KpiCard icon={<AlertTriangle size={25} />} label="Failed OCR" value={stats.failed} detail="new today" tone="red" />
-        <KpiCard icon={<CheckCircle2 size={25} />} label="Synced" value={stats.synced} detail="ready" tone="green" />
+        <KpiCard icon={<FileText size={25} />} label={t('documents.kpiTotal')} value={stats.total} detail={t('documents.kpiTotalDetail')} tone="green" />
+        <KpiCard icon={<RefreshCw size={25} />} label={t('documents.kpiProcessing')} value={stats.processing} detail={t('documents.kpiProcessingDetail')} tone="blue" />
+        <KpiCard icon={<AlertTriangle size={25} />} label={t('documents.kpiNeedsReview')} value={stats.needsReview} detail={t('documents.kpiNeedsReviewDetail')} tone="orange" />
+        <KpiCard icon={<AlertTriangle size={25} />} label={t('documents.kpiFailedOcr')} value={stats.failed} detail={t('documents.kpiFailedOcrDetail')} tone="red" />
+        <KpiCard icon={<CheckCircle2 size={25} />} label={t('documents.kpiSynced')} value={stats.synced} detail={t('documents.kpiSyncedDetail')} tone="green" />
       </section>
       <section className="documents-console-grid">
         <section className="document-table-panel workflow-card">
           <div className="document-toolbar">
             <label className="toolbar-search"><Search size={17} /><input placeholder={t('documents.searchPlaceholder')} value={filters.title || ''} onChange={(event) => updateFilter('title', event.target.value)} /></label>
             <select value={filters.collection_name || ''} onChange={(event) => updateFilter('collection_name', event.target.value)}>
-              <option value="">Collection</option>
+              <option value="">{t('dashboard.collection')}</option>
               <option>Eingangsrechnung</option>
               <option>Ausgangsrechnung</option>
               <option>Belege</option>
             </select>
             <select value={filters.state || ''} onChange={(event) => updateFilter('state', event.target.value)}>
-              <option value="">Status</option>
-              <option value="complete">Complete</option>
-              <option value="failed">Failed</option>
-              <option value="ocr_processing">Processing</option>
+              <option value="">{t('fields.status')}</option>
+              <option value="complete">{t('common.complete')}</option>
+              <option value="failed">{t('common.failed')}</option>
+              <option value="ocr_processing">{t('common.processing')}</option>
             </select>
             <SavedViewsBar section="documents" filters={filters} onApply={(next) => { setFilters(next); void load(next) }} />
           </div>
           <div className="bulk-bar console-bulk">
-            <span>{selectedIds.size} selected</span>
+            <span>{selectedIds.size} {t('documents.selected')}</span>
             <button onClick={() => void bulk('retry')}>{t('common.retryOcr')}</button>
             <button onClick={() => void bulk('reextract')}>{t('common.reextract')}</button>
             <button onClick={() => void bulk('set_review_state', { review_state: 'needs_review', review_reason: 'Bulk marked for review' })}>{t('common.needsReview')}</button>
@@ -174,12 +174,12 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
           <div className="document-console-table">
             <div className="doc-table-head">
               <span />
-              <span>Title</span>
-              <span>Collection</span>
-              <span>Status</span>
-              <span>Date</span>
-              <span>Amount</span>
-              <span>OCR Conf.</span>
+              <span>{t('fields.title')}</span>
+              <span>{t('dashboard.collection')}</span>
+              <span>{t('fields.status')}</span>
+              <span>{t('fields.date')}</span>
+              <span>{t('fields.amount')}</span>
+              <span>{t('documents.ocrConfidenceShort')}</span>
             </div>
             {documents.map((document) => (
               <button key={document.id} className={`doc-table-row ${document.id === selected?.id ? 'selected' : ''}`} onClick={() => setSelectedId(document.id)}>
@@ -296,7 +296,7 @@ function DocumentPreviewPanel({ document, pages, loading, onOpenDocument }: { do
       {activeTab === 'ocr' && <pre className="ocr-preview console-ocr">{document.ocr_text || document.ocr_snippet || 'Open the document detail page to load full OCR text.'}</pre>}
       {activeTab === 'raw' && <pre className="ocr-preview console-ocr json-preview">{formatJson(document.raw_ocr_json, 'No raw OCR JSON stored for this document yet.')}</pre>}
       {activeTab === 'layout' && <LayoutPreview pages={pages} loading={loading} />}
-      <span className="confidence-pill">OCR Confidence: {document.processing_state === 'failed' ? 'NA' : '98%'}</span>
+      <span className="confidence-pill">{t('documents.ocrConfidence')}: {document.processing_state === 'failed' ? 'NA' : '98%'}</span>
       {largePreviewOpen && <LargePreviewModal document={document} onClose={() => setLargePreviewOpen(false)} />}
     </section>
   )
@@ -387,23 +387,24 @@ function DocumentInspector({ document, events, loading, onOpenDocument, onOpenRe
 }
 
 function DocumentDetailsFields({ document }: { document: Document }) {
+  const { t } = useI18n()
   return (
     <div className="detail-tab-panel">
-      <label>Title<input value={document.manual_title_override || document.extracted_title || document.original_filename} readOnly /></label>
-      <label>Collection<select value={document.collection_name} disabled><option>{document.collection_name}</option></select></label>
-      <label>Sender / Vendor<input value={document.extracted_sender || 'Demo Ges.mbh'} readOnly /></label>
-      <label>Recipient / Customer<input value={document.extracted_recipient || 'UniTech Technische Produkte'} readOnly /></label>
+      <label>{t('fields.title')}<input value={document.manual_title_override || document.extracted_title || document.original_filename} readOnly /></label>
+      <label>{t('dashboard.collection')}<select value={document.collection_name} disabled><option>{document.collection_name}</option></select></label>
+      <label>{t('fields.correspondentSender')}<input value={document.extracted_sender || 'Demo Ges.mbh'} readOnly /></label>
+      <label>{t('fields.recipientCustomer')}<input value={document.extracted_recipient || 'UniTech Technische Produkte'} readOnly /></label>
       <div className="detail-two">
-        <label>Invoice No.<input value={document.extracted_invoice_number || 'PR400000005'} readOnly /></label>
-        <label>Invoice Date<input value={document.extracted_date || '12/10/2020'} readOnly /></label>
+        <label>{t('fields.invoiceNumber')}<input value={document.extracted_invoice_number || 'PR400000005'} readOnly /></label>
+        <label>{t('fields.invoiceDate')}<input value={document.extracted_date || '12/10/2020'} readOnly /></label>
       </div>
       <div className="detail-two">
-        <label>Amount (Gross)<input value={document.extracted_amount || '205,25'} readOnly /></label>
-        <label>Currency<select value="EUR" disabled><option>EUR</option></select></label>
+        <label>{t('fields.amountGross')}<input value={document.extracted_amount || '205,25'} readOnly /></label>
+        <label>{t('fields.currency')}<select value="EUR" disabled><option>EUR</option></select></label>
       </div>
-      <label>Status / Review State<select value={document.review_state} disabled><option>{document.review_state}</option></select></label>
-      <label>Tags<div className="tag-input"><button type="button">invoice</button><button type="button">2020</button><button type="button">supplier:demo</button></div></label>
-      <label>Notes<textarea placeholder="Add notes..." readOnly /></label>
+      <label>{t('fields.statusReviewState')}<select value={document.review_state} disabled><option>{document.review_state}</option></select></label>
+      <label>{t('fields.tags')}<div className="tag-input"><button type="button">invoice</button><button type="button">2020</button><button type="button">supplier:demo</button></div></label>
+      <label>{t('fields.notes')}<textarea placeholder={t('documents.addNotes')} readOnly /></label>
     </div>
   )
 }
@@ -411,24 +412,24 @@ function DocumentDetailsFields({ document }: { document: Document }) {
 function DocumentMetadataPanel({ document }: { document: Document }) {
   const { t } = useI18n()
   const rows = [
-    ['Title', document.manual_title_override || document.extracted_title || '—'],
-    ['Sender', document.extracted_sender || '—'],
-    ['Recipient', document.extracted_recipient || '—'],
-    ['Invoice No.', document.extracted_invoice_number || '—'],
-    ['Date', document.extracted_date || '—'],
-    ['Amount', document.extracted_amount || '—'],
-    ['Payment', document.extracted_payment_method || '—'],
-    ['Summary', document.llm_summary || '—'],
-    ['Purpose', document.llm_document_purpose || '—'],
-    ['Confidence', document.llm_confidence == null ? '—' : String(document.llm_confidence)]
+    [t('fields.title'), document.manual_title_override || document.extracted_title || '—'],
+    [t('fields.sender'), document.extracted_sender || '—'],
+    [t('fields.recipient'), document.extracted_recipient || '—'],
+    [t('fields.invoiceNumber'), document.extracted_invoice_number || '—'],
+    [t('fields.date'), document.extracted_date || '—'],
+    [t('fields.amount'), document.extracted_amount || '—'],
+    [t('fields.paymentMethod'), document.extracted_payment_method || '—'],
+    [t('fields.summary'), document.llm_summary || '—'],
+    [t('fields.purpose'), document.llm_document_purpose || '—'],
+    [t('fields.confidence'), document.llm_confidence == null ? '—' : String(document.llm_confidence)]
   ]
   return (
     <div className="detail-tab-panel metadata-readout">
       <dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
       <h3>{t('documents.metadataJson')}</h3>
-      <pre className="json-preview compact-json">{formatJson(document.metadata_json, 'No custom metadata JSON stored.')}</pre>
+      <pre className="json-preview compact-json">{formatJson(document.metadata_json, t('documents.noMetadataJson'))}</pre>
       <h3>{t('documents.sources')}</h3>
-      <pre className="json-preview compact-json">{formatJson(document.metadata_sources_json, 'No source metadata stored.')}</pre>
+      <pre className="json-preview compact-json">{formatJson(document.metadata_sources_json, t('documents.noSourceMetadata'))}</pre>
     </div>
   )
 }
@@ -438,23 +439,23 @@ function DocumentActivityPanel({ document, events, loading }: { document: Docume
   const logEntries = Array.isArray(document.processing_log_json) ? document.processing_log_json : []
   return (
     <div className="detail-tab-panel activity-list">
-      {loading && <p className="tab-empty">Loading activity…</p>}
-      {!loading && !events.length && !logEntries.length && <p className="tab-empty">No activity events have been recorded for this document yet.</p>}
+      {loading && <p className="tab-empty">{t('documents.loadingActivity')}</p>}
+      {!loading && !events.length && !logEntries.length && <p className="tab-empty">{t('documents.noActivityEvents')}</p>}
       {events.map((event) => (
         <article key={event.id}>
-          <strong>{event.event_type.replace(/_/g, ' ')}</strong>
-          <span>{new Date(event.created_at).toLocaleString()} · {event.actor || event.source}</span>
-          {event.message && <p>{event.message}</p>}
+          <strong>{translateDocumentListEvent(event.event_type, t)}</strong>
+          <span>{new Date(event.created_at).toLocaleString()} · {translateDocumentListActor(event.actor || event.source, t)}</span>
+          {event.message && <p>{translateDocumentListMessage(event.message, t)}</p>}
         </article>
       ))}
       {!events.length && logEntries.map((entry, index) => (
         <article key={index}>
           <strong>{t('documents.processingLog')}</strong>
-          <span>Entry {index + 1}</span>
+          <span>{t('documents.entry')} {index + 1}</span>
           <pre>{typeof entry === 'string' ? entry : JSON.stringify(entry, null, 2)}</pre>
         </article>
       ))}
-      {document.reviewed_at && <article><strong>Reviewed</strong><span>{new Date(document.reviewed_at).toLocaleString()} · {document.reviewed_by || 'unknown'}</span></article>}
+      {document.reviewed_at && <article><strong>{t('common.reviewed')}</strong><span>{new Date(document.reviewed_at).toLocaleString()} · {document.reviewed_by || t('common.unknown')}</span></article>}
     </div>
   )
 }
@@ -547,3 +548,32 @@ const demoDocuments: Document[] = [
   { ...baseDoc, id: 'demo-3', collection_name: 'Ausgangsrechnung', original_filename: 'habermannsohne_m1675_29-10-2020_22251.pdf', processing_state: 'complete', review_state: 'reviewed', review_reason: null, reviewed_by: 'admin', reviewed_at: new Date().toISOString(), extracted_title: 'HabermannSohne_M1675_29/10/2020_222,51', extracted_invoice_number: 'M1675', extracted_date: '29/10/2020', extracted_amount: '222,51', ocr_text: 'Rechnung Nr. M1675\nZu zahlen 222,51 EUR' },
   { ...baseDoc, id: 'demo-4', collection_name: 'Eingangsrechnung', original_filename: 'musterkundeco_2400_15-07-2019_253946.pdf', processing_state: 'failed', review_state: 'needs_review', review_reason: 'OCR failed', reviewed_by: null, reviewed_at: null, extracted_title: 'MusterkundeCo_2400_15/07/2019_2539,46', extracted_invoice_number: '2400', extracted_date: '15/07/2019', extracted_amount: '2539,46', ocr_text: '' }
 ]
+
+
+function translateDocumentListEvent(value: string, t: (key: string, fallback?: string) => string) {
+  return t(`activity.event.${value}`, value.replace(/_/g, ' '))
+}
+
+function translateDocumentListActor(value: string, t: (key: string, fallback?: string) => string) {
+  return t(`activity.actor.${value}`, t(`activity.source.${value}`, value))
+}
+
+function translateDocumentListMessage(value: string, t: (key: string, fallback?: string) => string) {
+  const key = DOCUMENT_LIST_EVENT_MESSAGE_KEYS[value]
+  return key ? t(key, value) : value
+}
+
+const DOCUMENT_LIST_EVENT_MESSAGE_KEYS: Record<string, string> = {
+  'Deterministic extraction completed': 'activity.message.deterministicDone',
+  'Document complete after OCR, metadata, title, and DB update': 'activity.message.documentComplete',
+  'Final title and metadata generated': 'activity.message.titleGenerated',
+  'Full OCR and metadata are searchable in the app database': 'activity.message.searchIndexed',
+  'Mapped correspondent, document type, and storage path metadata': 'activity.message.paperlessMapped',
+  'OCR completed': 'activity.message.ocrCompleted',
+  'OCR started': 'activity.message.ocrStarted',
+  'Metadata extraction started': 'activity.message.metadataStarted',
+  'Document queued for OCR': 'activity.message.queuedForOcr',
+  'Document uploaded': 'activity.message.uploaded',
+  'Original file stored on local filesystem': 'activity.message.stored',
+  'Full document processing started': 'activity.message.processStarted'
+}

@@ -94,10 +94,10 @@ export default function RecordListPage({ onOpenRecord }: { onOpenRecord: (id: st
         <button className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={18} /></button>
       </header>
       <section className="records-summary-grid">
-        <RecordSummary icon={<Layers3 size={23} />} label="Records" value={stats.total} detail="parent objects" />
-        <RecordSummary icon={<FileText size={23} />} label="Documents" value={stats.documents} detail="attached OCR units" />
-        <RecordSummary icon={<RefreshCw size={23} />} label="Processing" value={stats.processing} detail="active records" tone="blue" />
-        <RecordSummary icon={<FileText size={23} />} label="Review" value={stats.needsReview} detail="needs attention" tone="orange" />
+        <RecordSummary icon={<Layers3 size={23} />} label={t('nav.records')} value={stats.total} detail={t('records.parentObjects')} />
+        <RecordSummary icon={<FileText size={23} />} label={t('nav.documents')} value={stats.documents} detail={t('records.attachedOcrUnits')} />
+        <RecordSummary icon={<RefreshCw size={23} />} label={t('nav.processing')} value={stats.processing} detail={t('records.activeRecords')} tone="blue" />
+        <RecordSummary icon={<FileText size={23} />} label={t('common.review')} value={stats.needsReview} detail={t('records.needsAttention')} tone="orange" />
       </section>
       <section className="workflow-card record-workflow-panel">
         <form className="upload-band record-upload-band" onSubmit={upload}>

@@ -6,7 +6,7 @@ import type { Document, DocumentCustomFieldValue, DocumentEvent, DocumentPage } 
 import { useI18n } from '../i18n'
 
 export default function DocumentDetailPage({ id }: { id: string }) {
-  const { t } = useI18n()
+  const { t, language } = useI18n()
   const [document, setDocument] = useState<Document | null>(null)
   const [events, setEvents] = useState<DocumentEvent[]>([])
   const [pages, setPages] = useState<DocumentPage[]>([])
@@ -114,7 +114,7 @@ export default function DocumentDetailPage({ id }: { id: string }) {
     await load()
   }
 
-  if (!document) return <main className="document-detail-console">{error || 'Loading document...'}</main>
+  if (!document) return <main className="document-detail-console">{error || t('documentDetail.loading')}</main>
   const canPreview = document.mime_type?.startsWith('image/') || document.mime_type === 'application/pdf'
   const isPdf = document.mime_type === 'application/pdf'
   const previewMediaStyle = isPdf
@@ -141,7 +141,7 @@ export default function DocumentDetailPage({ id }: { id: string }) {
       </header>
       {error && <p className="error">{error}</p>}
       {document.error_message && <p className="error">{document.error_message}</p>}
-      {document.duplicate_of_document_id && <p className="warning">Duplicate of document {document.duplicate_of_document_id}; it was linked and not reprocessed by default.</p>}
+      {document.duplicate_of_document_id && <p className="warning">{t('documentDetail.duplicateOf')} {document.duplicate_of_document_id}; {t('documentDetail.duplicateLinked')}</p>}
 
       <section className="split document-detail-split">
         <section className="document-detail-preview-card">
@@ -242,9 +242,9 @@ export default function DocumentDetailPage({ id }: { id: string }) {
         <h2>{t('documentDetail.timeline')}</h2>
         {events.map((event) => (
           <div className="timeline-row" key={event.id}>
-            <strong>{event.event_type}</strong>
-            <span>{new Date(event.created_at).toLocaleString()} · {event.source}</span>
-            <p>{event.message}</p>
+            <strong>{translateDocumentEvent(event.event_type, t)}</strong>
+            <span>{new Date(event.created_at).toLocaleString(language === 'de' ? 'de-DE' : undefined)} · {translateDocumentSource(event.source, t)}</span>
+            <p>{translateDocumentMessage(event.message || '', t)}</p>
           </div>
         ))}
       </section>
@@ -272,4 +272,33 @@ export default function DocumentDetailPage({ id }: { id: string }) {
       </section>
     </main>
   )
+}
+
+
+function translateDocumentEvent(value: string, t: (key: string, fallback?: string) => string) {
+  return t(`activity.event.${value}`, value.replace(/_/g, ' '))
+}
+
+function translateDocumentSource(value: string, t: (key: string, fallback?: string) => string) {
+  return t(`activity.source.${value}`, value)
+}
+
+function translateDocumentMessage(value: string, t: (key: string, fallback?: string) => string) {
+  const key = DOCUMENT_EVENT_MESSAGE_KEYS[value]
+  return key ? t(key, value) : value
+}
+
+const DOCUMENT_EVENT_MESSAGE_KEYS: Record<string, string> = {
+  'Deterministic extraction completed': 'activity.message.deterministicDone',
+  'Document complete after OCR, metadata, title, and DB update': 'activity.message.documentComplete',
+  'Final title and metadata generated': 'activity.message.titleGenerated',
+  'Full OCR and metadata are searchable in the app database': 'activity.message.searchIndexed',
+  'Mapped correspondent, document type, and storage path metadata': 'activity.message.paperlessMapped',
+  'OCR completed': 'activity.message.ocrCompleted',
+  'OCR started': 'activity.message.ocrStarted',
+  'Metadata extraction started': 'activity.message.metadataStarted',
+  'Document queued for OCR': 'activity.message.queuedForOcr',
+  'Document uploaded': 'activity.message.uploaded',
+  'Original file stored on local filesystem': 'activity.message.stored',
+  'Full document processing started': 'activity.message.processStarted'
 }

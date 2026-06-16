@@ -92,10 +92,10 @@ export default function CollectionsPage({ onOpenCollection, onSchemas }: Collect
       )}
 
       <section className="collections-summary-grid">
-        <SummaryCard icon={<Database size={23} />} label="Collections" value={totals.collections} detail="schema buckets" />
-        <SummaryCard icon={<SlidersHorizontal size={23} />} label="Records" value={totals.records} detail="browseable rows" />
-        <SummaryCard icon={<FileText size={23} />} label="Documents" value={totals.documents} detail="OCR units" />
-        <SummaryCard icon={<Settings2 size={23} />} label="Needs Review" value={totals.needsReview} detail="across schemas" tone="orange" />
+        <SummaryCard icon={<Database size={23} />} label={t('nav.collections')} value={totals.collections} detail={t('collections.schemaBuckets')} />
+        <SummaryCard icon={<SlidersHorizontal size={23} />} label={t('nav.records')} value={totals.records} detail={t('collections.browseableRows')} />
+        <SummaryCard icon={<FileText size={23} />} label={t('nav.documents')} value={totals.documents} detail={t('collections.ocrUnits')} />
+        <SummaryCard icon={<Settings2 size={23} />} label={t('common.needsReview')} value={totals.needsReview} detail={t('collections.acrossSchemas')} tone="orange" />
       </section>
 
       <section className="workflow-card collection-browser">
