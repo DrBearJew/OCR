@@ -1,6 +1,10 @@
+<div align="center">
+
 # Dok OCR
 
-Automated self-hosted document OCR workflow for uploads, metadata extraction, review, and search.
+### A private OCR cockpit for turning documents into searchable, reviewable records.
+
+Upload files, run OCR, extract metadata, generate titles, route exceptions, and keep every document traceable from intake to search.
 
 ![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)
@@ -8,57 +12,79 @@ Automated self-hosted document OCR workflow for uploads, metadata extraction, re
 ![Celery](https://img.shields.io/badge/Celery-workers-37814a)
 ![OCR](https://img.shields.io/badge/OCR-PaddleOCR--VL%20%7C%20PP--OCRv6%20%7C%20GLM-7c3aed)
 ![i18n](https://img.shields.io/badge/UI-English%20%2F%20German-0f766e)
+![Self hosted](https://img.shields.io/badge/self--hosted-private%20documents-111827)
 
-Dok OCR automatically turns PDFs and scanned documents into searchable records. It runs OCR, extracts metadata, generates titles, routes exceptions for review, and keeps documents organized as collections, records, and files.
+</div>
 
-It is built around a `Collection → Record → Document` model. A document can store the original file, preview/thumbnail data, OCR text, extracted metadata, review state, events, and retry/reprocessing settings.
+---
 
-## Why it is useful
+## What Dok OCR is
 
-- Runs as a normal Docker app without a GPU; use `ppocrv6` for local CPU OCR or `fake` for UI/dev.
-- Keeps large smart models outside the main containers, so small machines can run the web app and workers while LM Studio, llama.cpp, or another endpoint runs elsewhere.
-- On sub-4GB machines, use `fake`/`ppocrv6`, keep OCR worker concurrency low, and put smart multimodal models on another endpoint.
-- Automates the pipeline from upload to OCR, metadata extraction, title generation, search indexing, and review routing.
-- Keeps manual controls for retrying OCR, re-extracting metadata, locking fields, and reviewing exceptions.
+Dok OCR is a self-hosted document processing app, not just an OCR script. It gives you a full workflow around scanned documents, screenshots, PDFs, receipts, invoices, and mixed document batches.
 
-> [!IMPORTANT]
-> Dok OCR handles sensitive documents. Run it only on trusted infrastructure, change default credentials, configure HTTPS at your reverse proxy, and back up PostgreSQL plus the file volume.
+It is built around a simple model:
 
-## Scope
+```txt
+Collection → Record → Document
+```
 
-The repository contains the app stack:
+Each document can keep its original file, preview, OCR text, extracted metadata, title, review state, processing events, retry history, and search index state.
 
-- React/Vite frontend
-- FastAPI backend
-- Celery workers and beat
-- Redis
-- PostgreSQL
-- local file storage
-- OCR provider adapters and deterministic metadata extraction
+> [!NOTE]
+> Dok OCR can use PaddleOCR-VL and PP-OCRv6, but it is not the PaddleOCR toolkit itself. It is the private document workflow layer around OCR providers, metadata extraction, review, and search.
 
-Supported OCR providers in the app configuration:
+---
 
-- `fake`: test/development OCR
-- `ppocrv6`: local PP-OCRv6 OCR path
-- `paddle_vl`: external PaddleOCR-VL-style multimodal endpoint
-- `glm`: external GLM OCR fallback endpoint
+## Highlights
 
-Optional Qwen metadata refinement is configured separately from OCR.
+| Area | What you get |
+| --- | --- |
+| **Smart OCR** | PaddleOCR-VL-style multimodal OCR through the internal model gateway or any OpenAI-compatible llama.cpp/LM Studio endpoint. |
+| **Local OCR** | PP-OCRv6 CPU OCR path for simple deployments without a GPU. |
+| **Fallbacks** | GLM OCR fallback and PP-OCRv6 recovery when smart OCR returns empty output. |
+| **Metadata workflow** | Deterministic extraction plus optional Qwen metadata refinement. |
+| **Review cockpit** | Failed, duplicate, incomplete, and manually corrected documents stay visible and retryable. |
+| **Collections** | Per-collection OCR defaults, schema rules, title rules, search defaults, and custom metadata. |
+| **Search** | PostgreSQL-backed full-text search over OCR text, titles, metadata, records, and collections. |
+| **Admin setup** | Visual model setup wizard for fake/local/smart OCR modes and endpoint testing. |
+| **German/English UI** | App shell and core workflows are localized for English and German users. |
+
+---
 
 ## Pipeline
 
 ```mermaid
 flowchart LR
-  U[Upload or consume folder] --> V[Validate and store]
-  V --> O[OCR]
-  O --> M[Metadata and title extraction]
-  M --> R[Review or complete]
-  R --> S[Search index]
+  A[Upload or consume folder] --> B[Validate and store]
+  B --> C[Preview and thumbnail]
+  C --> D[OCR]
+  D --> E[Metadata and title extraction]
+  E --> F{Needs review?}
+  F -- yes --> G[Review queue]
+  F -- no --> H[Complete record]
+  G --> H
+  H --> I[Search index]
 ```
 
-The pipeline can run automatically after upload. Review and retry controls remain available when extraction is incomplete or needs correction.
+The pipeline can run automatically after upload. Manual controls remain available for retrying OCR, forcing OCR, re-extracting metadata, locking fields, and rebuilding search.
 
-## Run locally
+---
+
+## Choose your runtime
+
+| Mode | Best for | Default provider | Notes |
+| --- | --- | --- | --- |
+| **Fake** | UI development and smoke tests | `fake` | No real OCR. Fastest way to test the app shell. |
+| **Local** | Small machines, CPU-only OCR | `ppocrv6` | No GPU required. PP-OCRv6 models are prewarmed during backend build. |
+| **Smart** | Higher quality document parsing | `paddle_vl` | Uses the internal gateway or a direct OpenAI-compatible model endpoint. |
+| **Fallback** | Legacy multimodal OCR | `glm` | Kept as a secondary OCR path. |
+
+> [!TIP]
+> On sub-4GB machines, run the web app and workers with `fake` or `ppocrv6`, keep worker concurrency low, and put smart multimodal models on a different host or endpoint.
+
+---
+
+## Quick start: basic local app
 
 ```bash
 cd app
@@ -67,15 +93,17 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Prerequisites: Docker Compose and outbound network access for image, Python package, and PP-OCRv6 model downloads. The first backend build prewarms PP-OCRv6 even when you start with `OCR_PROVIDER=fake`.
-
 Open:
 
 - UI: <http://localhost:3001>
 - API docs: <http://localhost:8001/docs>
 
-Default development login is defined in `app/.env.example`. Change it before real use.
+Prerequisites: Docker Compose and outbound network access for container images, Python packages, and PP-OCRv6 model downloads.
 
+> [!IMPORTANT]
+> Dok OCR handles sensitive documents. Run it only on trusted infrastructure, change default credentials, configure HTTPS at your reverse proxy, and back up PostgreSQL plus the file volume.
+
+---
 
 ## One-click smart PaddleOCR-VL stack
 
@@ -85,7 +113,7 @@ For a full smart OCR setup on a host that already has Docker and a llama.cpp `ll
 sudo scripts/install-smart-paddlevl.sh
 ```
 
-The installer is idempotent. It writes a managed smart-stack directory, installs the smart-proxy container, installs the PaddleOCR-VL chat template with OpenAI `image_url` support, writes the llama.cpp model preset, starts/reuses the model manager when possible, and prints the Admin values to save.
+The installer is idempotent. It installs a managed smart-stack directory, packages the internal model gateway, installs the PaddleOCR-VL chat template with OpenAI `image_url` support, writes the llama.cpp model preset, starts or reuses the model manager when possible, and prints the Admin values to save.
 
 If the PaddleOCR-VL GGUF files are not already present under `/root/llm-models`, provide download URLs or place the files manually:
 
@@ -95,17 +123,38 @@ sudo DOKOCR_PADDLE_MODEL_URL=https://example/paddleocr-vl-q8_0.gguf \
      scripts/install-smart-paddlevl.sh
 ```
 
-After it finishes, open **Admin → Model Setup**, click **Use internal gateway**, test **PaddleOCR-VL**, and save.
-
 Safe preview mode:
 
 ```bash
 scripts/install-smart-paddlevl.sh --dry-run --skip-download --no-start
 ```
 
+After the installer finishes:
+
+1. Open **Admin → Model Setup**.
+2. Click **Use internal gateway**.
+3. Click **Test PaddleOCR-VL**.
+4. Save.
+
+---
+
+## Admin setup wizard
+
+The Admin page includes **Model Setup**, a visual runtime wizard for normal users:
+
+- choose `Fake`, `Local`, or `Smart` mode.
+- configure PaddleOCR-VL, GLM, and Qwen endpoints.
+- use the internal gateway preset.
+- test endpoints before saving.
+- change global defaults without editing `.env`.
+
+There is also a separate **Model Configuration** area for collection-level OCR defaults such as language, OCR mode, page limits, DPI, output format, and image size limits.
+
+---
+
 ## OCR and model endpoints
 
-For UI/dev without a real OCR model:
+For UI/dev without real OCR:
 
 ```env
 OCR_PROVIDER=fake
@@ -117,7 +166,7 @@ For basic local OCR:
 OCR_PROVIDER=ppocrv6
 ```
 
-For smart OCR or Qwen metadata refinement, configure Admin → Model Setup. Most local deployments should use the internal model gateway; advanced users can point directly at OpenAI-compatible endpoints in Admin or `.env`, for example:
+For smart OCR or Qwen metadata refinement, prefer **Admin → Model Setup**. Advanced users can still configure compatible endpoints directly:
 
 ```env
 OCR_PROVIDER=paddle_vl
@@ -129,14 +178,62 @@ QWEN_LLAMACPP_BASE_URL=http://host.docker.internal:1234/v1
 QWEN_MODEL_PATH=qwen
 ```
 
-LM Studio, llama.cpp server, or another compatible service can provide these endpoints. The app can also use an internal model gateway to hide routing, OCR/metadata cleanup, and local endpoint details; the technical service name may appear only in diagnostics.
+LM Studio, llama.cpp server, or another OpenAI-compatible service can provide these endpoints. The internal gateway hides routing details, normalizes OCR output, applies deterministic decode settings, and keeps model service details out of the normal user flow.
 
-## Admin configuration
+---
 
-The Admin UI can configure collection-level OCR defaults, ingestion sources, processing hooks, integration status, and maintenance actions.
+## Architecture
 
-Global model endpoints can be configured in Admin → Model Setup. Use it to choose fake/local/smart mode, enter LM Studio or llama.cpp-compatible URLs, test endpoints, and save defaults without editing `.env`.
+```mermaid
+flowchart TB
+  UI[React frontend] --> API[FastAPI backend]
+  API --> DB[(PostgreSQL)]
+  API --> FS[(File storage)]
+  API --> R[Redis]
+  R --> W[Celery workers]
+  W --> OCR{OCR provider}
+  OCR --> PPOCR[PP-OCRv6 local CPU]
+  OCR --> GW[Internal model gateway]
+  GW --> PVL[PaddleOCR-VL]
+  GW --> GLM[GLM OCR]
+  W --> QWEN[Optional Qwen metadata]
+  W --> DB
+```
+
+Repository stack:
+
+- React/Vite frontend
+- FastAPI backend
+- Celery worker, beat, and maintenance workers
+- Redis
+- PostgreSQL
+- local file storage
+- OCR provider adapters
+- deterministic metadata and title extraction
+- optional smart model gateway assets
+
+---
+
+## What is production-ready and what is not
+
+Ready today:
+
+- private Docker deployment.
+- local PP-OCRv6 OCR.
+- smart PaddleOCR-VL endpoint integration.
+- one-click smart gateway installer for prepared hosts.
+- upload, retry, review, metadata, collections, records, and search workflows.
+
+Still environment-dependent:
+
+- smart model weights and reliable download URLs.
+- llama.cpp build/install path.
+- GPU/CPU performance of external model endpoints.
+- HTTPS/reverse proxy and backup policy.
+
+---
 
 ## More documentation
 
 Detailed setup and operations notes are in [`app/README.md`](app/README.md), including upload limits, optional converters, reverse proxy settings, migrations, tests, API routes, and the document model.
+
