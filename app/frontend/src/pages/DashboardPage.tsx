@@ -396,9 +396,6 @@ export default function DashboardPage({ onOpenRecord, onOpenDocument }: Dashboar
         </section>
 
         <aside className="metadata-redesign-rail">
-          <MetadataForm metadata={metadata} setMetadata={updateSelectedMetadata} busy={busy} selected={selected} collectionName={collectionName} setCollectionName={setCollectionName} />
-          <OCRTextPreview selected={selected} />
-          <ProcessingOptionsPanel options={processingOptions} setOptions={setProcessingOptions} qwenStatus={qwenStatus} />
           <NextActionsBar
             disabled={Boolean(actionBusy) || busy}
             hasUploadedRecord={Boolean(uploadedRecordId)}
@@ -408,6 +405,9 @@ export default function DashboardPage({ onOpenRecord, onOpenDocument }: Dashboar
             onExtract={() => void runSelected('metadata')}
             onReview={() => void runSelected('review')}
           />
+          <MetadataForm metadata={metadata} setMetadata={updateSelectedMetadata} busy={busy} selected={selected} collectionName={collectionName} setCollectionName={setCollectionName} />
+          <OCRTextPreview selected={selected} />
+          <ProcessingOptionsPanel options={processingOptions} setOptions={setProcessingOptions} qwenStatus={qwenStatus} />
         </aside>
       </form>
     </main>

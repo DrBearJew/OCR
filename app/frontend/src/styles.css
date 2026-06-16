@@ -8115,3 +8115,123 @@ main,
 }
 .metadata-collapsible-panel .metadata-grid { margin-top: 0.9rem; }
 .metadata-collapsible-panel .form-actions { margin-bottom: 0.95rem; }
+
+
+/* Upload redesign rebalance: action-first right rail, less dead preview space. */
+.upload-redesign-grid {
+  grid-template-columns: minmax(260px, 320px) minmax(620px, 1fr) minmax(440px, 520px);
+  gap: 0.85rem;
+}
+
+.upload-review-workspace {
+  gap: 0.75rem;
+}
+
+.review-combo-card {
+  min-height: 0;
+}
+
+.review-combo-card > .card-title-row {
+  margin-bottom: 0.55rem;
+}
+
+.preview-only-grid .document-preview-surface {
+  min-height: clamp(420px, 48vh, 560px);
+}
+
+.preview-only-grid .document-preview-surface iframe,
+.preview-only-grid .document-preview-surface img {
+  max-height: clamp(420px, 50vh, 580px);
+}
+
+.preview-only-grid .attachment-strip {
+  padding-top: 0.55rem;
+}
+
+.metadata-redesign-rail {
+  gap: 0.65rem;
+}
+
+.metadata-redesign-rail .next-actions {
+  order: -10;
+  padding: 1rem;
+  border-color: rgba(45, 212, 191, 0.62);
+  box-shadow: 0 16px 42px rgba(20, 184, 166, 0.12);
+}
+
+.metadata-redesign-rail .next-actions h2 {
+  font-size: 1rem;
+  margin-bottom: 0.1rem;
+}
+
+.metadata-redesign-rail .process-button {
+  min-height: 3.7rem;
+  font-size: 1.08rem;
+  letter-spacing: 0.01em;
+}
+
+.metadata-redesign-rail .primary-process-row span {
+  max-width: 100%;
+}
+
+.metadata-redesign-rail .metadata-card,
+.metadata-redesign-rail .collapsed-side-panel,
+.metadata-redesign-rail .collapsed-ocr-options {
+  border-radius: 12px;
+}
+
+.metadata-collapsible-panel summary,
+.collapsed-side-panel summary,
+.metadata-redesign-rail .collapsed-ocr-options summary {
+  min-height: 3.35rem;
+}
+
+.metadata-collapsible-panel[open] .metadata-grid {
+  max-height: 46vh;
+  overflow: auto;
+  padding-right: 0.15rem;
+}
+
+.metadata-redesign-rail .metadata-grid {
+  gap: 0.5rem;
+}
+
+.metadata-redesign-rail .metadata-grid label {
+  font-size: 0.78rem;
+}
+
+.metadata-redesign-rail .metadata-grid input,
+.metadata-redesign-rail .metadata-grid select,
+.metadata-redesign-rail .metadata-grid textarea,
+.metadata-redesign-rail .tag-input {
+  min-height: 2.05rem;
+  font-size: 0.82rem;
+}
+
+.upload-review-workspace .shared-title-card {
+  padding: 0.85rem;
+}
+
+.upload-review-workspace .shared-title-card p {
+  font-size: 0.86rem;
+}
+
+.upload-queue-rail .dropzone {
+  min-height: 118px;
+}
+
+.upload-queue-rail .recent-uploads {
+  max-height: 42vh;
+}
+
+@media (max-width: 1500px) {
+  .upload-redesign-grid {
+    grid-template-columns: minmax(240px, 300px) minmax(520px, 1fr);
+  }
+  .metadata-redesign-rail {
+    grid-template-columns: minmax(360px, 0.9fr) minmax(320px, 0.7fr);
+  }
+  .metadata-redesign-rail .next-actions {
+    grid-column: 1 / -1;
+  }
+}
