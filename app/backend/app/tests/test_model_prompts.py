@@ -10,7 +10,7 @@ from app.models import Batch, Document, DocumentState, StageState
 from app.services.extraction import ExtractionInput, extract_belege_title
 from app.services.integrations import collect_integrations
 from app.services.llm_qwen import QwenLlamaCppProvider, QwenRefinement
-from app.services.ocr_glm import GLMLlamaCppOCRProvider, OCRProviderError, PaddleVLLlamaCppOCRProvider, PPOCRv6Provider, build_ocr_provider
+from app.services.ocr_glm import GLMLlamaCppOCRProvider, OCRProviderError, PaddleVLLlamaCppOCRProvider, PPOCRv6Provider, _compact_repeated_ocr_lines, _format_diagram_ocr_markdown_if_needed, build_ocr_provider
 from app.services.processing import run_metadata_for_document
 from app.services.prompt_loader import PromptLoader
 from app.services.rules import get_collection_rules, get_ocr_rules, validate_title_for_collection
@@ -54,6 +54,13 @@ def test_prompt_loader_loads_required_templates_and_renders_variables() -> None:
     custom = loader.render("created_date_prompt.tmpl", {"Language": "German", "Today": "2026-04-28", "Content": "Hallo"})
     assert "German" in custom.text
     assert "2026-04-28" in custom.text
+
+
+def test_ocr_prompt_includes_diagram_guardrails() -> None:
+    rendered = PromptLoader().render("ocr_prompt.tmpl")
+    assert "Return Markdown only" in rendered.text
+    assert "For diagrams or slides" in rendered.text
+    assert "Do not repeat labels" in rendered.text
 
 
 def test_rules_yaml_is_loaded_and_used_for_title_validation() -> None:
@@ -116,6 +123,10 @@ def test_paddle_vl_adapter_uses_prompt_and_mocked_llama_response(monkeypatch, tm
     assert result.model_role == "paddleocr_vl"
     assert captured["url"] == "http://smart-proxy:8081/v1/chat/completions"
     assert captured["json"]["model"] == "paddleocr-vl"
+    assert captured["json"]["temperature"] == 0.0
+    assert captured["json"]["max_tokens"] == 2048
+    assert captured["json"]["repeat_penalty"] == 1.18
+    assert captured["json"]["repeat_last_n"] == 512
     assert captured["timeout"] == 11
 
 
@@ -303,3 +314,67 @@ def test_integration_status_serializes_db_redis_and_models(monkeypatch, db_sessi
     names = {row["name"] for row in status["integrations"]}
     assert status["ok"] is True
     assert {"database", "redis", "glm_llama", "qwen_llama"} <= names
+
+
+def test_ocr_loop_compactor_removes_repeated_blocks_and_keeps_first_occurrence() -> None:
+    text = """Title
+A
+B
+A
+B
+A
+B
+Footer
+Footer
+Footer
+Footer"""
+    assert _compact_repeated_ocr_lines(text) == "Title\nA\nB\nFooter\nFooter\nFooter"
+
+
+def test_ocr_loop_compactor_removes_inline_token_loops() -> None:
+    text = "Latency 20s 16s 1s 1s 1s 1s 1s 1s done"
+    assert _compact_repeated_ocr_lines(text) == "Latency 20s 16s 1s 1s done"
+
+
+def test_ocr_loop_compactor_removes_inline_phrase_loops() -> None:
+    text = "KV Length 1M tokens 1M tokens 1M tokens 1M tokens done"
+    assert _compact_repeated_ocr_lines(text) == "KV Length 1M tokens 1M tokens done"
+
+
+def test_ocr_loop_compactor_cuts_generated_numeric_arrow_chain() -> None:
+    text = "01 → Q2 → KV1 → 03 → 04 → 05 → 06 → 07 → 08 → 09 → 10 → 11 → 12 → 13"
+    assert _compact_repeated_ocr_lines(text) == "01 → Q2 → KV1 → 03 → 04 → 05 → 06 → 07 → 08 → 09 → 10"
+
+
+def test_diagram_ocr_markdown_formatter_promotes_titles_and_bullets_labels() -> None:
+    text = """MiniMax Sparse Attention
+GQA-based Attention Block
+Index Branch
+Step 1 - Index Attention
+Q1
+Top-k
+Sequence Length
+512k
+1M tokens"""
+    assert _format_diagram_ocr_markdown_if_needed(text) == """# MiniMax Sparse Attention
+
+## GQA-based Attention Block
+
+## Index Branch
+
+### Step 1 - Index Attention
+- Q1
+
+### Top-k
+
+## Sequence Length
+- 512k
+- 1M tokens"""
+
+
+def test_diagram_ocr_markdown_formatter_leaves_existing_markdown_alone() -> None:
+    text = """# Already Markdown
+
+- Attention
+- Block"""
+    assert _format_diagram_ocr_markdown_if_needed(text) == text

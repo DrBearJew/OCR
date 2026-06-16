@@ -6,6 +6,7 @@ import base64
 import io
 import logging
 import mimetypes
+import re
 from pathlib import Path
 import tempfile
 import threading
@@ -121,7 +122,7 @@ class GLMLlamaCppOCRProvider:
         if not choices:
             raise OCRProviderError("GLM OCR returned no choices")
         message = choices[0].get("message") or {}
-        text = str(message.get("content") or "").strip()
+        text = _compact_repeated_ocr_lines(str(message.get("content") or "").strip())
         if not text:
             raise OCRProviderError("GLM OCR returned empty text")
         return OCRResult(
@@ -182,8 +183,13 @@ class PaddleVLLlamaCppOCRProvider:
                     ],
                 }
             ],
-            "temperature": self.settings.llm_temperature,
-            "max_tokens": self.settings.llm_max_tokens,
+            "temperature": 0.0,
+            # PaddleOCR-VL can fall into long repeated label loops on dense diagrams.
+            # 2048 keeps normal OCR usable while bounding pathological generations.
+            "max_tokens": min(int(self.settings.llm_max_tokens), 2048),
+            # Keep decoding deterministic but penalize local repetition.
+            "repeat_penalty": 1.18,
+            "repeat_last_n": 512,
         }
         headers = {"Content-Type": "application/json"}
         url = llama_chat_completions_url(self.settings.paddle_vl_llamacpp_base_url)
@@ -209,7 +215,8 @@ class PaddleVLLlamaCppOCRProvider:
         if not choices:
             raise OCRProviderError("PaddleOCR-VL returned no choices")
         message = choices[0].get("message") or {}
-        text = str(message.get("content") or "").strip()
+        text = _compact_repeated_ocr_lines(str(message.get("content") or "").strip())
+        text = _format_diagram_ocr_markdown_if_needed(text)
         if not text:
             raise OCRProviderError("PaddleOCR-VL returned empty text")
         return OCRResult(
@@ -236,6 +243,208 @@ class PaddleVLLlamaCppOCRProvider:
                 "PaddleOCR-VL model configuration error: "
                 f"configured model '{self.settings.paddle_vl_model_name}' is not in /v1/models ({', '.join(model_ids)})"
             )
+
+
+def _format_diagram_ocr_markdown_if_needed(text: str) -> str:
+    """Apply minimal Markdown structure to diagram/slide OCR line dumps.
+
+    The model sometimes returns a faithful line list instead of Markdown. For
+    diagram-like outputs, promote visible titles/section labels and bullet the
+    remaining labels without changing the OCR text itself.
+    """
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    if not _looks_like_unformatted_diagram_ocr(lines):
+        return text.strip() if text else ""
+
+    output: list[str] = []
+    for index, line in enumerate(lines):
+        if index == 0:
+            output.append(f"# {line}")
+            continue
+        if index == 1 and not _looks_like_value_label(line):
+            output.extend(["", f"## {line}"])
+            continue
+        if _looks_like_major_diagram_section(line):
+            output.extend(["", f"## {line}"])
+            continue
+        if _looks_like_minor_diagram_section(line):
+            output.extend(["", f"### {line}"])
+            continue
+        output.append(f"- {line}")
+    return "\n".join(output).strip()
+
+
+def _looks_like_unformatted_diagram_ocr(lines: list[str]) -> bool:
+    if len(lines) < 8:
+        return False
+    if any(line.startswith(("#", "- ", "* ", "|")) for line in lines[:8]):
+        return False
+    joined = "\n".join(lines).lower()
+    diagram_markers = (
+        "branch",
+        "attention",
+        "top-k",
+        "sparse",
+        "sequence length",
+        "kv length",
+        "speedup",
+        "block",
+        "latency",
+    )
+    if not any(marker in joined for marker in diagram_markers):
+        return False
+    average_len = sum(len(line) for line in lines) / len(lines)
+    return average_len <= 80
+
+
+def _looks_like_major_diagram_section(line: str) -> bool:
+    lowered = line.lower().strip()
+    return lowered.endswith("branch") or lowered in {"hidden states", "sequence length", "kv length", "decoding"}
+
+
+def _looks_like_minor_diagram_section(line: str) -> bool:
+    lowered = line.lower().strip()
+    return lowered.startswith("step ") or lowered in {"top-k", "max pool", "sparse", "output", "projection"}
+
+
+def _looks_like_value_label(line: str) -> bool:
+    lowered = line.lower().strip()
+    return bool(re.fullmatch(r"[\d.]+\s*(s|ms|x|k|m|tokens)?", lowered))
+
+
+def _compact_repeated_ocr_lines(text: str, *, max_exact_repeats: int = 3) -> str:
+    """Collapse obvious OCR generation loops without rephrasing OCR content."""
+    if not text:
+        return ""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    output: list[str] = []
+    seen: dict[str, int] = {}
+    index = 0
+    while index < len(lines):
+        skipped_loop = False
+        max_block = min(8, len(output), len(lines) - index)
+        for block_size in range(max_block, 1, -1):
+            previous = [_ocr_line_key(line) for line in output[-block_size:]]
+            current = [_ocr_line_key(line) for line in lines[index : index + block_size]]
+            distinct_current = {key for key in current if key}
+            if len(distinct_current) > 1 and current == previous:
+                index += block_size
+                skipped_loop = True
+                break
+        if skipped_loop:
+            continue
+
+        line = _compact_repeated_inline_tokens(lines[index])
+        key = _ocr_line_key(line)
+        if key:
+            seen[key] = seen.get(key, 0) + 1
+            if seen[key] > max_exact_repeats:
+                index += 1
+                continue
+        output.append(line)
+        index += 1
+    return "\n".join(output).strip()
+
+
+def _ocr_line_key(line: str) -> str:
+    return re.sub(r"\s+", " ", line or "").strip().casefold()
+
+
+def _compact_repeated_inline_tokens(line: str, *, max_repeats: int = 2) -> str:
+    """Collapse obvious in-line token/phrase loops such as `1s 1s 1s ...`."""
+    tokens = (line or "").split()
+    if len(tokens) < max_repeats + 1:
+        return line
+
+    single_pass: list[str] = []
+    previous_key = ""
+    repeat_count = 0
+    for token in tokens:
+        key = _ocr_token_key(token)
+        if key and key == previous_key:
+            repeat_count += 1
+        else:
+            previous_key = key
+            repeat_count = 1
+        if key and repeat_count > max_repeats:
+            continue
+        single_pass.append(token)
+
+    compacted = single_pass
+    for phrase_size in range(4, 1, -1):
+        compacted = _compact_repeated_token_phrases(compacted, phrase_size, max_repeats=max_repeats)
+    return _compact_numeric_arrow_runs(" ".join(compacted))
+
+
+def _compact_numeric_arrow_runs(line: str, *, max_numeric_run: int = 8) -> str:
+    """Cut generated arrow chains such as `03 → 04 → ... → 418`."""
+    if "→" not in line:
+        return line
+    parts = re.split(r"\s*→\s*", line)
+    if len(parts) <= max_numeric_run + 1:
+        return line
+    kept: list[str] = []
+    numeric_run = 0
+    previous_number: int | None = None
+    for part in parts:
+        stripped = part.strip()
+        number = _ocr_arrow_part_number(stripped)
+        if number is not None and (previous_number is None or number == previous_number + 1 or numeric_run == 0):
+            numeric_run += 1
+        elif number is not None:
+            numeric_run = 1
+        else:
+            numeric_run = 0
+        if numeric_run > max_numeric_run:
+            break
+        kept.append(stripped)
+        previous_number = number if number is not None else None
+    if len(kept) == len(parts):
+        return line
+    return " → ".join(part for part in kept if part).strip()
+
+
+def _ocr_arrow_part_number(part: str) -> int | None:
+    match = re.fullmatch(r"[()\[\]{}\s]*(\d{1,4})[.,;:\s()\[\]{}]*", part or "")
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _compact_repeated_token_phrases(tokens: list[str], phrase_size: int, *, max_repeats: int) -> list[str]:
+    if len(tokens) < phrase_size * (max_repeats + 1):
+        return tokens
+    output: list[str] = []
+    index = 0
+    while index < len(tokens):
+        phrase = tokens[index : index + phrase_size]
+        if len(phrase) < phrase_size:
+            output.extend(phrase)
+            break
+        phrase_key = [_ocr_token_key(token) for token in phrase]
+        if not any(phrase_key):
+            output.extend(phrase)
+            index += phrase_size
+            continue
+        repeats = 1
+        output.extend(phrase)
+        index += phrase_size
+        while index + phrase_size <= len(tokens):
+            next_phrase = tokens[index : index + phrase_size]
+            if [_ocr_token_key(token) for token in next_phrase] != phrase_key:
+                break
+            repeats += 1
+            if repeats <= max_repeats:
+                output.extend(next_phrase)
+            index += phrase_size
+    return output
+
+
+def _ocr_token_key(token: str) -> str:
+    return re.sub(r"^[^\w]+|[^\w]+$", "", token or "").casefold()
 
 
 def _image_data_for_llama(path: Path) -> tuple[str, str]:
