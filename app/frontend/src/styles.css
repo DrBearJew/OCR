@@ -8958,7 +8958,8 @@ main,
 }
 
 .upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .record-setup-panel[open] {
-  min-height: 34rem !important;
+  height: auto !important;
+  min-height: 0 !important;
   padding-bottom: 0.95rem !important;
   margin-bottom: 0.75rem !important;
 }
@@ -8989,4 +8990,21 @@ main,
   position: relative !important;
   z-index: 0 !important;
   clear: both !important;
+}
+
+
+/* Upload right rail open panels use natural flow and scroll the rail, not each other. */
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail {
+  align-content: start !important;
+  grid-auto-rows: max-content !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > details[open] {
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.upload-dashboard-grid.upload-redesign-grid > .metadata-redesign-rail > .metadata-collapsible-panel[open] {
+  margin-top: 0 !important;
 }
