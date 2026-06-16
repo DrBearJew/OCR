@@ -9181,3 +9181,44 @@ main,
     margin-top: 0 !important;
   }
 }
+
+
+/* Final sidebar presentation: full-height rail, natural menu stack. */
+@media (min-width: 901px) {
+  .app-shell {
+    align-items: stretch !important;
+  }
+
+  .sidebar {
+    align-self: stretch !important;
+    position: sticky !important;
+    top: 0 !important;
+    height: 100vh !important;
+    min-height: 100vh !important;
+    max-height: 100vh !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: flex-start !important;
+    gap: 0.75rem !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    background: linear-gradient(180deg, #121a25 0%, #101922 48%, #0b121b 100%) !important;
+  }
+
+  .sidebar nav {
+    flex: 0 0 auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding-right: 0 !important;
+  }
+
+  .sidebar .sidebar-card,
+  .sidebar .logout {
+    flex: 0 0 auto !important;
+  }
+
+  .sidebar .logout {
+    margin-top: 0 !important;
+    align-self: stretch !important;
+  }
+}
