@@ -381,14 +381,18 @@ export default function DashboardPage({ onOpenRecord, onOpenDocument }: Dashboar
       </header>
       {message && <p className={message.toLowerCase().includes('failed') || message.toLowerCase().includes(t('dashboard.message.addFiles').toLowerCase().slice(0, 8)) ? 'error' : 'success-message'}>{message}</p>}
       <form className="upload-dashboard-grid upload-redesign-grid" onSubmit={submit}>
-        <aside className="upload-queue-rail">
-          <UploadDropzone inputRef={inputRef} files={files} busy={busy} onFiles={addFiles} />
-        </aside>
+        <section className="upload-left-workspace">
+          <aside className="upload-queue-rail">
+            <UploadDropzone inputRef={inputRef} files={files} busy={busy} onFiles={addFiles} />
+          </aside>
 
-        <section className="upload-review-workspace">
-          <section className="workflow-card review-combo-card document-preview-shell">
-            <FilePreviewCard selected={selected} files={files} selectedId={selectedId} setSelectedId={setSelectedId} onAddMore={() => inputRef.current?.click()} />
+          <section className="upload-review-workspace">
+            <section className="workflow-card review-combo-card document-preview-shell">
+              <FilePreviewCard selected={selected} files={files} selectedId={selectedId} setSelectedId={setSelectedId} onAddMore={() => inputRef.current?.click()} />
+            </section>
           </section>
+
+          <ProcessingProfilePanel options={processingOptions} setOptions={setProcessingOptions} qwenStatus={qwenStatus} />
         </section>
 
         <aside className="metadata-redesign-rail">
@@ -406,8 +410,6 @@ export default function DashboardPage({ onOpenRecord, onOpenDocument }: Dashboar
           <OCRTextPreview selected={selected} />
           <ProcessingOptionsPanel options={processingOptions} setOptions={setProcessingOptions} qwenStatus={qwenStatus} />
         </aside>
-
-        <ProcessingProfilePanel options={processingOptions} setOptions={setProcessingOptions} qwenStatus={qwenStatus} />
       </form>
     </main>
   )

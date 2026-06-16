@@ -8628,3 +8628,67 @@ main,
     padding-right: 0;
   }
 }
+
+
+/* Decouple upload right rail from left workspace/profile rows. */
+.upload-redesign-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(400px, 460px);
+  gap: 1rem;
+  align-items: start;
+  grid-template-areas: none;
+}
+
+.upload-left-workspace {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(400px, 510px) minmax(620px, 1fr);
+  grid-template-areas:
+    "queue review"
+    "profiles profiles";
+  gap: 1rem;
+  align-items: start;
+}
+
+.upload-left-workspace .upload-queue-rail { grid-area: queue; }
+.upload-left-workspace .upload-review-workspace { grid-area: review; }
+.upload-left-workspace .processing-profile-card { grid-area: profiles; }
+
+.upload-left-workspace .processing-profile-card {
+  margin-top: 0;
+}
+
+.metadata-redesign-rail {
+  min-width: 0;
+  align-self: start;
+  height: calc(100vh - 7.5rem);
+  max-height: calc(100vh - 7.5rem);
+  min-height: 0;
+  overflow-y: auto;
+  contain: layout paint;
+}
+
+@media (max-width: 1500px) {
+  .upload-redesign-grid {
+    grid-template-columns: 1fr;
+  }
+  .upload-left-workspace {
+    grid-template-columns: minmax(320px, 430px) minmax(520px, 1fr);
+  }
+  .metadata-redesign-rail {
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    contain: none;
+  }
+}
+
+@media (max-width: 980px) {
+  .upload-left-workspace {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "queue"
+      "review"
+      "profiles";
+  }
+}
