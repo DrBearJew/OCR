@@ -8692,3 +8692,30 @@ main,
       "profiles";
   }
 }
+
+
+/* Keep upload right rail beside the workspace on normal desktop widths. */
+@media (min-width: 1101px) {
+  .upload-redesign-grid {
+    grid-template-columns: minmax(0, 1fr) clamp(360px, 23vw, 460px) !important;
+    align-items: start !important;
+  }
+
+  .upload-left-workspace {
+    grid-template-columns: minmax(340px, 500px) minmax(560px, 1fr) !important;
+    grid-template-areas:
+      "queue review"
+      "profiles profiles" !important;
+  }
+
+  .metadata-redesign-rail {
+    grid-template-columns: 1fr !important;
+    height: calc(100vh - 7.5rem) !important;
+    max-height: calc(100vh - 7.5rem) !important;
+    overflow-y: auto !important;
+  }
+
+  .metadata-redesign-rail .next-actions {
+    grid-column: auto !important;
+  }
+}
