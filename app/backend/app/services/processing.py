@@ -46,7 +46,7 @@ DEFAULT_PROCESSING_OPTIONS = {
     "auto_process": False,
     "qwen_enabled": None,
     "qwen_enrichment_enabled": None,
-    "auto_folder_enabled": True,
+    "auto_folder_enabled": False,
     "use_qwen_folder_suggestion": False,
     "overwrite_manual_values": False,
     "preserve_locked_fields": True,
@@ -213,6 +213,9 @@ def merge_extracted_metadata_with_manual_values(
         elif not _is_empty_value(candidate):
             merged[field_name] = candidate
             sources[field_name] = {"source": "deterministic", "confidence": 90}
+        elif force:
+            merged[field_name] = None
+            sources[field_name] = {"source": "deterministic", "confidence": None}
         else:
             merged[field_name] = current
             sources[field_name] = {"source": current_source or "deterministic", "confidence": source_info.get("confidence")}
@@ -293,6 +296,79 @@ def _qwen_confidence(suggestion: dict[str, Any], field_name: str) -> int | None:
         return int(numeric * 100) if numeric <= 1 else int(numeric)
     except (TypeError, ValueError):
         return None
+
+
+NEUTRAL_QWEN_CORE_CANDIDATE_FIELDS = {
+    "correspondent",
+    "sender",
+    "recipient",
+    "document_type",
+    "created_date",
+    "invoice_number",
+    "amount",
+    "currency",
+    "payment_method",
+    "suggested_title_base",
+}
+
+NEUTRAL_QWEN_METADATA_KEYS = {
+    "title",
+    "title_base",
+    "extracted_title",
+    "sender",
+    "correspondent",
+    "vendor",
+    "issuer",
+    "recipient",
+    "customer",
+    "document_type",
+    "invoice_number",
+    "invoiceNo",
+    "invoice_no",
+    "rechnungsnummer",
+    "created_date",
+    "date",
+    "invoice_date",
+    "rechnungsdatum",
+    "amount",
+    "total",
+    "gross_amount",
+    "invoice_total",
+    "currency",
+    "payment_method",
+    "zahlart",
+}
+
+
+def suppress_qwen_candidate_core_fields_for_neutral(candidate: dict[str, Any] | None) -> dict[str, Any]:
+    """Keep Qwen search/tag/custom-field hints, but do not let it classify neutral files as invoices."""
+    if not isinstance(candidate, dict):
+        return {}
+    cleaned = {**candidate}
+    for field_name in NEUTRAL_QWEN_CORE_CANDIDATE_FIELDS:
+        item = cleaned.get(field_name)
+        if isinstance(item, dict):
+            cleaned[field_name] = {**item, "value": None, "confidence": None, "evidence": None}
+        else:
+            cleaned[field_name] = {"value": None, "confidence": None, "evidence": None}
+    return cleaned
+
+
+def suppress_qwen_core_fields_for_neutral(qwen_suggestion: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(qwen_suggestion, dict):
+        return qwen_suggestion
+    cleaned = {**qwen_suggestion}
+    metadata = cleaned.get("metadata") if isinstance(cleaned.get("metadata"), dict) else None
+    if metadata is not None:
+        cleaned["metadata"] = {key: value for key, value in metadata.items() if key not in NEUTRAL_QWEN_METADATA_KEYS}
+    else:
+        for key in NEUTRAL_QWEN_METADATA_KEYS:
+            cleaned.pop(key, None)
+    for group in ("confidence", "evidence"):
+        values = cleaned.get(group)
+        if isinstance(values, dict):
+            cleaned[group] = {key: value for key, value in values.items() if key not in NEUTRAL_QWEN_METADATA_KEYS}
+    return cleaned
 
 
 def _qwen_evidence(suggestion: dict[str, Any], field_name: str) -> str | None:
@@ -961,7 +1037,16 @@ def run_metadata_for_document(
             )
             if qwen_debug.get("ok"):
                 qwen_candidate = qwen_debug.get("candidate") or {}
+                if result.metadata.get("neutral_file"):
+                    qwen_candidate = suppress_qwen_candidate_core_fields_for_neutral(qwen_candidate)
+                    qwen_debug = {
+                        **qwen_debug,
+                        "candidate": qwen_candidate,
+                        "neutral_core_fields_suppressed": True,
+                    }
                 qwen_suggestion = candidate_to_metadata_suggestion(qwen_candidate)
+                if result.metadata.get("neutral_file"):
+                    qwen_suggestion = suppress_qwen_core_fields_for_neutral(qwen_suggestion)
                 _apply_qwen_candidate_side_effects(
                     db,
                     document,
@@ -1041,9 +1126,12 @@ def run_metadata_for_document(
 
         document.metadata_sources_json = sources
         apply_paperless_metadata(db, document)
+        previous_metadata = dict(document.metadata_json or {})
+        previous_metadata.pop("review_warnings", None)
+        previous_metadata.pop("missing_required_fields", None)
         document.metadata_json = {
+            **previous_metadata,
             **result.metadata,
-            **(document.metadata_json or {}),
             "deterministic_title": result.title,
             "qwen_refinement": qwen_debug,
             "qwen_candidates": (qwen_debug or {}).get("candidate", {}),
@@ -1072,6 +1160,9 @@ def run_metadata_for_document(
         document.metadata_state = StageState.done
         missing_required = missing_required_core_fields(document, merged)
         warnings = review_warnings(document, merged, sources, qwen_suggestion, deterministic)
+        if not missing_required and not warnings and document.review_state == ReviewState.needs_review:
+            document.review_state = ReviewState.unreviewed
+            document.review_reason = None
         document.processing_state = determine_next_processing_state(document, missing_required)
         if warnings and document.processing_state == DocumentState.complete:
             document.processing_state = DocumentState.needs_review
@@ -1229,7 +1320,7 @@ def run_full_process_for_document(
 
 
 def _assign_folder_after_processing(db: Session, document: Document, options: dict[str, Any]) -> None:
-    if not options.get("auto_folder_enabled", True) or document.folder_id is not None:
+    if not options.get("auto_folder_enabled", False) or document.folder_id is not None:
         return
     folder_path = None
     if options.get("use_qwen_folder_suggestion") and document.llm_suggested_folder:

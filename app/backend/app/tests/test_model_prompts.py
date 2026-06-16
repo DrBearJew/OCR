@@ -188,6 +188,9 @@ def test_qwen_refinement_adapter_is_mockable(monkeypatch) -> None:
     assert "EUR205.25" in result.raw_text
     assert captured["url"] == "http://qwen-llama:8080/v1/chat/completions"
     assert captured["json"]["model"] == "qwen.gguf"
+    assert captured["json"]["messages"][0]["role"] == "system"
+    assert "<|think_off|>" in captured["json"]["messages"][0]["content"]
+    assert captured["json"]["messages"][1]["role"] == "user"
 
 
 def test_qwen_metadata_brain_prompt_requires_structured_candidates() -> None:
@@ -235,7 +238,7 @@ def test_metadata_extraction_still_succeeds_when_qwen_disabled(db_session: Sessi
     db_session.add(doc)
     db_session.commit()
 
-    run_metadata_for_document(db_session, doc.id)
+    run_metadata_for_document(db_session, doc.id, qwen_enabled=False)
     db_session.refresh(doc)
     assert doc.processing_state == DocumentState.complete
     assert doc.extracted_title == "Demo_PR400000005_12/10/2020_205,25"

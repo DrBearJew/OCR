@@ -61,7 +61,7 @@ class MockQwen:
         )
 
 
-def make_document(db: Session, tmp_path: Path, text: str, *, title: str = "doc.txt") -> Document:
+def make_document(db: Session, tmp_path: Path, text: str, *, title: str = "doc.txt", processing_options: dict | None = None) -> Document:
     collection = ensure_collection(db, "Eingangsrechnung")
     record = create_record_for_upload(db, collection, "Record")
     batch = Batch(collection_name="Eingangsrechnung", document_count=1)
@@ -78,7 +78,7 @@ def make_document(db: Session, tmp_path: Path, text: str, *, title: str = "doc.t
         mime_type="text/plain",
         file_size=len(text),
         sha256=title.ljust(64, "0")[:64],
-        processing_options_json={"qwen_enabled": False, "qwen_enrichment_enabled": True},
+        processing_options_json={"qwen_enabled": False, "qwen_enrichment_enabled": True, **(processing_options or {})},
     )
     db.add(document)
     db.commit()
@@ -86,7 +86,7 @@ def make_document(db: Session, tmp_path: Path, text: str, *, title: str = "doc.t
     return document
 
 
-def test_one_click_process_runs_ocr_metadata_qwen_title_and_folder(db_session: Session, tmp_path: Path) -> None:
+def test_one_click_process_runs_ocr_metadata_qwen_title_without_auto_folder(db_session: Session, tmp_path: Path) -> None:
     text = "Demo GmbH\nRechnungsnummer PR400000005\nRechnungsdatum 12.10.2020\nEndsumme 205,25"
     document = make_document(db_session, tmp_path, text)
     qwen = MockQwen()
@@ -102,11 +102,22 @@ def test_one_click_process_runs_ocr_metadata_qwen_title_and_folder(db_session: S
     assert document.llm_keywords == ["demo", "invoice", "technical parts", "205,25"]
     assert document.llm_confidence == 91
     assert document.llm_suggested_folder == "Eingangsrechnung/Demo/2020"
-    assert document.folder is not None
-    assert document.folder.path == "Eingangsrechnung/Demo/2020"
+    assert document.folder is None
     assert qwen.last_payload is not None
     assert qwen.last_payload["deterministic_metadata"]["invoice_number"] == "PR400000005"
     assert qwen.calls == 1
+
+
+def test_one_click_process_assigns_folder_only_when_explicitly_enabled(db_session: Session, tmp_path: Path) -> None:
+    text = "Demo GmbH\nRechnungsnummer PR400000005\nRechnungsdatum 12.10.2020\nEndsumme 205,25"
+    document = make_document(db_session, tmp_path, text, title="auto-folder.txt", processing_options={"auto_folder_enabled": True, "use_qwen_folder_suggestion": True})
+
+    run_full_process_for_document(db_session, document.id, ocr_provider=StaticOCR(text), qwen_provider=MockQwen())
+    db_session.refresh(document)
+
+    assert document.llm_suggested_folder == "Eingangsrechnung/Demo/2020"
+    assert document.folder is not None
+    assert document.folder.path == "Eingangsrechnung/Demo/2020"
 
 
 def test_invalid_qwen_enrichment_preserves_deterministic_metadata(db_session: Session, tmp_path: Path) -> None:

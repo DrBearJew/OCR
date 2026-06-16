@@ -3,6 +3,7 @@ import { Database, FileText, Plus, RefreshCw, Search, Settings2, SlidersHorizont
 import type { CSSProperties, ReactNode } from 'react'
 import { api } from '../api/client'
 import type { CollectionSummary } from '../types'
+import { useI18n } from '../i18n'
 
 interface CollectionsPageProps {
   onOpenCollection: (slug: string) => void
@@ -10,6 +11,7 @@ interface CollectionsPageProps {
 }
 
 export default function CollectionsPage({ onOpenCollection, onSchemas }: CollectionsPageProps) {
+  const { t } = useI18n()
   const [collections, setCollections] = useState<CollectionSummary[]>([])
   const [query, setQuery] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
@@ -22,7 +24,7 @@ export default function CollectionsPage({ onOpenCollection, onSchemas }: Collect
       const rows = await api.collectionSummaries()
       setCollections(rows.length ? rows : demoCollections)
     } catch {
-      setError('Backend API is unavailable; showing sample collection layout data.')
+      setError(t('collections.demoWarning'))
       setCollections(demoCollections)
     }
   }
@@ -60,7 +62,7 @@ export default function CollectionsPage({ onOpenCollection, onSchemas }: Collect
       await load()
       onOpenCollection(created.slug)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not create collection')
+      setError(err instanceof Error ? err.message : t('collections.createError'))
     }
   }
 
@@ -68,24 +70,24 @@ export default function CollectionsPage({ onOpenCollection, onSchemas }: Collect
     <main className="collections-console">
       <header className="page-header console-header">
         <div>
-          <h1>Collections</h1>
-          <p>PocketBase-style schema buckets with document-true records, fields, and OCR workflows.</p>
+          <h1>{t('collections.title')}</h1>
+          <p>{t('collections.subtitle')}</p>
         </div>
         <div className="button-row">
-          <button className="primary" onClick={() => setCreateOpen((value) => !value)}><Plus size={17} /> Create collection</button>
-          <button onClick={onSchemas}><Settings2 size={17} /> Manage Schemas</button>
-          <button className="icon-button" title="Refresh" onClick={() => void load()}><RefreshCw size={18} /></button>
+          <button className="primary" onClick={() => setCreateOpen((value) => !value)}><Plus size={17} /> {t('collections.create')}</button>
+          <button onClick={onSchemas}><Settings2 size={17} /> {t('collections.manageSchemas')}</button>
+          <button className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={18} /></button>
         </div>
       </header>
       {error && <p className="warning">{error}</p>}
       {createOpen && (
         <form className="workflow-card create-collection-form" onSubmit={createCollection}>
           <label>Name<input value={newCollection.name} onChange={(event) => setNewCollection({ ...newCollection, name: event.target.value })} placeholder="Steuer" autoFocus /></label>
-          <label>Slug<input value={newCollection.slug} onChange={(event) => setNewCollection({ ...newCollection, slug: event.target.value })} placeholder="auto-generated if empty" /></label>
+          <label>Slug<input value={newCollection.slug} onChange={(event) => setNewCollection({ ...newCollection, slug: event.target.value })} placeholder={t('collections.autoSlug')} /></label>
           <label>Icon<input value={newCollection.icon} onChange={(event) => setNewCollection({ ...newCollection, icon: event.target.value })} placeholder="ST" maxLength={4} /></label>
           <label>Color<input type="color" value={newCollection.color} onChange={(event) => setNewCollection({ ...newCollection, color: event.target.value })} /></label>
           <button className="primary"><Plus size={17} /> Save collection</button>
-          <button type="button" onClick={() => setCreateOpen(false)}>Cancel</button>
+          <button type="button" onClick={() => setCreateOpen(false)}>{t('common.cancel')}</button>
         </form>
       )}
 
@@ -100,11 +102,11 @@ export default function CollectionsPage({ onOpenCollection, onSchemas }: Collect
         <div className="document-toolbar">
           <label className="toolbar-search">
             <Search size={17} />
-            <input placeholder="Search collections, slugs, document types..." value={query} onChange={(event) => setQuery(event.target.value)} />
+            <input placeholder={t('collections.searchPlaceholder')} value={query} onChange={(event) => setQuery(event.target.value)} />
           </label>
-          <button onClick={onSchemas}><Settings2 size={17} /> Schema Editor</button>
-          <button onClick={() => setCreateOpen(true)}><Plus size={17} /> New collection</button>
-          <button className="primary" onClick={() => onOpenCollection('eingangsrechnung')}>Open invoices</button>
+          <button onClick={onSchemas}><Settings2 size={17} /> {t('collections.schemaEditor')}</button>
+          <button onClick={() => setCreateOpen(true)}><Plus size={17} /> {t('collections.new')}</button>
+          <button className="primary" onClick={() => onOpenCollection('eingangsrechnung')}>{t('collections.openInvoices')}</button>
         </div>
 
         <div className="collection-card-grid">
@@ -121,9 +123,9 @@ export default function CollectionsPage({ onOpenCollection, onSchemas }: Collect
               </div>
 
               <div className="collection-meter-row">
-                <span><strong>{item.record_count}</strong> Records</span>
-                <span><strong>{item.document_count}</strong> Documents</span>
-                <span><strong>{item.status_counts.complete || 0}</strong> Complete</span>
+                <span><strong>{item.record_count}</strong> {t('common.records')}</span>
+                <span><strong>{item.document_count}</strong> {t('common.documents')}</span>
+                <span><strong>{item.status_counts.complete || 0}</strong> {t('common.complete')}</span>
               </div>
 
               <StatusPills counts={item.status_counts} />
@@ -143,9 +145,9 @@ export default function CollectionsPage({ onOpenCollection, onSchemas }: Collect
               </div>
 
               <div className="collection-actions">
-                <button onClick={onSchemas}>Schema</button>
-                <button onClick={() => onOpenCollection(item.collection.slug)}>Records</button>
-                <button className="primary" onClick={() => onOpenCollection(item.collection.slug)}>Open</button>
+                <button onClick={onSchemas}>{t('common.schema')}</button>
+                <button onClick={() => onOpenCollection(item.collection.slug)}>{t('common.records')}</button>
+                <button className="primary" onClick={() => onOpenCollection(item.collection.slug)}>{t('common.open')}</button>
               </div>
             </article>
           ))}

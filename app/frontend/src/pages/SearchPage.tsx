@@ -4,8 +4,10 @@ import { api } from '../api/client'
 import SavedViewsBar from '../components/SavedViewsBar'
 import StatusBadge from '../components/StatusBadge'
 import type { SearchResult } from '../types'
+import { useI18n } from '../i18n'
 
 export default function SearchPage({ onOpenDocument }: { onOpenDocument: (id: string) => void }) {
+  const { t } = useI18n()
   const [query, setQuery] = useState('')
   const [collection, setCollection] = useState('')
   const [status, setStatus] = useState('')
@@ -30,16 +32,16 @@ export default function SearchPage({ onOpenDocument }: { onOpenDocument: (id: st
     try {
       setResults(await api.search({ q: query, collection, status, filename, title, dateFrom, dateTo, customField, customValue, correspondentId, documentTypeId, tagId, storagePathId, ocrMode, reviewState }))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Search failed')
+      setError(err instanceof Error ? err.message : t('search.failed'))
     }
   }
 
   return (
-    <main>
+    <main className="search-console">
       <header className="page-header">
         <div>
-          <h1>Search</h1>
-          <p>Full-text search across OCR text stored in PostgreSQL.</p>
+          <h1>{t('search.title')}</h1>
+          <p>{t('search.subtitle')}</p>
         </div>
       </header>
       <SavedViewsBar section="search" filters={{ query, collection, status, filename, title, dateFrom, dateTo, customField, customValue, correspondentId, documentTypeId, tagId, storagePathId, ocrMode, reviewState }} onApply={(filters) => {
@@ -60,30 +62,30 @@ export default function SearchPage({ onOpenDocument }: { onOpenDocument: (id: st
         setReviewState(filters.reviewState || '')
       }} />
       <form className="search-band" onSubmit={submit}>
-        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search OCR text" />
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('search.ocrPlaceholder')} />
         <select value={collection} onChange={(event) => setCollection(event.target.value)}>
-          <option value="">All collections</option>
+          <option value="">{t('search.allCollections')}</option>
           <option>Belege</option>
           <option>Eingangsrechnung</option>
           <option>Ausgangsrechnung</option>
         </select>
         <select value={status} onChange={(event) => setStatus(event.target.value)}>
-          <option value="">Any status</option>
-          <option value="complete">Complete</option>
-          <option value="failed">Failed</option>
-          <option value="duplicate">Duplicate</option>
-          <option value="ocr_done">OCR done</option>
+          <option value="">{t('search.anyStatus')}</option>
+          <option value="complete">{t('common.complete')}</option>
+          <option value="failed">{t('common.failed')}</option>
+          <option value="duplicate">{t('common.duplicate')}</option>
+          <option value="ocr_done">{t('common.ocrDone')}</option>
         </select>
-        <input value={filename} onChange={(event) => setFilename(event.target.value)} placeholder="Filename filter" />
-        <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Title filter" />
+        <input value={filename} onChange={(event) => setFilename(event.target.value)} placeholder={t('search.filenameFilter')} />
+        <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={t('search.titleFilter')} />
         <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
         <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
-        <input value={customField} onChange={(event) => setCustomField(event.target.value)} placeholder="Custom field slug" />
-        <input value={customValue} onChange={(event) => setCustomValue(event.target.value)} placeholder="Custom value" />
-        <input value={correspondentId} onChange={(event) => setCorrespondentId(event.target.value)} placeholder="Correspondent ID" />
-        <input value={documentTypeId} onChange={(event) => setDocumentTypeId(event.target.value)} placeholder="Document type ID" />
-        <input value={tagId} onChange={(event) => setTagId(event.target.value)} placeholder="Tag ID" />
-        <input value={storagePathId} onChange={(event) => setStoragePathId(event.target.value)} placeholder="Storage path ID" />
+        <input value={customField} onChange={(event) => setCustomField(event.target.value)} placeholder={t('search.customField')} />
+        <input value={customValue} onChange={(event) => setCustomValue(event.target.value)} placeholder={t('search.customValue')} />
+        <input value={correspondentId} onChange={(event) => setCorrespondentId(event.target.value)} placeholder={t('search.correspondentId')} />
+        <input value={documentTypeId} onChange={(event) => setDocumentTypeId(event.target.value)} placeholder={t('search.documentTypeId')} />
+        <input value={tagId} onChange={(event) => setTagId(event.target.value)} placeholder={t('search.tagId')} />
+        <input value={storagePathId} onChange={(event) => setStoragePathId(event.target.value)} placeholder={t('search.storagePathId')} />
         <select value={ocrMode} onChange={(event) => setOcrMode(event.target.value)}>
           <option value="">Any OCR mode</option>
           <option value="skip">skip</option>
@@ -96,7 +98,7 @@ export default function SearchPage({ onOpenDocument }: { onOpenDocument: (id: st
           <option value="needs_review">needs review</option>
           <option value="reviewed">reviewed</option>
         </select>
-        <button className="primary"><Search size={18} /> Search</button>
+        <button className="primary"><Search size={18} /> {t('common.search')}</button>
       </form>
       {error && <p className="error">{error}</p>}
       <div className="results">

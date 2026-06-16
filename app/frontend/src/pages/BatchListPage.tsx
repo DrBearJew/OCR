@@ -3,10 +3,12 @@ import { RefreshCw, Upload } from 'lucide-react'
 import { api } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
 import type { Batch } from '../types'
+import { useI18n } from '../i18n'
 
 const collections = ['Belege', 'Eingangsrechnung', 'Ausgangsrechnung']
 
 export default function BatchListPage({ onOpenBatch }: { onOpenBatch: (id: string) => void }) {
+  const { t } = useI18n()
   const [batches, setBatches] = useState<Batch[]>([])
   const [collection, setCollection] = useState(collections[0])
   const [label, setLabel] = useState('')
@@ -19,7 +21,7 @@ export default function BatchListPage({ onOpenBatch }: { onOpenBatch: (id: strin
     try {
       setBatches(await api.batches())
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load batches')
+      setError(err instanceof Error ? err.message : t('batches.loadError'))
     }
   }
 
@@ -41,7 +43,7 @@ export default function BatchListPage({ onOpenBatch }: { onOpenBatch: (id: strin
       await load()
       onOpenBatch(created.id)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed')
+      setError(err instanceof Error ? err.message : t('common.uploadFailed'))
     } finally {
       setBusy(false)
     }
@@ -51,20 +53,20 @@ export default function BatchListPage({ onOpenBatch }: { onOpenBatch: (id: strin
     <main>
       <header className="page-header">
         <div>
-          <h1>Batches</h1>
-          <p>Upload documents and track OCR plus metadata completion.</p>
+          <h1>{t('batches.title')}</h1>
+          <p>{t('batches.subtitle')}</p>
         </div>
-        <button className="icon-button" title="Refresh" onClick={() => void load()}><RefreshCw size={18} /></button>
+        <button className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={18} /></button>
       </header>
 
       <form className="upload-band" onSubmit={upload}>
         <select value={collection} onChange={(event) => setCollection(event.target.value)}>
           {collections.map((item) => <option key={item}>{item}</option>)}
         </select>
-        <input placeholder="Batch label" value={label} onChange={(event) => setLabel(event.target.value)} />
+        <input placeholder={t('batches.labelPlaceholder')} value={label} onChange={(event) => setLabel(event.target.value)} />
         <input type="file" multiple onChange={(event) => setFiles(event.target.files)} />
         <button className="primary" disabled={busy || !files?.length}>
-          <Upload size={18} /> Upload
+          <Upload size={18} /> {t('common.upload')}
         </button>
       </form>
       {error && <p className="error">{error}</p>}
@@ -73,11 +75,11 @@ export default function BatchListPage({ onOpenBatch }: { onOpenBatch: (id: strin
         <table>
           <thead>
             <tr>
-              <th>Collection</th>
-              <th>Label</th>
-              <th>Documents</th>
-              <th>Status</th>
-              <th>Created</th>
+              <th>{t('common.collection')}</th>
+              <th>{t('common.label')}</th>
+              <th>{t('common.documents')}</th>
+              <th>{t('common.status')}</th>
+              <th>{t('common.created')}</th>
             </tr>
           </thead>
           <tbody>

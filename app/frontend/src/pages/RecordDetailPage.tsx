@@ -3,8 +3,10 @@ import { Download, RefreshCw, Save, Sparkles, Trash2 } from 'lucide-react'
 import { api, downloadUrl, previewUrl, thumbnailUrl } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
 import type { Document, RecordRow } from '../types'
+import { useI18n } from '../i18n'
 
 export default function RecordDetailPage({ id, onOpenDocument }: { id: string; onOpenDocument: (id: string) => void }) {
+  const { t } = useI18n()
   const [record, setRecord] = useState<RecordRow | null>(null)
   const [selectedId, setSelectedId] = useState<string>('')
   const [error, setError] = useState('')
@@ -22,7 +24,7 @@ export default function RecordDetailPage({ id, onOpenDocument }: { id: string; o
       setApplySharedTitle(row.apply_shared_title_to_documents)
       setSelectedId((current) => current || row.documents[0]?.id || '')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load record')
+      setError(err instanceof Error ? err.message : t('recordDetail.loadError'))
     }
   }
 
@@ -79,39 +81,39 @@ export default function RecordDetailPage({ id, onOpenDocument }: { id: string; o
   }
 
   return (
-    <main>
+    <main className="record-detail-console">
       <header className="page-header">
         <div>
           <h1>{record.title}</h1>
           <p>{record.collection?.name} · {record.document_count} documents · <StatusBadge value={record.status} /></p>
         </div>
         <div className="button-row">
-          <button className="primary" onClick={() => void processAll()} disabled={busy === 'process'}><Sparkles size={18} /> {busy === 'process' ? 'Processing...' : 'Process All'}</button>
-          <button className="icon-button" title="Refresh" onClick={() => void load()}><RefreshCw size={18} /></button>
-          <button className="icon-button danger-button" title="Delete record" onClick={() => void deleteRecord()} disabled={busy === 'delete'}><Trash2 size={18} /></button>
+          <button className="primary" onClick={() => void processAll()} disabled={busy === 'process'}><Sparkles size={18} /> {busy === 'process' ? t('common.processing') + '...' : t('recordDetail.processAll')}</button>
+          <button className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={18} /></button>
+          <button className="icon-button danger-button" title={t('recordDetail.deleteRecord')} onClick={() => void deleteRecord()} disabled={busy === 'delete'}><Trash2 size={18} /></button>
         </div>
       </header>
       {error && <p className="error">{error}</p>}
       {message && <p className="success-message">{message}</p>}
       <section className="workflow-card record-shared-title-card">
         <div>
-          <h2>Shared title base</h2>
-          <p>Optional. Applies only to unlocked document title base segments; invoice number, date, amount, OCR, and metadata remain per document.</p>
+          <h2>{t('recordDetail.sharedTitleBase')}</h2>
+          <p>{t('recordDetail.sharedTitleCopy')}</p>
         </div>
         <div className="shared-title-controls">
           <label>
-            Base title/name
+            {t('recordDetail.baseTitleName')}
             <input value={sharedTitleBase} onChange={(event) => setSharedTitleBase(event.target.value)} placeholder="Telekom" />
           </label>
           <label className="toggle-row">
             <input type="checkbox" checked={applySharedTitle} onChange={(event) => setApplySharedTitle(event.target.checked)} />
-            <span>Apply shared title to documents in this record</span>
+            <span>{t('recordDetail.applySharedTitle')}</span>
           </label>
         </div>
         <div className="button-row">
-          <button type="button" onClick={() => void saveSharedTitle(false)}><Save size={17} /> Save settings</button>
+          <button type="button" onClick={() => void saveSharedTitle(false)}><Save size={17} /> {t('recordDetail.saveSettings')}</button>
           <button type="button" className="primary" disabled={!sharedTitleBase.trim() || !applySharedTitle} onClick={() => void saveSharedTitle(true)}>
-            <Sparkles size={17} /> Apply to unlocked documents
+            <Sparkles size={17} /> {t('recordDetail.applyUnlocked')}
           </button>
         </div>
       </section>
@@ -128,44 +130,45 @@ export default function RecordDetailPage({ id, onOpenDocument }: { id: string; o
             </button>
           ))}
         </aside>
-        {selected ? <SelectedDocument document={selected} onOpenDocument={onOpenDocument} /> : <p>No documents in this record.</p>}
+        {selected ? <SelectedDocument document={selected} onOpenDocument={onOpenDocument} /> : <p>{t('recordDetail.noDocuments')}</p>}
       </section>
     </main>
   )
 }
 
 function SelectedDocument({ document, onOpenDocument }: { document: Document; onOpenDocument: (id: string) => void }) {
+  const { t } = useI18n()
   const canPreview = document.mime_type?.startsWith('image/') || document.mime_type === 'application/pdf'
   return (
     <section className="selected-document">
       <div className="selected-toolbar">
-        <button onClick={() => onOpenDocument(document.id)}>Open document</button>
-        <a className="icon-button" href={downloadUrl(document.id)} title="Download"><Download size={18} /></a>
+        <button onClick={() => onOpenDocument(document.id)}>{t('recordDetail.openDocument')}</button>
+        <a className="icon-button" href={downloadUrl(document.id)} title={t('common.download')}><Download size={18} /></a>
       </div>
       <div className="preview-pane">
         {canPreview ? (
           document.mime_type === 'application/pdf'
-            ? <iframe src={previewUrl(document.id)} title="Document preview" />
+            ? <iframe src={previewUrl(document.id)} title={t('documents.preview')} />
             : <img src={previewUrl(document.id)} alt={document.original_filename} />
         ) : document.thumbnail_path ? (
           <img src={thumbnailUrl(document.id)} alt={document.original_filename} />
         ) : (
-          <a href={downloadUrl(document.id)}>Download {document.original_filename}</a>
+          <a href={downloadUrl(document.id)}>{t('common.download')} {document.original_filename}</a>
         )}
       </div>
       <div className="record-document-meta">
-        <h2>Document Metadata</h2>
+        <h2>{t('recordDetail.documentMetadata')}</h2>
         <dl>
-          <dt>Title</dt><dd>{document.manual_title_override || document.extracted_title || 'NA'}</dd>
-          <dt>Sender</dt><dd>{document.extracted_sender || 'NA'}</dd>
-          <dt>Recipient</dt><dd>{document.extracted_recipient || 'NA'}</dd>
-          <dt>Invoice</dt><dd>{document.extracted_invoice_number || 'NA'}</dd>
-          <dt>Date</dt><dd>{document.extracted_date || 'NA'}</dd>
-          <dt>Amount</dt><dd>{document.extracted_amount || 'NA'}</dd>
+          <dt>{t('fields.title')}</dt><dd>{document.manual_title_override || document.extracted_title || 'NA'}</dd>
+          <dt>{t('fields.sender')}</dt><dd>{document.extracted_sender || 'NA'}</dd>
+          <dt>{t('fields.recipient')}</dt><dd>{document.extracted_recipient || 'NA'}</dd>
+          <dt>{t('fields.invoice')}</dt><dd>{document.extracted_invoice_number || 'NA'}</dd>
+          <dt>{t('fields.date')}</dt><dd>{document.extracted_date || 'NA'}</dd>
+          <dt>{t('fields.amount')}</dt><dd>{document.extracted_amount || 'NA'}</dd>
         </dl>
       </div>
       <div className="text-section">
-        <h2>OCR Text</h2>
+        <h2>{t('documents.ocrText')}</h2>
         <pre>{document.ocr_text || ''}</pre>
       </div>
     </section>

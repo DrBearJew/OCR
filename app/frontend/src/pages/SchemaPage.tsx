@@ -2,10 +2,12 @@ import { FormEvent, useEffect, useState } from 'react'
 import { Plus, RefreshCw } from 'lucide-react'
 import { api } from '../api/client'
 import type { Collection, CustomFieldDefinition, CustomFieldType, PaperlessMetadata } from '../types'
+import { useI18n } from '../i18n'
 
 const fieldTypes: CustomFieldType[] = ['string', 'text', 'number', 'date', 'boolean', 'select']
 
 export default function SchemaPage() {
+  const { t } = useI18n()
   const [collections, setCollections] = useState<Collection[]>([])
   const [selected, setSelected] = useState('')
   const [fields, setFields] = useState<CustomFieldDefinition[]>([])
@@ -99,22 +101,22 @@ export default function SchemaPage() {
     <main className="schema-page">
       <header className="page-header">
         <div>
-          <h1>Schemas</h1>
+          <h1>{t('schemas.title')}</h1>
           <p>Manage PocketBase-like collection schemas and custom document fields.</p>
         </div>
-        <button className="icon-button" title="Refresh" onClick={() => void load()}><RefreshCw size={18} /></button>
+        <button className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={18} /></button>
       </header>
       {error && <p className="error">{error}</p>}
       <form className="workflow-card create-collection-form schema-create-collection" onSubmit={addCollection}>
-        <label>Collection name<input value={collectionForm.name} onChange={(event) => setCollectionForm({ ...collectionForm, name: event.target.value })} placeholder="New collection" /></label>
-        <label>Slug<input value={collectionForm.slug} onChange={(event) => setCollectionForm({ ...collectionForm, slug: event.target.value })} placeholder="auto-generated if empty" /></label>
-        <label>Icon<input value={collectionForm.icon} onChange={(event) => setCollectionForm({ ...collectionForm, icon: event.target.value })} placeholder="NC" maxLength={4} /></label>
-        <label>Color<input type="color" value={collectionForm.color} onChange={(event) => setCollectionForm({ ...collectionForm, color: event.target.value })} /></label>
-        <button className="primary"><Plus size={18} /> Create collection</button>
+        <label>{t('schemas.collectionName')}<input value={collectionForm.name} onChange={(event) => setCollectionForm({ ...collectionForm, name: event.target.value })} placeholder={t('schemas.newCollection')} /></label>
+        <label>{t('schemas.slug')}<input value={collectionForm.slug} onChange={(event) => setCollectionForm({ ...collectionForm, slug: event.target.value })} placeholder={t('collections.autoSlug')} /></label>
+        <label>{t('schemas.icon')}<input value={collectionForm.icon} onChange={(event) => setCollectionForm({ ...collectionForm, icon: event.target.value })} placeholder="NC" maxLength={4} /></label>
+        <label>{t('schemas.color')}<input type="color" value={collectionForm.color} onChange={(event) => setCollectionForm({ ...collectionForm, color: event.target.value })} /></label>
+        <button className="primary"><Plus size={18} /> {t('collections.create')}</button>
       </form>
       <section className="schema-layout">
         <aside className="workflow-card schema-collections">
-          <h2>Collections</h2>
+          <h2>{t('collections.title')}</h2>
           {collections.map((collection) => (
             <button key={collection.id} className={selected === collection.id ? 'active' : ''} onClick={() => setSelected(collection.id)}>
               <strong>{collection.name}</strong>
@@ -124,17 +126,17 @@ export default function SchemaPage() {
         </aside>
         <section className="schema-editor-stack">
           <section className="workflow-card schema-panel">
-            <h2>Custom Fields</h2>
+            <h2>{t('schemas.customFields')}</h2>
             <form className="schema-form" onSubmit={addField}>
-              <input placeholder="Field name" value={name} onChange={(event) => setName(event.target.value)} />
-              <input placeholder="slug" value={slug} onChange={(event) => setSlug(event.target.value)} />
+              <input placeholder={t('schemas.fieldName')} value={name} onChange={(event) => setName(event.target.value)} />
+              <input placeholder={t('schemas.slug')} value={slug} onChange={(event) => setSlug(event.target.value)} />
               <select value={fieldType} onChange={(event) => setFieldType(event.target.value as CustomFieldType)}>
                 {fieldTypes.map((type) => <option key={type}>{type}</option>)}
               </select>
-              <input placeholder="Enum options, comma separated" value={enumOptions} onChange={(event) => setEnumOptions(event.target.value)} />
-              <label className="check"><input type="checkbox" checked={required} onChange={(event) => setRequired(event.target.checked)} /> Required</label>
-              <label className="check"><input type="checkbox" checked={searchable} onChange={(event) => setSearchable(event.target.checked)} /> Searchable</label>
-              <button className="primary"><Plus size={18} /> Add field</button>
+              <input placeholder={t('schemas.enumOptions')} value={enumOptions} onChange={(event) => setEnumOptions(event.target.value)} />
+              <label className="check"><input type="checkbox" checked={required} onChange={(event) => setRequired(event.target.checked)} /> {t('schemas.required')}</label>
+              <label className="check"><input type="checkbox" checked={searchable} onChange={(event) => setSearchable(event.target.checked)} /> {t('schemas.searchable')}</label>
+              <button className="primary"><Plus size={18} /> {t('schemas.addField')}</button>
             </form>
             <div className="table-wrap">
               <table>
@@ -155,17 +157,17 @@ export default function SchemaPage() {
             </div>
           </section>
           <section className="workflow-card schema-panel">
-            <h2>Paperless Metadata</h2>
+            <h2>{t('schemas.paperlessMetadata')}</h2>
             <form className="schema-form metadata-schema-form" onSubmit={addMetadata}>
               <select value={metadataKind} onChange={(event) => setMetadataKind(event.target.value as typeof metadataKind)}>
-                <option value="correspondents">Correspondents</option>
-                <option value="document-types">Document types</option>
+                <option value="correspondents">{t('schemas.correspondents')}</option>
+                <option value="document-types">{t('schemas.documentTypes')}</option>
                 <option value="tags">Tags</option>
-                <option value="storage-paths">Storage paths</option>
+                <option value="storage-paths">{t('schemas.storagePaths')}</option>
               </select>
-              <input placeholder="Name" value={metadataName} onChange={(event) => setMetadataName(event.target.value)} />
-              <input placeholder="Storage path template" value={metadataTemplate} onChange={(event) => setMetadataTemplate(event.target.value)} />
-              <button className="primary"><Plus size={18} /> Add metadata</button>
+              <input placeholder={t('schemas.name')} value={metadataName} onChange={(event) => setMetadataName(event.target.value)} />
+              <input placeholder={t('schemas.storagePathTemplate')} value={metadataTemplate} onChange={(event) => setMetadataTemplate(event.target.value)} />
+              <button className="primary"><Plus size={18} /> {t('schemas.addMetadata')}</button>
             </form>
             <div className="table-wrap">
               <table>

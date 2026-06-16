@@ -1,10 +1,12 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { Download, RefreshCw, RotateCcw, Save, Sparkles, Trash2 } from 'lucide-react'
+import { Download, Maximize2, Minus, Plus, RefreshCw, RotateCcw, Save, Sparkles, Trash2 } from 'lucide-react'
 import { api, downloadUrl, previewUrl, thumbnailUrl } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
 import type { Document, DocumentCustomFieldValue, DocumentEvent, DocumentPage } from '../types'
+import { useI18n } from '../i18n'
 
 export default function DocumentDetailPage({ id }: { id: string }) {
+  const { t } = useI18n()
   const [document, setDocument] = useState<Document | null>(null)
   const [events, setEvents] = useState<DocumentEvent[]>([])
   const [pages, setPages] = useState<DocumentPage[]>([])
@@ -15,6 +17,7 @@ export default function DocumentDetailPage({ id }: { id: string }) {
   const [form, setForm] = useState<Partial<Document>>({})
   const [error, setError] = useState('')
   const [busy, setBusy] = useState<'process' | 'delete' | null>(null)
+  const [previewZoom, setPreviewZoom] = useState(100)
 
   async function load() {
     setError('')
@@ -28,11 +31,11 @@ export default function DocumentDetailPage({ id }: { id: string }) {
       setDiagnostics(diagnosticRow)
       setForm(row)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load document')
+      setError(err instanceof Error ? err.message : t('documentDetail.loadError'))
     }
   }
 
-  useEffect(() => { void load() }, [id])
+  useEffect(() => { void load(); setPreviewZoom(100) }, [id])
 
   async function save(event: FormEvent) {
     event.preventDefault()
@@ -111,68 +114,87 @@ export default function DocumentDetailPage({ id }: { id: string }) {
     await load()
   }
 
-  if (!document) return <main>{error || 'Loading document...'}</main>
+  if (!document) return <main className="document-detail-console">{error || 'Loading document...'}</main>
   const canPreview = document.mime_type?.startsWith('image/') || document.mime_type === 'application/pdf'
+  const isPdf = document.mime_type === 'application/pdf'
+  const previewMediaStyle = isPdf
+    ? { width: `${previewZoom}%`, maxWidth: previewZoom <= 100 ? '100%' : 'none', height: `${Math.round(78 * previewZoom / 100)}vh` }
+    : { width: `${previewZoom}%`, maxWidth: previewZoom <= 100 ? '100%' : 'none' }
+
+  function adjustPreviewZoom(delta: number) {
+    setPreviewZoom((current) => Math.min(260, Math.max(50, current + delta)))
+  }
 
   return (
-    <main>
+    <main className="document-detail-console">
       <header className="page-header">
         <div>
           <h1>{document.manual_title_override || document.extracted_title || document.original_filename}</h1>
           <p><StatusBadge value={document.processing_state} /> {document.collection_name}</p>
         </div>
         <div className="button-row">
-          <button className="primary" title="Process document" onClick={() => void processDocument()} disabled={busy === 'process'}><Sparkles size={18} /> {busy === 'process' ? 'Processing...' : 'Process Document'}</button>
-          <button className="icon-button" title="Refresh" onClick={() => void load()}><RefreshCw size={18} /></button>
-          <a className="icon-button" title="Download" href={downloadUrl(document.id)}><Download size={18} /></a>
-          <button className="icon-button danger-button" title="Delete" onClick={() => void deleteDocument()} disabled={busy === 'delete'}><Trash2 size={18} /></button>
+          <button className="primary" title={t('documentDetail.processDocument')} onClick={() => void processDocument()} disabled={busy === 'process'}><Sparkles size={18} /> {busy === 'process' ? t('common.processing') + '...' : t('documentDetail.processDocument')}</button>
+          <button className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={18} /></button>
+          <a className="icon-button" title={t('common.download')} href={downloadUrl(document.id)}><Download size={18} /></a>
+          <button className="icon-button danger-button" title={t('common.delete')} onClick={() => void deleteDocument()} disabled={busy === 'delete'}><Trash2 size={18} /></button>
         </div>
       </header>
       {error && <p className="error">{error}</p>}
       {document.error_message && <p className="error">{document.error_message}</p>}
       {document.duplicate_of_document_id && <p className="warning">Duplicate of document {document.duplicate_of_document_id}; it was linked and not reprocessed by default.</p>}
 
-      <section className="split">
-        <div className="preview-pane">
-          {document.thumbnail_path && !canPreview ? (
-            <img src={thumbnailUrl(document.id)} alt={document.original_filename} />
-          ) : canPreview ? (
-            document.mime_type === 'application/pdf'
-              ? <iframe src={previewUrl(document.id)} title="Document preview" />
-              : <img src={previewUrl(document.id)} alt={document.original_filename} />
-          ) : (
-            <a href={downloadUrl(document.id)}>Download {document.original_filename}</a>
-          )}
-        </div>
+      <section className="split document-detail-split">
+        <section className="document-detail-preview-card">
+          <div className="preview-toolbar">
+            <strong>{t('documents.preview')}</strong>
+            <div className="button-row">
+              <button type="button" className="icon-button" title={t('common.zoomOut')} onClick={() => adjustPreviewZoom(-20)}><Minus size={16} /></button>
+              <button type="button" className="zoom-value" title={t('common.resetZoom')} onClick={() => setPreviewZoom(100)}>{previewZoom}%</button>
+              <button type="button" className="icon-button" title={t('common.zoomIn')} onClick={() => adjustPreviewZoom(20)}><Plus size={16} /></button>
+              <button type="button" className="icon-button" title={t('documentDetail.readableSize')} onClick={() => setPreviewZoom((current) => current >= 160 ? 100 : 160)}><Maximize2 size={16} /></button>
+            </div>
+          </div>
+          <div className="preview-pane document-detail-preview-pane">
+            {document.thumbnail_path && !canPreview ? (
+              <img className="document-detail-preview-media" style={previewMediaStyle} src={thumbnailUrl(document.id)} alt={document.original_filename} />
+            ) : canPreview ? (
+              isPdf
+                ? <iframe className="document-detail-preview-media" style={previewMediaStyle} src={previewUrl(document.id)} title={t('documents.preview')} />
+                : <img className="document-detail-preview-media" style={previewMediaStyle} src={previewUrl(document.id)} alt={document.original_filename} />
+            ) : (
+              <a href={downloadUrl(document.id)}>{t('common.download')} {document.original_filename}</a>
+            )}
+          </div>
+        </section>
         <form className="metadata-form" onSubmit={save}>
-          <label>Manual title override<input value={form.manual_title_override ?? ''} onChange={(e) => setForm({ ...form, manual_title_override: e.target.value })} /></label>
-          <label>Extracted title<input value={form.extracted_title ?? ''} onChange={(e) => setForm({ ...form, extracted_title: e.target.value })} /></label>
-          <label>Sender<input value={form.extracted_sender ?? ''} onChange={(e) => setForm({ ...form, extracted_sender: e.target.value })} /></label>
-          <label>Recipient<input value={form.extracted_recipient ?? ''} onChange={(e) => setForm({ ...form, extracted_recipient: e.target.value })} /></label>
-          <label>Invoice number<input value={form.extracted_invoice_number ?? ''} onChange={(e) => setForm({ ...form, extracted_invoice_number: e.target.value })} /></label>
-          <label>Date<input value={form.extracted_date ?? ''} onChange={(e) => setForm({ ...form, extracted_date: e.target.value })} /></label>
-          <label>Amount<input value={form.extracted_amount ?? ''} onChange={(e) => setForm({ ...form, extracted_amount: e.target.value })} /></label>
-          <label>Payment method<input value={form.extracted_payment_method ?? ''} onChange={(e) => setForm({ ...form, extracted_payment_method: e.target.value })} /></label>
-          <label>Review state<select value={form.review_state ?? 'unreviewed'} onChange={(e) => setForm({ ...form, review_state: e.target.value as Document['review_state'] })}>
-            <option value="unreviewed">Unreviewed</option>
-            <option value="needs_review">Needs review</option>
-            <option value="reviewed">Reviewed</option>
+          <label>{t('documentDetail.manualTitleOverride')}<input value={form.manual_title_override ?? ''} onChange={(e) => setForm({ ...form, manual_title_override: e.target.value })} /></label>
+          <label>{t('documentDetail.extractedTitle')}<input value={form.extracted_title ?? ''} onChange={(e) => setForm({ ...form, extracted_title: e.target.value })} /></label>
+          <label>{t('fields.sender')}<input value={form.extracted_sender ?? ''} onChange={(e) => setForm({ ...form, extracted_sender: e.target.value })} /></label>
+          <label>{t('fields.recipient')}<input value={form.extracted_recipient ?? ''} onChange={(e) => setForm({ ...form, extracted_recipient: e.target.value })} /></label>
+          <label>{t('fields.invoiceNumber')}<input value={form.extracted_invoice_number ?? ''} onChange={(e) => setForm({ ...form, extracted_invoice_number: e.target.value })} /></label>
+          <label>{t('fields.date')}<input value={form.extracted_date ?? ''} onChange={(e) => setForm({ ...form, extracted_date: e.target.value })} /></label>
+          <label>{t('fields.amount')}<input value={form.extracted_amount ?? ''} onChange={(e) => setForm({ ...form, extracted_amount: e.target.value })} /></label>
+          <label>{t('fields.paymentMethod')}<input value={form.extracted_payment_method ?? ''} onChange={(e) => setForm({ ...form, extracted_payment_method: e.target.value })} /></label>
+          <label>{t('fields.reviewState')}<select value={form.review_state ?? 'unreviewed'} onChange={(e) => setForm({ ...form, review_state: e.target.value as Document['review_state'] })}>
+            <option value="unreviewed">{t('common.unreviewed')}</option>
+            <option value="needs_review">{t('common.needsReview')}</option>
+            <option value="reviewed">{t('common.reviewed')}</option>
           </select></label>
-          <label>Review reason<input value={form.review_reason ?? ''} onChange={(e) => setForm({ ...form, review_reason: e.target.value })} /></label>
-          <label className="check"><input type="checkbox" checked={Boolean(form.metadata_locked)} onChange={(e) => setForm({ ...form, metadata_locked: e.target.checked })} /> Metadata locked</label>
+          <label>{t('fields.reviewReason')}<input value={form.review_reason ?? ''} onChange={(e) => setForm({ ...form, review_reason: e.target.value })} /></label>
+          <label className="check"><input type="checkbox" checked={Boolean(form.metadata_locked)} onChange={(e) => setForm({ ...form, metadata_locked: e.target.checked })} /> {t('documentDetail.metadataLocked')}</label>
           <div className="button-row">
-            <button className="primary"><Save size={18} /> Save</button>
+            <button className="primary"><Save size={18} /> {t('common.save')}</button>
             <details className="advanced-actions inline-advanced">
-              <summary>Advanced actions</summary>
+              <summary>{t('documentDetail.advancedActions')}</summary>
               <div>
-                <button type="button" onClick={retry}><RotateCcw size={18} /> Retry OCR</button>
-                <button type="button" onClick={() => void runOcr('skip')}>OCR skip</button>
-                <button type="button" onClick={() => void runOcr('redo')}>OCR redo</button>
-                <button type="button" onClick={() => void runOcr('force')}>OCR force</button>
-                <button type="button" onClick={() => void reextract(false)}>Reextract</button>
-                <button type="button" onClick={() => void reextract(true)}>Force reextract</button>
-                <button type="button" onClick={() => void previewExtraction()}>Preview extraction</button>
-                <button type="button" onClick={() => void reindex()}>Reindex</button>
+                <button type="button" onClick={retry}><RotateCcw size={18} /> {t('common.retryOcr')}</button>
+                <button type="button" onClick={() => void runOcr('skip')}>{t('documentDetail.ocrSkip')}</button>
+                <button type="button" onClick={() => void runOcr('redo')}>{t('documentDetail.ocrRedo')}</button>
+                <button type="button" onClick={() => void runOcr('force')}>{t('documentDetail.ocrForce')}</button>
+                <button type="button" onClick={() => void reextract(false)}>{t('common.reextract')}</button>
+                <button type="button" onClick={() => void reextract(true)}>{t('documentDetail.forceReextract')}</button>
+                <button type="button" onClick={() => void previewExtraction()}>{t('documentDetail.previewExtraction')}</button>
+                <button type="button" onClick={() => void reindex()}>{t('documentDetail.reindex')}</button>
               </div>
             </details>
           </div>
@@ -180,25 +202,25 @@ export default function DocumentDetailPage({ id }: { id: string }) {
       </section>
 
       <section className="text-section">
-        <h2>Why is this not complete?</h2>
+        <h2>{t('documentDetail.whyIncomplete')}</h2>
         <pre>{JSON.stringify(diagnostics, null, 2)}</pre>
       </section>
       {preview && (
         <section className="text-section">
-          <h2>Dry-run Extraction Preview</h2>
+          <h2>{t('documentDetail.dryRunPreview')}</h2>
           <pre>{JSON.stringify(preview, null, 2)}</pre>
           <div className="button-row">
-            <button type="button" className="primary" onClick={() => void applyPreview()}>Apply preview to unlocked fields</button>
-            <button type="button" onClick={() => setPreview(null)}>Reject preview</button>
+            <button type="button" className="primary" onClick={() => void applyPreview()}>{t('documentDetail.applyPreview')}</button>
+            <button type="button" onClick={() => setPreview(null)}>{t('documentDetail.rejectPreview')}</button>
           </div>
         </section>
       )}
       <section className="text-section">
-        <h2>Custom Fields</h2>
+        <h2>{t('schemas.customFields')}</h2>
         <pre>{JSON.stringify(customFields, null, 2)}</pre>
       </section>
       <section className="text-section">
-        <h2>Operational State</h2>
+        <h2>{t('documentDetail.operationalState')}</h2>
         <pre>{JSON.stringify({
           page_count: document.page_count,
           attempts: document.processing_attempt,
@@ -217,7 +239,7 @@ export default function DocumentDetailPage({ id }: { id: string }) {
         }, null, 2)}</pre>
       </section>
       <section className="timeline">
-        <h2>Timeline</h2>
+        <h2>{t('documentDetail.timeline')}</h2>
         {events.map((event) => (
           <div className="timeline-row" key={event.id}>
             <strong>{event.event_type}</strong>
@@ -227,15 +249,15 @@ export default function DocumentDetailPage({ id }: { id: string }) {
         ))}
       </section>
       <section className="text-section">
-        <h2>Page OCR</h2>
+        <h2>{t('documentDetail.pageOcr')}</h2>
         <pre>{JSON.stringify(pages.map((page) => ({ page: page.page_number, text: page.ocr_text })), null, 2)}</pre>
       </section>
       <section className="text-section">
-        <h2>OCR Text</h2>
+        <h2>{t('documents.ocrText')}</h2>
         <pre>{document.ocr_text || ''}</pre>
       </section>
       <section className="text-section">
-        <h2>Debug</h2>
+        <h2>{t('documentDetail.debug')}</h2>
         <pre>{JSON.stringify({
           metadata: document.metadata_json,
           metadata_sources: document.metadata_sources_json,

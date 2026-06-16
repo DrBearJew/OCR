@@ -100,6 +100,7 @@ export const api = {
   uploadBatch: (form: FormData) => request<BatchDetail>('/api/batches/upload', { method: 'POST', body: form }),
   collections: () => request<Collection[]>('/api/collections'),
   createCollection: (payload: Partial<Collection>) => request<Collection>('/api/collections', { method: 'POST', body: JSON.stringify(payload) }),
+  patchCollection: (id: string, payload: Partial<Collection>) => request<Collection>(`/api/collections/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   dashboard: () => request<DashboardSummary>('/api/dashboard'),
   activity: (params: Record<string, string> = {}) => request<ActivityItem[]>(`/api/activity?${new URLSearchParams(params).toString()}`),
   processing: () => request<ProcessingSummary>('/api/processing'),

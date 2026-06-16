@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
+import type { KeyboardEvent, MouseEvent } from 'react'
 import { FileText, RefreshCw, Search, Settings2 } from 'lucide-react'
-import { api } from '../api/client'
+import { api, previewUrl, thumbnailUrl } from '../api/client'
 import SavedViewsBar from '../components/SavedViewsBar'
 import StatusBadge from '../components/StatusBadge'
 import type { CollectionPageData, Document, RecordRow } from '../types'
+import { useI18n } from '../i18n'
 
-export default function CollectionDetailPage({ slug, onOpenRecord }: { slug: string; onOpenRecord: (id: string) => void }) {
+export default function CollectionDetailPage({ slug, onOpenRecord, onOpenDocument }: { slug: string; onOpenRecord: (id: string) => void; onOpenDocument: (id: string) => void }) {
+  const { t } = useI18n()
   const [data, setData] = useState<CollectionPageData | null>(null)
   const [status, setStatus] = useState('')
   const [query, setQuery] = useState('')
@@ -37,11 +40,11 @@ export default function CollectionDetailPage({ slug, onOpenRecord }: { slug: str
       <header className="page-header console-header">
         <div>
           <h1>{data?.collection.name || slug}</h1>
-          <p>Records, status counts, and document strips for this collection.</p>
+          <p>{t('collectionDetail.subtitle')}</p>
         </div>
         <div className="button-row">
           <button><Settings2 size={17} /> Schema</button>
-          <button className="icon-button" title="Refresh" onClick={() => void load()}><RefreshCw size={18} /></button>
+          <button className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={18} /></button>
         </div>
       </header>
       {error && <p className="error">{error}</p>}
@@ -52,30 +55,30 @@ export default function CollectionDetailPage({ slug, onOpenRecord }: { slug: str
           <p>{records.length} visible records, {totalDocs} searchable document OCR units.</p>
         </div>
         <div className="collection-detail-stats">
-          <span><strong>{data?.records.length || 0}</strong> Records</span>
-          <span><strong>{totalDocs}</strong> Documents</span>
-          <span><strong>{data?.status_counts.needs_review || 0}</strong> Needs review</span>
-          <span><strong>{data?.status_counts.complete || 0}</strong> Complete</span>
+          <span><strong>{data?.records.length || 0}</strong> {t('common.records')}</span>
+          <span><strong>{totalDocs}</strong> {t('common.documents')}</span>
+          <span><strong>{data?.status_counts.needs_review || 0}</strong> {t('common.needsReview')}</span>
+          <span><strong>{data?.status_counts.complete || 0}</strong> {t('common.complete')}</span>
         </div>
       </section>
       <section className="workflow-card collection-record-panel">
         <div className="document-toolbar collection-detail-toolbar">
           <label className="toolbar-search">
             <Search size={17} />
-            <input placeholder="Search records, filenames, titles..." value={query} onChange={(event) => setQuery(event.target.value)} />
+            <input placeholder={t('collectionDetail.searchPlaceholder')} value={query} onChange={(event) => setQuery(event.target.value)} />
           </label>
           <select value={status} onChange={(event) => setStatus(event.target.value)}>
             <option value="">All statuses</option>
             <option value="pending">Pending</option>
-            <option value="processing">Processing</option>
+            <option value="processing">{t('processing.title')}</option>
             <option value="partially_failed">Partially failed</option>
-            <option value="complete">Complete</option>
-            <option value="needs_review">Needs review</option>
+            <option value="complete">{t('common.complete')}</option>
+            <option value="needs_review">{t('common.needsReview')}</option>
           </select>
           <SavedViewsBar section="collections" filters={{ status, query }} onApply={(filters) => { setStatus(filters.status || ''); setQuery(filters.query || '') }} />
         </div>
         <div className="collection-record-list">
-          {records.map((record) => <CollectionRecordCard key={record.id} record={record} onOpenRecord={onOpenRecord} />)}
+          {records.map((record) => <CollectionRecordCard key={record.id} record={record} onOpenRecord={onOpenRecord} onOpenDocument={onOpenDocument} />)}
           {!records.length && <p className="muted-empty">No records match the current filters.</p>}
         </div>
       </section>
@@ -83,10 +86,21 @@ export default function CollectionDetailPage({ slug, onOpenRecord }: { slug: str
   )
 }
 
-function CollectionRecordCard({ record, onOpenRecord }: { record: RecordRow; onOpenRecord: (id: string) => void }) {
+function CollectionRecordCard({ record, onOpenRecord, onOpenDocument }: { record: RecordRow; onOpenRecord: (id: string) => void; onOpenDocument: (id: string) => void }) {
   const firstDoc = record.documents[0]
   return (
-    <button className="collection-record-card" onClick={() => onOpenRecord(record.id)}>
+    <div
+      className="collection-record-card"
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpenRecord(record.id)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onOpenRecord(record.id)
+        }
+      }}
+    >
       <div className="record-main-meta">
         <span className="record-type-icon"><FileText size={18} /></span>
         <div>
@@ -96,20 +110,38 @@ function CollectionRecordCard({ record, onOpenRecord }: { record: RecordRow; onO
         </div>
       </div>
       <div className="thumb-strip" onClick={(event) => event.stopPropagation()}>
-        {record.documents.slice(0, 6).map((document) => <CollectionDocThumb key={document.id} document={document} />)}
+        {record.documents.slice(0, 6).map((document) => <CollectionDocThumb key={document.id} document={document} onOpenDocument={onOpenDocument} />)}
         {record.documents.length > 6 && <span className="count-badge">+{record.documents.length - 6}</span>}
       </div>
       <StatusBadge value={record.status} />
-    </button>
+    </div>
   )
 }
 
-function CollectionDocThumb({ document }: { document: Document }) {
+function CollectionDocThumb({ document, onOpenDocument }: { document: Document; onOpenDocument: (id: string) => void }) {
+  function open(event: MouseEvent | KeyboardEvent) {
+    event.stopPropagation()
+    onOpenDocument(document.id)
+  }
+
   return (
-    <span className="record-thumb compact-record-thumb">
-      <span className="file-icon">{document.original_filename.split('.').pop()?.toUpperCase() || 'DOC'}</span>
+    <span
+      className="record-thumb"
+      role="button"
+      tabIndex={0}
+      title={`Open ${document.original_filename}`}
+      onClick={open}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          open(event)
+        }
+      }}
+    >
+      {document.thumbnail_path ? <img src={thumbnailUrl(document.id)} alt="" /> : <span className="file-icon">{document.original_filename.split('.').pop()?.toUpperCase() || 'DOC'}</span>}
       <span className={`status-dot dot-${document.processing_state}`} />
       <span className="hover-preview">
+        {document.thumbnail_path && <img src={document.mime_type?.startsWith('image/') ? previewUrl(document.id) : thumbnailUrl(document.id)} alt="" />}
         <strong>{document.original_filename}</strong>
         <em>{document.processing_state}</em>
         <span>{document.extracted_title || 'No title yet'}</span>

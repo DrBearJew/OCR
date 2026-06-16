@@ -80,10 +80,19 @@ def ensure_folder_path(db: Session, path: str, collection_id: uuid.UUID | None =
     return current
 
 
-def folder_counts(db: Session, folder: Folder) -> tuple[int, int]:
+def folder_counts(db: Session, folder: Folder, *, recursive: bool = False) -> tuple[int, int]:
     documents = db.scalar(select(func.count()).select_from(Document).where(Document.folder_id == folder.id).where(Document.deleted_at.is_(None))) or 0
     records = db.scalar(select(func.count()).select_from(Record).where(Record.folder_id == folder.id).where(Record.deleted_at.is_(None))) or 0
-    return int(documents), int(records)
+    document_count = int(documents)
+    record_count = int(records)
+    if recursive:
+        for child in folder.children:
+            if child.deleted_at is not None:
+                continue
+            child_documents, child_records = folder_counts(db, child, recursive=True)
+            document_count += child_documents
+            record_count += child_records
+    return document_count, record_count
 
 
 def soft_delete_document(db: Session, document: Document, actor: str = "admin") -> None:

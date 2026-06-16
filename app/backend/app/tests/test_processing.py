@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import Batch, BatchStatus, Document, DocumentState, OCRMode, StageState
+from app.models import Batch, BatchStatus, Document, DocumentState, OCRMode, ReviewState, StageState
 from app.services.llm_qwen import QwenRefinement
 from app.services.prompt_loader import PromptLoader
 from app.services.ocr_glm import OCRProviderError, OCRResult
@@ -184,6 +184,62 @@ def test_manual_override_survives_locked_reprocessing(db_session: Session, tmp_p
     assert batch is not None
     assert batch.status == BatchStatus.complete
 
+
+def test_neutral_file_in_invoice_collection_completes_without_na_review(db_session: Session, tmp_path: Path) -> None:
+    class MockQwen:
+        def generate_metadata_candidates(self, payload: dict) -> QwenRefinement:
+            prompt = PromptLoader().render("custom_field_prompt.tmpl", {"Content": payload["ocr_text"]})
+            return QwenRefinement(
+                raw_text=(
+                    '{"sender":{"value":"Natürliche Aktivierung","confidence":0.9},'
+                    '"invoice_number":{"value":"NA","confidence":0.5},'
+                    '"created_date":{"value":"2026-06-15","confidence":0.8},'
+                    '"amount":{"value":"42,00","confidence":0.8},'
+                    '"summary":"Neutral health graphic","suggested_tags":["neutral"]}'
+                ),
+                raw_response={"ok": True},
+                prompt=prompt,
+                endpoint="http://qwen",
+                model="qwen.gguf",
+            )
+
+    text = "Natürliche Aktivierung\nAktiviert körpereigene Prozesse\nohne Fremdstoffe."
+    doc = make_doc(db_session, tmp_path, text, collection="Eingangsrechnung", sha="n" * 64)
+    doc.ocr_text = text
+    doc.ocr_state = StageState.done
+    doc.processing_state = DocumentState.ocr_done
+    doc.review_state = ReviewState.needs_review
+    doc.review_reason = "Fallback title or missing title segment used"
+    doc.extracted_sender = "Old Sender"
+    doc.extracted_date = "15/06/2026"
+    doc.extracted_amount = "42,00"
+    doc.metadata_sources_json = {
+        "sender": {"source": "qwen", "confidence": 80},
+        "date": {"source": "qwen", "confidence": 80},
+        "amount": {"source": "qwen", "confidence": 80},
+    }
+    doc.metadata_json = {"review_warnings": ["Fallback title or missing title segment used"], "missing_required_fields": ["amount"]}
+    db_session.commit()
+
+    run_metadata_for_document(db_session, doc.id, qwen_provider=MockQwen(), qwen_enabled=True, force=True)
+    db_session.refresh(doc)
+
+    assert doc.processing_state == DocumentState.complete
+    assert doc.review_state == ReviewState.unreviewed
+    assert doc.review_reason is None
+    assert doc.extracted_title == "NaturlicheAktivierung"
+    assert doc.extracted_sender is None
+    assert doc.extracted_invoice_number is None
+    assert doc.extracted_date is None
+    assert doc.extracted_amount is None
+    assert doc.llm_summary == "Neutral health graphic"
+    assert doc.llm_suggested_tags == ["neutral"]
+    assert doc.metadata_json["neutral_file"] is True
+    assert doc.metadata_json["document_kind"] == "neutral"
+    assert doc.metadata_json["qwen_refinement"]["neutral_core_fields_suppressed"] is True
+    assert doc.metadata_json["qwen_candidates"]["sender"]["value"] is None
+    assert "review_warnings" not in doc.metadata_json
+    assert "missing_required_fields" not in doc.metadata_json
 
 def test_qwen_autofill_fills_empty_fields_and_records_source(db_session: Session, tmp_path: Path) -> None:
     class MockQwen:

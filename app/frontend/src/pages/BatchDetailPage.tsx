@@ -3,8 +3,10 @@ import { RefreshCw } from 'lucide-react'
 import { api, thumbnailUrl } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
 import type { BatchDetail } from '../types'
+import { useI18n } from '../i18n'
 
 export default function BatchDetailPage({ id, onOpenDocument }: { id: string; onOpenDocument: (id: string) => void }) {
+  const { t } = useI18n()
   const [batch, setBatch] = useState<BatchDetail | null>(null)
   const [error, setError] = useState('')
 
@@ -28,7 +30,7 @@ export default function BatchDetailPage({ id, onOpenDocument }: { id: string; on
           <h1>{batch.label || batch.collection_name}</h1>
           <p>{batch.document_count} documents · <StatusBadge value={batch.status} /></p>
         </div>
-        <button className="icon-button" title="Refresh" onClick={() => void load()}><RefreshCw size={18} /></button>
+        <button className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={18} /></button>
       </header>
       {error && <p className="error">{error}</p>}
       <div className="document-grid">

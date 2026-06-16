@@ -16,6 +16,13 @@ from app.services.prompt_loader import PromptLoader, RenderedPrompt
 logger = logging.getLogger(__name__)
 
 
+QWEN_THINKING_DISABLED_SYSTEM_PROMPT = (
+    "<|think_off|>\n"
+    "You are a precise metadata extraction engine. Return only the requested final answer "
+    "in assistant message content. Do not put output in reasoning_content."
+)
+
+
 class QwenProviderError(RuntimeError):
     pass
 
@@ -150,7 +157,10 @@ class QwenLlamaCppProvider:
     def _chat(self, prompt: RenderedPrompt, *, role_name: str) -> QwenRefinement:
         body = {
             "model": self.settings.qwen_model_name,
-            "messages": [{"role": "user", "content": prompt.text}],
+            "messages": [
+                {"role": "system", "content": QWEN_THINKING_DISABLED_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt.text},
+            ],
             "temperature": self.settings.llm_temperature,
             "max_tokens": self.settings.llm_max_tokens,
         }

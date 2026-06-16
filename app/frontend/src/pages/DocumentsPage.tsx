@@ -1,17 +1,23 @@
-import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Download, FileText, RefreshCw, Search, Trash2, UploadCloud } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { AlertTriangle, CheckCircle2, Download, FileText, Maximize2, Minus, Plus, RefreshCw, Search, Trash2, UploadCloud } from 'lucide-react'
+import type { MouseEvent, ReactNode } from 'react'
 import { api, downloadUrl, previewUrl, thumbnailUrl } from '../api/client'
 import SavedViewsBar from '../components/SavedViewsBar'
 import StatusBadge from '../components/StatusBadge'
-import type { Document } from '../types'
+import type { Document, DocumentEvent, DocumentPage } from '../types'
+import { useI18n } from '../i18n'
 
 export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpenDocument: (id: string) => void; onOpenRecord: (id: string) => void }) {
+  const { t } = useI18n()
   const [documents, setDocuments] = useState<Document[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [error, setError] = useState('')
+  const [selectedDetail, setSelectedDetail] = useState<Document | null>(null)
+  const [selectedEvents, setSelectedEvents] = useState<DocumentEvent[]>([])
+  const [selectedPages, setSelectedPages] = useState<DocumentPage[]>([])
+  const [detailLoading, setDetailLoading] = useState(false)
 
   async function load(nextFilters = filters) {
     setError('')
@@ -20,15 +26,56 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
       setDocuments(rows.length ? rows : demoDocuments)
       setSelectedId((current) => current || rows[0]?.id || demoDocuments[0].id)
     } catch {
-      setError('Backend API is unavailable; showing sample document layout data.')
+      setError(t('documents.demoWarning'))
       setDocuments(demoDocuments)
       setSelectedId((current) => current || demoDocuments[0].id)
     }
   }
 
   useEffect(() => { void load() }, [])
-  const selected = useMemo(() => documents.find((doc) => doc.id === selectedId) || documents[0], [documents, selectedId])
+  const selectedListItem = useMemo(() => documents.find((doc) => doc.id === selectedId) || documents[0], [documents, selectedId])
+  const selected = useMemo(
+    () => selectedDetail?.id === selectedListItem?.id ? selectedDetail : selectedListItem,
+    [selectedDetail, selectedListItem]
+  )
   const stats = useMemo(() => buildStats(documents), [documents])
+
+  useEffect(() => {
+    if (!selectedListItem) {
+      setSelectedDetail(null)
+      setSelectedEvents([])
+      setSelectedPages([])
+      setDetailLoading(false)
+      return
+    }
+    let cancelled = false
+    setSelectedDetail(null)
+    setSelectedEvents([])
+    setSelectedPages([])
+    if (selectedListItem.id.startsWith('demo-')) {
+      setDetailLoading(false)
+      return
+    }
+    setDetailLoading(true)
+    Promise.all([
+      api.document(selectedListItem.id),
+      api.documentEvents(selectedListItem.id),
+      api.documentPages(selectedListItem.id)
+    ]).then(([documentRow, eventRows, pageRows]) => {
+      if (cancelled) return
+      setSelectedDetail(documentRow)
+      setSelectedEvents(eventRows)
+      setSelectedPages(pageRows)
+    }).catch(() => {
+      if (cancelled) return
+      setSelectedDetail(null)
+      setSelectedEvents([])
+      setSelectedPages([])
+    }).finally(() => {
+      if (!cancelled) setDetailLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [selectedListItem?.id])
 
   function updateFilter(key: string, value: string) {
     const next = { ...filters, [key]: value }
@@ -82,12 +129,12 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
     <main className="documents-console">
       <header className="page-header console-header">
         <div>
-          <h1>Documents</h1>
+          <h1>{t('documents.title')}</h1>
           <p>Browse OCR units with record context, preview, metadata, and review actions.</p>
         </div>
         <div className="button-row">
-          <button className="primary"><UploadCloud size={18} /> Upload Documents</button>
-          <button className="icon-button" title="Refresh" onClick={() => void load()}><RefreshCw size={18} /></button>
+          <button className="primary"><UploadCloud size={18} /> {t('documents.upload')}</button>
+          <button className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={18} /></button>
         </div>
       </header>
       {error && <p className="warning">{error}</p>}
@@ -101,7 +148,7 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
       <section className="documents-console-grid">
         <section className="document-table-panel workflow-card">
           <div className="document-toolbar">
-            <label className="toolbar-search"><Search size={17} /><input placeholder="Search documents, sender, invoice no., amount, tags..." value={filters.title || ''} onChange={(event) => updateFilter('title', event.target.value)} /></label>
+            <label className="toolbar-search"><Search size={17} /><input placeholder={t('documents.searchPlaceholder')} value={filters.title || ''} onChange={(event) => updateFilter('title', event.target.value)} /></label>
             <select value={filters.collection_name || ''} onChange={(event) => updateFilter('collection_name', event.target.value)}>
               <option value="">Collection</option>
               <option>Eingangsrechnung</option>
@@ -118,11 +165,11 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
           </div>
           <div className="bulk-bar console-bulk">
             <span>{selectedIds.size} selected</span>
-            <button onClick={() => void bulk('retry')}>Retry OCR</button>
-            <button onClick={() => void bulk('reextract')}>Re-extract</button>
-            <button onClick={() => void bulk('set_review_state', { review_state: 'needs_review', review_reason: 'Bulk marked for review' })}>Needs review</button>
-            <button onClick={() => void bulk('set_review_state', { review_state: 'reviewed' })}>Reviewed</button>
-            <button className="danger-button" onClick={() => void deleteSelectedDocuments()}><Trash2 size={16} /> Delete selected</button>
+            <button onClick={() => void bulk('retry')}>{t('common.retryOcr')}</button>
+            <button onClick={() => void bulk('reextract')}>{t('common.reextract')}</button>
+            <button onClick={() => void bulk('set_review_state', { review_state: 'needs_review', review_reason: 'Bulk marked for review' })}>{t('common.needsReview')}</button>
+            <button onClick={() => void bulk('set_review_state', { review_state: 'reviewed' })}>{t('common.reviewed')}</button>
+            <button className="danger-button" onClick={() => void deleteSelectedDocuments()}><Trash2 size={16} /> {t('documents.deleteSelected')}</button>
           </div>
           <div className="document-console-table">
             <div className="doc-table-head">
@@ -152,44 +199,196 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
             ))}
           </div>
         </section>
-        {selected && <DocumentPreviewPanel document={selected} onOpenDocument={onOpenDocument} />}
-        {selected && <DocumentInspector document={selected} onOpenDocument={onOpenDocument} onOpenRecord={onOpenRecord} onDelete={() => void deleteDocument(selected)} />}
+        {selected && <DocumentPreviewPanel document={selected} pages={selectedPages} loading={detailLoading} onOpenDocument={onOpenDocument} />}
+        {selected && <DocumentInspector document={selected} events={selectedEvents} loading={detailLoading} onOpenDocument={onOpenDocument} onOpenRecord={onOpenRecord} onDelete={() => void deleteDocument(selected)} />}
       </section>
     </main>
   )
 }
 
-function DocumentPreviewPanel({ document, onOpenDocument }: { document: Document; onOpenDocument: (id: string) => void }) {
+type PreviewTab = 'ocr' | 'raw' | 'layout'
+type InspectorTab = 'details' | 'metadata' | 'activity'
+
+function DocumentPreviewPanel({ document, pages, loading, onOpenDocument }: { document: Document; pages: DocumentPage[]; loading: boolean; onOpenDocument: (id: string) => void }) {
+  const { t } = useI18n()
+  const [activeTab, setActiveTab] = useState<PreviewTab>('ocr')
+  const [zoom, setZoom] = useState(100)
+  const [largePreviewOpen, setLargePreviewOpen] = useState(false)
+  const previewSurfaceRef = useRef<HTMLDivElement | null>(null)
   const canPreview = document.mime_type?.startsWith('image/') || document.mime_type === 'application/pdf'
+  const isPdf = document.mime_type === 'application/pdf'
+  const mediaStyle = isPdf
+    ? { width: `${zoom}%`, maxWidth: zoom <= 100 ? '100%' : 'none', height: `${Math.round(420 * zoom / 100)}px` }
+    : { width: `${zoom}%`, maxWidth: zoom <= 100 ? '100%' : 'none' }
+
+  useEffect(() => {
+    setActiveTab('ocr')
+    setZoom(100)
+    setLargePreviewOpen(false)
+  }, [document.id])
+
+  function clampZoom(value: number) {
+    return Math.min(260, Math.max(50, value))
+  }
+
+  function centerRatio() {
+    const surface = previewSurfaceRef.current
+    if (!surface || !surface.scrollWidth || !surface.scrollHeight) return { x: 0.5, y: 0.5 }
+    return {
+      x: (surface.scrollLeft + surface.clientWidth / 2) / surface.scrollWidth,
+      y: (surface.scrollTop + surface.clientHeight / 2) / surface.scrollHeight
+    }
+  }
+
+  function setZoomAround(nextZoom: number, ratio = centerRatio()) {
+    const surface = previewSurfaceRef.current
+    setZoom(clampZoom(nextZoom))
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (!surface) return
+      surface.scrollLeft = Math.max(0, Math.min(surface.scrollWidth - surface.clientWidth, ratio.x * surface.scrollWidth - surface.clientWidth / 2))
+      surface.scrollTop = Math.max(0, Math.min(surface.scrollHeight - surface.clientHeight, ratio.y * surface.scrollHeight - surface.clientHeight / 2))
+    }))
+  }
+
+  function adjustZoom(delta: number) {
+    setZoomAround(zoom + delta)
+  }
+
+  function resetZoom() {
+    setZoomAround(100, { x: 0.5, y: 0.5 })
+  }
+
+  function handlePreviewClick(event: MouseEvent<HTMLDivElement>) {
+    if (isPdf) return
+    const media = event.currentTarget.querySelector('.zoomable-preview-media') as HTMLElement | null
+    if (!media) return
+    const rect = media.getBoundingClientRect()
+    const x = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
+    const y = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height))
+    setZoomAround(zoom >= 180 ? 100 : Math.max(180, zoom + 80), { x, y })
+  }
+
   return (
     <section className="document-preview-panel workflow-card">
       <div className="card-title-row">
         <h2>{document.original_filename}</h2>
-        <div className="button-row">
-          <a className="icon-button" href={downloadUrl(document.id)} title="Download"><Download size={17} /></a>
-          <button className="icon-button" onClick={() => onOpenDocument(document.id)} title="Open"><FileText size={17} /></button>
+        <div className="button-row preview-zoom-controls">
+          <button type="button" className="icon-button" title={t('common.zoomOut')} onClick={() => adjustZoom(-20)}><Minus size={16} /></button>
+          <button type="button" className="zoom-value" title={t('common.resetZoom')} onClick={resetZoom}>{zoom}%</button>
+          <button type="button" className="icon-button" title={t('common.zoomIn')} onClick={() => adjustZoom(20)}><Plus size={16} /></button>
+          <button type="button" className="icon-button" title={t('documents.largePreview')} onClick={() => setLargePreviewOpen(true)}><Maximize2 size={16} /></button>
+          <a className="icon-button" href={downloadUrl(document.id)} title={t('common.download')}><Download size={17} /></a>
+          <button className="icon-button" onClick={() => onOpenDocument(document.id)} title={t('common.open')}><FileText size={17} /></button>
         </div>
       </div>
-      <div className="document-preview-surface console-preview">
+      <div ref={previewSurfaceRef} className="document-preview-surface console-preview zoomable-preview" onClick={handlePreviewClick} title={isPdf ? 'Use zoom controls above the PDF preview' : 'Click image to zoom around that point'}>
         {canPreview && !document.id.startsWith('demo-') ? (
-          document.mime_type === 'application/pdf' ? <iframe src={previewUrl(document.id)} title="Document preview" /> : <img src={previewUrl(document.id)} alt={document.original_filename} />
-        ) : document.thumbnail_path && !document.id.startsWith('demo-') ? <img src={thumbnailUrl(document.id)} alt={document.original_filename} /> : <InvoiceMockup />}
+          isPdf
+            ? <iframe className="zoomable-preview-media" style={mediaStyle} src={previewUrl(document.id)} title="Document preview" />
+            : <img className="zoomable-preview-media" style={mediaStyle} src={previewUrl(document.id)} alt={document.original_filename} />
+        ) : document.thumbnail_path && !document.id.startsWith('demo-') ? <img className="zoomable-preview-media" style={mediaStyle} src={thumbnailUrl(document.id)} alt={document.original_filename} /> : <InvoiceMockup />}
       </div>
       <div className="ocr-tabs">
-        <button className="active">OCR Text</button>
-        <button>Raw OCR</button>
-        <button>Layout</button>
+        <button type="button" className={activeTab === 'ocr' ? 'active' : ''} onClick={() => setActiveTab('ocr')}>{t('documents.ocrText')}</button>
+        <button type="button" className={activeTab === 'raw' ? 'active' : ''} onClick={() => setActiveTab('raw')}>{t('documents.rawOcr')}</button>
+        <button type="button" className={activeTab === 'layout' ? 'active' : ''} onClick={() => setActiveTab('layout')}>{t('documents.layout')}</button>
       </div>
-      <pre className="ocr-preview console-ocr">{document.ocr_text || document.ocr_snippet || 'Open the document detail page to load full OCR text.'}</pre>
+      {activeTab === 'ocr' && <pre className="ocr-preview console-ocr">{document.ocr_text || document.ocr_snippet || 'Open the document detail page to load full OCR text.'}</pre>}
+      {activeTab === 'raw' && <pre className="ocr-preview console-ocr json-preview">{formatJson(document.raw_ocr_json, 'No raw OCR JSON stored for this document yet.')}</pre>}
+      {activeTab === 'layout' && <LayoutPreview pages={pages} loading={loading} />}
       <span className="confidence-pill">OCR Confidence: {document.processing_state === 'failed' ? 'NA' : '98%'}</span>
+      {largePreviewOpen && <LargePreviewModal document={document} onClose={() => setLargePreviewOpen(false)} />}
     </section>
   )
 }
 
-function DocumentInspector({ document, onOpenDocument, onOpenRecord, onDelete }: { document: Document; onOpenDocument: (id: string) => void; onOpenRecord: (id: string) => void; onDelete: () => void }) {
+function LargePreviewModal({ document, onClose }: { document: Document; onClose: () => void }) {
+  const { t } = useI18n()
+  const [zoom, setZoom] = useState(100)
+  const isPdf = document.mime_type === 'application/pdf'
+  const canPreview = document.mime_type?.startsWith('image/') || isPdf
+  const source = document.id.startsWith('demo-') ? '' : canPreview ? previewUrl(document.id) : document.thumbnail_path ? thumbnailUrl(document.id) : ''
+  const mediaStyle = isPdf ? { width: `${zoom}%`, height: `${Math.round(74 * zoom / 100)}vh` } : { width: `${zoom}%` }
+  return (
+    <div className="large-preview-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <section className="large-preview-dialog" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <strong>{document.original_filename}</strong>
+          <div className="button-row">
+            <button type="button" className="icon-button" onClick={() => setZoom((value) => Math.max(50, value - 20))}><Minus size={16} /></button>
+            <button type="button" className="zoom-value" onClick={() => setZoom(100)}>{zoom}%</button>
+            <button type="button" className="icon-button" onClick={() => setZoom((value) => Math.min(260, value + 20))}><Plus size={16} /></button>
+            <button type="button" onClick={onClose}>{t('common.close')}</button>
+          </div>
+        </header>
+        <div className="large-preview-surface">
+          {source ? (isPdf ? <iframe style={mediaStyle} src={source} title="Large document preview" /> : <img style={mediaStyle} src={source} alt={document.original_filename} />) : <InvoiceMockup />}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function LayoutPreview({ pages, loading }: { pages: DocumentPage[]; loading: boolean }) {
+  const [selectedPageId, setSelectedPageId] = useState('')
+
+  useEffect(() => {
+    if (!pages.length) {
+      setSelectedPageId('')
+      return
+    }
+    setSelectedPageId((current) => pages.some((page) => page.id === current) ? current : pages[0].id)
+  }, [pages])
+
+  if (loading) return <p className="tab-empty">Loading page layout…</p>
+  if (!pages.length) return <p className="tab-empty">No page layout records are stored for this document yet.</p>
+  const selectedPage = pages.find((page) => page.id === selectedPageId) || pages[0]
+  return (
+    <div className="layout-preview">
+      <label className="layout-page-picker">Page
+        <select value={selectedPage.id} onChange={(event) => setSelectedPageId(event.target.value)}>
+          {pages.map((page) => <option key={page.id} value={page.id}>Page {page.page_number}</option>)}
+        </select>
+      </label>
+      <section className="layout-page">
+        <strong>Page {selectedPage.page_number}</strong>
+        <pre>{selectedPage.ocr_text || formatJson(selectedPage.raw_ocr_json, 'No layout text for this page.')}</pre>
+      </section>
+    </div>
+  )
+}
+
+function DocumentInspector({ document, events, loading, onOpenDocument, onOpenRecord, onDelete }: { document: Document; events: DocumentEvent[]; loading: boolean; onOpenDocument: (id: string) => void; onOpenRecord: (id: string) => void; onDelete: () => void }) {
+  const { t } = useI18n()
+  const [activeTab, setActiveTab] = useState<InspectorTab>('details')
+
+  useEffect(() => {
+    setActiveTab('details')
+  }, [document.id])
+
   return (
     <aside className="document-detail-panel workflow-card">
-      <div className="detail-tabs"><button className="active">Details</button><button>Metadata</button><button>Activity</button></div>
+      <div className="detail-tabs">
+        <button type="button" className={activeTab === 'details' ? 'active' : ''} onClick={() => setActiveTab('details')}>{t('documents.details')}</button>
+        <button type="button" className={activeTab === 'metadata' ? 'active' : ''} onClick={() => setActiveTab('metadata')}>{t('documents.metadata')}</button>
+        <button type="button" className={activeTab === 'activity' ? 'active' : ''} onClick={() => setActiveTab('activity')}>{t('nav.activity')}</button>
+      </div>
+      {activeTab === 'details' && <DocumentDetailsFields document={document} />}
+      {activeTab === 'metadata' && <DocumentMetadataPanel document={document} />}
+      {activeTab === 'activity' && <DocumentActivityPanel document={document} events={events} loading={loading} />}
+      <div className="detail-actions">
+        <button type="button" onClick={() => onOpenDocument(document.id)}>{t('common.open')}</button>
+        {document.record_id && <button type="button" onClick={() => onOpenRecord(document.record_id!)}>{t('common.record')}</button>}
+        <button type="button" className="primary">{t('documents.markReviewed')}</button>
+        <button type="button" className="danger-button" disabled={document.id.startsWith('demo-')} onClick={onDelete}><Trash2 size={16} /> {t('common.delete')}</button>
+      </div>
+    </aside>
+  )
+}
+
+function DocumentDetailsFields({ document }: { document: Document }) {
+  return (
+    <div className="detail-tab-panel">
       <label>Title<input value={document.manual_title_override || document.extracted_title || document.original_filename} readOnly /></label>
       <label>Collection<select value={document.collection_name} disabled><option>{document.collection_name}</option></select></label>
       <label>Sender / Vendor<input value={document.extracted_sender || 'Demo Ges.mbh'} readOnly /></label>
@@ -205,14 +404,69 @@ function DocumentInspector({ document, onOpenDocument, onOpenRecord, onDelete }:
       <label>Status / Review State<select value={document.review_state} disabled><option>{document.review_state}</option></select></label>
       <label>Tags<div className="tag-input"><button type="button">invoice</button><button type="button">2020</button><button type="button">supplier:demo</button></div></label>
       <label>Notes<textarea placeholder="Add notes..." readOnly /></label>
-      <div className="detail-actions">
-        <button type="button" onClick={() => onOpenDocument(document.id)}>Open</button>
-        {document.record_id && <button type="button" onClick={() => onOpenRecord(document.record_id!)}>Record</button>}
-        <button type="button" className="primary">Mark Reviewed</button>
-        <button type="button" className="danger-button" disabled={document.id.startsWith('demo-')} onClick={onDelete}><Trash2 size={16} /> Delete</button>
-      </div>
-    </aside>
+    </div>
   )
+}
+
+function DocumentMetadataPanel({ document }: { document: Document }) {
+  const { t } = useI18n()
+  const rows = [
+    ['Title', document.manual_title_override || document.extracted_title || '—'],
+    ['Sender', document.extracted_sender || '—'],
+    ['Recipient', document.extracted_recipient || '—'],
+    ['Invoice No.', document.extracted_invoice_number || '—'],
+    ['Date', document.extracted_date || '—'],
+    ['Amount', document.extracted_amount || '—'],
+    ['Payment', document.extracted_payment_method || '—'],
+    ['Summary', document.llm_summary || '—'],
+    ['Purpose', document.llm_document_purpose || '—'],
+    ['Confidence', document.llm_confidence == null ? '—' : String(document.llm_confidence)]
+  ]
+  return (
+    <div className="detail-tab-panel metadata-readout">
+      <dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+      <h3>{t('documents.metadataJson')}</h3>
+      <pre className="json-preview compact-json">{formatJson(document.metadata_json, 'No custom metadata JSON stored.')}</pre>
+      <h3>{t('documents.sources')}</h3>
+      <pre className="json-preview compact-json">{formatJson(document.metadata_sources_json, 'No source metadata stored.')}</pre>
+    </div>
+  )
+}
+
+function DocumentActivityPanel({ document, events, loading }: { document: Document; events: DocumentEvent[]; loading: boolean }) {
+  const { t } = useI18n()
+  const logEntries = Array.isArray(document.processing_log_json) ? document.processing_log_json : []
+  return (
+    <div className="detail-tab-panel activity-list">
+      {loading && <p className="tab-empty">Loading activity…</p>}
+      {!loading && !events.length && !logEntries.length && <p className="tab-empty">No activity events have been recorded for this document yet.</p>}
+      {events.map((event) => (
+        <article key={event.id}>
+          <strong>{event.event_type.replace(/_/g, ' ')}</strong>
+          <span>{new Date(event.created_at).toLocaleString()} · {event.actor || event.source}</span>
+          {event.message && <p>{event.message}</p>}
+        </article>
+      ))}
+      {!events.length && logEntries.map((entry, index) => (
+        <article key={index}>
+          <strong>{t('documents.processingLog')}</strong>
+          <span>Entry {index + 1}</span>
+          <pre>{typeof entry === 'string' ? entry : JSON.stringify(entry, null, 2)}</pre>
+        </article>
+      ))}
+      {document.reviewed_at && <article><strong>Reviewed</strong><span>{new Date(document.reviewed_at).toLocaleString()} · {document.reviewed_by || 'unknown'}</span></article>}
+    </div>
+  )
+}
+
+function formatJson(value: unknown, fallback: string) {
+  if (value == null) return fallback
+  if (typeof value === 'object' && !Array.isArray(value) && Object.keys(value as Record<string, unknown>).length === 0) return fallback
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
 }
 
 function KpiCard({ icon, label, value, detail, tone }: { icon: ReactNode; label: string; value: number; detail: string; tone: string }) {

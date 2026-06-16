@@ -1,10 +1,38 @@
-import { useEffect, useState } from 'react'
-import { RefreshCw, RotateCcw, Wrench } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { RefreshCw, RotateCcw, Save, Wrench } from 'lucide-react'
 import { api } from '../api/client'
-import StatusBadge from '../components/StatusBadge'
 import type { Collection, Document, IngestionJob, IngestionSource, IntegrationSummary, JobInfo, ProcessingHook } from '../types'
+import { useI18n } from '../i18n'
+
+interface ModelFormState {
+  ocr_engine: string
+  ocr_mode: string
+  language: string
+  page_limit: string
+  image_dpi: string
+  output_type: string
+  max_image_pixels: string
+}
+
+const defaultModelForm: ModelFormState = {
+  ocr_engine: 'paddle_vl',
+  ocr_mode: 'redo',
+  language: 'deu+eng',
+  page_limit: '100',
+  image_dpi: '220',
+  output_type: 'markdown',
+  max_image_pixels: '40000000'
+}
+
+const engineLabels: Record<string, { title: string; detail: string }> = {
+  paddle_vl: { title: 'PaddleOCR-VL', detail: 'Smart document parser, default for invoices and mixed layouts.' },
+  ppocrv6: { title: 'PP-OCRv6', detail: 'Fast/simple OCR through ONNX Runtime.' },
+  glm: { title: 'GLM OCR', detail: 'Legacy multimodal fallback.' },
+  fake: { title: 'Fake OCR', detail: 'Development/test stub only.' }
+}
 
 export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: string) => void }) {
+  const { t } = useI18n()
   const [jobs, setJobs] = useState<JobInfo[]>([])
   const [failed, setFailed] = useState<JobInfo[]>([])
   const [duplicates, setDuplicates] = useState<Document[]>([])
@@ -14,9 +42,12 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
   const [hooks, setHooks] = useState<ProcessingHook[]>([])
   const [integrations, setIntegrations] = useState<IntegrationSummary | null>(null)
   const [collection, setCollection] = useState('Belege')
+  const [selectedCollectionId, setSelectedCollectionId] = useState('')
+  const [modelForm, setModelForm] = useState<ModelFormState>(defaultModelForm)
   const [sourceForm, setSourceForm] = useState({ name: '', path: '', collection_id: '', recursive: false })
   const [hookForm, setHookForm] = useState({ name: '', stage: 'pre_consume', hook_kind: 'command', command: '', webhook_url: '', blocking: true })
   const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
 
   async function load() {
     setError('')
@@ -39,19 +70,56 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
       setSources(sourceRows)
       setIngestionJobs(ingestionRows)
       setHooks(hookRows)
+      if (!selectedCollectionId && collectionRows[0]) setSelectedCollectionId(collectionRows[0].id)
       if (!sourceForm.collection_id && collectionRows[0]) setSourceForm((form) => ({ ...form, collection_id: collectionRows[0].id }))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load admin data')
+      setError(err instanceof Error ? err.message : t('admin.loadError'))
     }
   }
+
+  useEffect(() => { void load() }, [])
+
+  const selectedCollection = useMemo(
+    () => collections.find((item) => item.id === selectedCollectionId) || collections[0],
+    [collections, selectedCollectionId]
+  )
+
+  useEffect(() => {
+    if (!selectedCollection) return
+    setModelForm(formFromCollection(selectedCollection))
+  }, [selectedCollection?.id, selectedCollection?.updated_at])
+
+  const integrationByName = useMemo(() => {
+    const rows = integrations?.integrations || []
+    return new Map(rows.map((item) => [item.name, item]))
+  }, [integrations])
 
   async function retry(id: string) {
     await api.retryDocument(id)
     await load()
   }
 
-  async function runAction(action: () => Promise<unknown>) {
+  async function runAction(action: () => Promise<unknown>, success = 'Action queued.') {
+    setMessage('')
     await action()
+    setMessage(success)
+    await load()
+  }
+
+  async function saveModelConfig() {
+    if (!selectedCollection) return
+    const nextConfig = {
+      ...(selectedCollection.ocr_config_json || {}),
+      ocr_engine: modelForm.ocr_engine,
+      ocr_mode: modelForm.ocr_mode,
+      language: modelForm.language,
+      page_limit: toNumber(modelForm.page_limit, defaultModelForm.page_limit),
+      image_dpi: toNumber(modelForm.image_dpi, defaultModelForm.image_dpi),
+      output_type: modelForm.output_type,
+      max_image_pixels: toNumber(modelForm.max_image_pixels, defaultModelForm.max_image_pixels)
+    }
+    await api.patchCollection(selectedCollection.id, { ocr_config_json: nextConfig })
+    setMessage(`Saved model config for ${selectedCollection.name}. New documents in this collection inherit it.`)
     await load()
   }
 
@@ -88,129 +156,249 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
     await load()
   }
 
-  useEffect(() => { void load() }, [])
-
   return (
-    <main className="admin-page">
+    <main className="admin-page admin-console">
       <header className="page-header">
         <div>
-          <h1>Admin</h1>
-          <p>Recent jobs and failed documents.</p>
+          <h1>{t('admin.title')}</h1>
+          <p>Technical model, OCR, ingestion, and maintenance configuration.</p>
         </div>
-        <button className="icon-button" title="Refresh" onClick={() => void load()}><RefreshCw size={18} /></button>
+        <button className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={18} /></button>
       </header>
       {error && <p className="error">{error}</p>}
-      <div className="admin-actions">
-        <button onClick={() => void runAction(api.reconcile)}><Wrench size={18} /> Reconcile stuck docs</button>
-        <button onClick={() => void runAction(api.retryFailed)}><RotateCcw size={18} /> Retry failed docs</button>
-        <select value={collection} onChange={(event) => setCollection(event.target.value)}>
-          <option>Belege</option>
-          <option>Eingangsrechnung</option>
-          <option>Ausgangsrechnung</option>
-        </select>
-        <button onClick={() => void runAction(() => api.reextractCollection(collection, false))}>Reextract collection</button>
-      </div>
-      <h2>Integrations</h2>
-      <div className="admin-list">
-        {integrations?.integrations.map((item) => (
-          <div key={item.name} className="admin-row">
-            <strong>{item.name}</strong>
-            <StatusBadge value={item.ok ? 'complete' : 'failed'} />
-            <span>{item.detail}</span>
-            <span>{item.latency_ms ?? ''}{item.latency_ms !== null ? ' ms' : ''}</span>
+      {message && <p className="success-message">{message}</p>}
+
+      <section className="admin-card model-config-card">
+        <div className="section-heading-row">
+          <div>
+            <h2>{t('admin.modelConfig')}</h2>
+            <p>{t('admin.modelConfigCopy')}</p>
           </div>
-        ))}
-      </div>
-      <h2>Ingestion</h2>
-      <div className="admin-actions">
-        <input placeholder="Source name" value={sourceForm.name} onChange={(event) => setSourceForm({ ...sourceForm, name: event.target.value })} />
-        <input placeholder="Consume folder path" value={sourceForm.path} onChange={(event) => setSourceForm({ ...sourceForm, path: event.target.value })} />
-        <select value={sourceForm.collection_id} onChange={(event) => setSourceForm({ ...sourceForm, collection_id: event.target.value })}>
-          {collections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-        </select>
-        <label className="check"><input type="checkbox" checked={sourceForm.recursive} onChange={(event) => setSourceForm({ ...sourceForm, recursive: event.target.checked })} /> Recursive</label>
-        <button onClick={() => void addSource()}>Add source</button>
-        <button onClick={() => void runAction(api.scanAllIngestionSources)}>Scan all</button>
-      </div>
-      <div className="admin-list">
-        {sources.map((source) => (
-          <div key={source.id} className="admin-row">
-            <strong>{source.name}</strong>
-            <StatusBadge value={source.enabled ? 'complete' : 'failed'} />
-            <span>{source.path} · {source.record_grouping}</span>
-            <button onClick={() => void runAction(() => api.scanIngestionSource(source.id))}>Scan</button>
+          <TechnicalPill state="info" label="Collection default" />
+        </div>
+        <div className="model-engine-grid">
+          <EngineCard engine="paddle_vl" item={integrationByName.get('paddle_vl_multimodal_ocr') || integrationByName.get('paddle_vl_llama')} />
+          <EngineCard engine="ppocrv6" item={undefined} note="Local ONNX runtime, loaded on demand." />
+          <EngineCard engine="glm" item={integrationByName.get('glm_multimodal_ocr') || integrationByName.get('glm_llama')} />
+          <EngineCard engine="qwen" item={integrationByName.get('qwen_llama')} title={t('admin.qwenMetadata')} detail={t('admin.qwenMetadataDetail')} />
+        </div>
+        <div className="model-config-form">
+          <label>Collection
+            <select value={selectedCollection?.id || ''} onChange={(event) => setSelectedCollectionId(event.target.value)}>
+              {collections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </label>
+          <label>OCR engine
+            <select value={modelForm.ocr_engine} onChange={(event) => setModelForm({ ...modelForm, ocr_engine: event.target.value })}>
+              <option value="paddle_vl">PaddleOCR-VL, smart parser</option>
+              <option value="ppocrv6">PP-OCRv6, fast/simple</option>
+              <option value="glm">GLM OCR fallback</option>
+              <option value="fake">Fake/test</option>
+            </select>
+          </label>
+          <label>OCR mode
+            <select value={modelForm.ocr_mode} onChange={(event) => setModelForm({ ...modelForm, ocr_mode: event.target.value })}>
+              <option value="redo">redo</option>
+              <option value="force">force</option>
+              <option value="skip">skip</option>
+            </select>
+          </label>
+          <label>Language
+            <input value={modelForm.language} onChange={(event) => setModelForm({ ...modelForm, language: event.target.value })} />
+          </label>
+          <label>Page limit
+            <input type="number" min="1" value={modelForm.page_limit} onChange={(event) => setModelForm({ ...modelForm, page_limit: event.target.value })} />
+          </label>
+          <label>DPI
+            <input type="number" min="72" value={modelForm.image_dpi} onChange={(event) => setModelForm({ ...modelForm, image_dpi: event.target.value })} />
+          </label>
+          <label>Output
+            <select value={modelForm.output_type} onChange={(event) => setModelForm({ ...modelForm, output_type: event.target.value })}>
+              <option value="markdown">markdown</option>
+              <option value="text">text</option>
+            </select>
+          </label>
+          <label>Max image pixels
+            <input type="number" min="1000000" value={modelForm.max_image_pixels} onChange={(event) => setModelForm({ ...modelForm, max_image_pixels: event.target.value })} />
+          </label>
+          <button type="button" className="primary" onClick={() => void saveModelConfig()}><Save size={17} /> {t('admin.saveConfig')}</button>
+        </div>
+      </section>
+
+      <section className="admin-card">
+        <div className="section-heading-row">
+          <div>
+            <h2>{t('admin.maintenance')}</h2>
+            <p>Manual recovery and bulk reprocessing actions.</p>
           </div>
-        ))}
-      </div>
-      <h2>Ingestion Jobs</h2>
-      <div className="admin-list">
-        {ingestionJobs.slice(0, 20).map((job) => (
-          <div key={job.id} className="admin-row">
-            <button disabled={!job.document_id} onClick={() => job.document_id && onOpenDocument(job.document_id)}>{job.discovered_path}</button>
-            <StatusBadge value={job.status === 'imported' || job.status === 'skipped' ? 'complete' : job.status === 'failed' ? 'failed' : 'processing'} />
-            <span>{job.error_message || job.sha256 || ''}</span>
-            <button onClick={() => void runAction(() => api.retryIngestionJob(job.id))}>Retry</button>
+        </div>
+        <div className="admin-actions technical-actions">
+          <button onClick={() => void runAction(api.reconcile, 'Reconciliation queued.')}><Wrench size={18} /> {t('admin.reconcileStuck')}</button>
+          <button onClick={() => void runAction(api.retryFailed, 'Failed docs retried.')}><RotateCcw size={18} /> {t('admin.retryFailed')}</button>
+          <select value={collection} onChange={(event) => setCollection(event.target.value)}>
+            <option>Belege</option>
+            <option>Eingangsrechnung</option>
+            <option>Ausgangsrechnung</option>
+          </select>
+          <button onClick={() => void runAction(() => api.reextractCollection(collection, false), `Reextract queued for ${collection}.`)}>{t('admin.reextractCollection')}</button>
+        </div>
+      </section>
+
+      <section className="admin-card">
+        <div className="section-heading-row"><h2>{t('admin.integrations')}</h2><TechnicalPill state={integrations?.ok ? 'ok' : 'down'} label={integrations?.ok ? t('admin.allReachable') : t('admin.needsAttention')} /></div>
+        <div className="admin-list technical-list">
+          {integrations?.integrations.map((item) => (
+            <div key={item.name} className="admin-row technical-row">
+              <strong>{item.name}</strong>
+              <TechnicalPill state={item.ok ? 'ok' : 'down'} label={item.ok ? 'Up' : 'Down'} />
+              <span>{item.detail}</span>
+              <small>{item.latency_ms ?? ''}{item.latency_ms !== null ? ' ms' : ''}</small>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="admin-card">
+        <div className="section-heading-row"><h2>{t('admin.ingestionSources')}</h2><TechnicalPill state="info" label={`${sources.length} configured`} /></div>
+        <div className="admin-actions technical-actions">
+          <input placeholder={t('admin.sourceName')} value={sourceForm.name} onChange={(event) => setSourceForm({ ...sourceForm, name: event.target.value })} />
+          <input placeholder={t('admin.consumeFolderPath')} value={sourceForm.path} onChange={(event) => setSourceForm({ ...sourceForm, path: event.target.value })} />
+          <select value={sourceForm.collection_id} onChange={(event) => setSourceForm({ ...sourceForm, collection_id: event.target.value })}>
+            {collections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+          <label className="check"><input type="checkbox" checked={sourceForm.recursive} onChange={(event) => setSourceForm({ ...sourceForm, recursive: event.target.checked })} /> Recursive</label>
+          <button onClick={() => void addSource()}>Add source</button>
+          <button onClick={() => void runAction(api.scanAllIngestionSources, 'Ingestion scan started.')}>{t('admin.scanAll')}</button>
+        </div>
+        <div className="admin-list technical-list">
+          {sources.map((source) => (
+            <div key={source.id} className="admin-row technical-row">
+              <strong>{source.name}</strong>
+              <TechnicalPill state={source.enabled ? 'ok' : 'down'} label={source.enabled ? 'Enabled' : 'Disabled'} />
+              <span>{source.path} · {source.record_grouping}</span>
+              <button onClick={() => void runAction(() => api.scanIngestionSource(source.id), `Scan started for ${source.name}.`)}>{t('admin.scan')}</button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="admin-card">
+        <div className="section-heading-row"><h2>{t('admin.processingHooks')}</h2><TechnicalPill state="info" label={`${hooks.length} configured`} /></div>
+        <div className="admin-actions technical-actions">
+          <input placeholder={t('admin.hookName')} value={hookForm.name} onChange={(event) => setHookForm({ ...hookForm, name: event.target.value })} />
+          <select value={hookForm.stage} onChange={(event) => setHookForm({ ...hookForm, stage: event.target.value })}>
+            <option value="pre_consume">pre_consume</option>
+            <option value="post_consume">post_consume</option>
+          </select>
+          <select value={hookForm.hook_kind} onChange={(event) => setHookForm({ ...hookForm, hook_kind: event.target.value })}>
+            <option value="command">command</option>
+            <option value="webhook">webhook</option>
+          </select>
+          <input placeholder={t('admin.command')} value={hookForm.command} onChange={(event) => setHookForm({ ...hookForm, command: event.target.value })} />
+          <input placeholder={t('admin.webhookUrl')} value={hookForm.webhook_url} onChange={(event) => setHookForm({ ...hookForm, webhook_url: event.target.value })} />
+          <label className="check"><input type="checkbox" checked={hookForm.blocking} onChange={(event) => setHookForm({ ...hookForm, blocking: event.target.checked })} /> Blocking</label>
+          <button onClick={() => void addHook()}>Add hook</button>
+        </div>
+        <div className="admin-list technical-list">
+          {hooks.map((hook) => (
+            <div key={hook.id} className="admin-row technical-row">
+              <strong>{hook.name}</strong>
+              <TechnicalPill state={hook.enabled ? 'ok' : 'down'} label={hook.enabled ? 'Enabled' : 'Disabled'} />
+              <span>{hook.stage} · {hook.hook_kind}</span>
+              <button onClick={() => void runAction(() => api.testHook(hook.id), `Hook test queued for ${hook.name}.`)}>{t('admin.testHook')}</button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="admin-card operational-card">
+        <div className="section-heading-row"><h2>{t('admin.operationalQueues')}</h2><p>{t('admin.operationalQueuesCopy')}</p></div>
+        <details>
+          <summary>Ingestion jobs ({ingestionJobs.length})</summary>
+          <div className="admin-list technical-list compact-list">
+            {ingestionJobs.slice(0, 20).map((job) => (
+              <div key={job.id} className="admin-row technical-row">
+                <button disabled={!job.document_id} onClick={() => job.document_id && onOpenDocument(job.document_id)}>{job.discovered_path}</button>
+                <TechnicalPill state={job.status === 'failed' ? 'down' : job.status === 'imported' || job.status === 'skipped' ? 'ok' : 'info'} label={job.status} />
+                <span>{job.error_message || job.sha256 || ''}</span>
+                <button onClick={() => void runAction(() => api.retryIngestionJob(job.id), 'Ingestion job retried.')}>{t('common.retry')}</button>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <h2>Hooks</h2>
-      <div className="admin-actions">
-        <input placeholder="Hook name" value={hookForm.name} onChange={(event) => setHookForm({ ...hookForm, name: event.target.value })} />
-        <select value={hookForm.stage} onChange={(event) => setHookForm({ ...hookForm, stage: event.target.value })}>
-          <option value="pre_consume">pre_consume</option>
-          <option value="post_consume">post_consume</option>
-        </select>
-        <select value={hookForm.hook_kind} onChange={(event) => setHookForm({ ...hookForm, hook_kind: event.target.value })}>
-          <option value="command">command</option>
-          <option value="webhook">webhook</option>
-        </select>
-        <input placeholder="Command" value={hookForm.command} onChange={(event) => setHookForm({ ...hookForm, command: event.target.value })} />
-        <input placeholder="Webhook URL" value={hookForm.webhook_url} onChange={(event) => setHookForm({ ...hookForm, webhook_url: event.target.value })} />
-        <label className="check"><input type="checkbox" checked={hookForm.blocking} onChange={(event) => setHookForm({ ...hookForm, blocking: event.target.checked })} /> Blocking</label>
-        <button onClick={() => void addHook()}>Add hook</button>
-      </div>
-      <div className="admin-list">
-        {hooks.map((hook) => (
-          <div key={hook.id} className="admin-row">
-            <strong>{hook.name}</strong>
-            <StatusBadge value={hook.enabled ? 'complete' : 'failed'} />
-            <span>{hook.stage} · {hook.hook_kind}</span>
-            <button onClick={() => void runAction(() => api.testHook(hook.id))}>Test</button>
+        </details>
+        <details>
+          <summary>Failed documents ({failed.length})</summary>
+          <div className="admin-list technical-list compact-list">
+            {failed.map((job) => (
+              <div key={job.document_id} className="admin-row technical-row">
+                <button onClick={() => onOpenDocument(job.document_id)}>{job.title || job.filename}</button>
+                <TechnicalPill state="down" label={job.state} />
+                <span>{job.error_message}</span>
+                <button className="icon-button" title={t('common.retry')} onClick={() => void retry(job.document_id)}><RotateCcw size={18} /></button>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <h2>Duplicates</h2>
-      <div className="admin-list">
-        {duplicates.map((doc) => (
-          <div key={doc.id} className="admin-row">
-            <button onClick={() => onOpenDocument(doc.id)}>{doc.manual_title_override || doc.extracted_title || doc.original_filename}</button>
-            <StatusBadge value={doc.processing_state} />
-            <span>Duplicate of {doc.duplicate_of_document_id}</span>
-            <button className="icon-button" title="Force retry OCR" onClick={() => void retry(doc.id)}><RotateCcw size={18} /></button>
+        </details>
+        <details>
+          <summary>Duplicates ({duplicates.length})</summary>
+          <div className="admin-list technical-list compact-list">
+            {duplicates.map((doc) => (
+              <div key={doc.id} className="admin-row technical-row">
+                <button onClick={() => onOpenDocument(doc.id)}>{doc.manual_title_override || doc.extracted_title || doc.original_filename}</button>
+                <TechnicalPill state="info" label="duplicate" />
+                <span>Duplicate of {doc.duplicate_of_document_id}</span>
+                <button className="icon-button" title={t('admin.forceRetryOcr')} onClick={() => void retry(doc.id)}><RotateCcw size={18} /></button>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <h2>Failed</h2>
-      <div className="admin-list">
-        {failed.map((job) => (
-          <div key={job.document_id} className="admin-row">
-            <button onClick={() => onOpenDocument(job.document_id)}>{job.title || job.filename}</button>
-            <StatusBadge value={job.state} />
-            <span>{job.error_message}</span>
-            <button className="icon-button" title="Retry" onClick={() => void retry(job.document_id)}><RotateCcw size={18} /></button>
+        </details>
+        <details>
+          <summary>Recent jobs ({jobs.length})</summary>
+          <div className="admin-list technical-list compact-list">
+            {jobs.map((job) => (
+              <div key={job.document_id} className="admin-row technical-row">
+                <button onClick={() => onOpenDocument(job.document_id)}>{job.title || job.filename}</button>
+                <TechnicalPill state={job.state === 'failed' ? 'down' : 'info'} label={job.state} />
+                <span>{new Date(job.updated_at).toLocaleString()}</span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <h2>Recent Jobs</h2>
-      <div className="admin-list">
-        {jobs.map((job) => (
-          <div key={job.document_id} className="admin-row">
-            <button onClick={() => onOpenDocument(job.document_id)}>{job.title || job.filename}</button>
-            <StatusBadge value={job.state} />
-            <span>{new Date(job.updated_at).toLocaleString()}</span>
-          </div>
-        ))}
-      </div>
+        </details>
+      </section>
     </main>
   )
+}
+
+function formFromCollection(collection: Collection): ModelFormState {
+  const config = collection.ocr_config_json || {}
+  return {
+    ocr_engine: String(config.ocr_engine || defaultModelForm.ocr_engine),
+    ocr_mode: String(config.ocr_mode || defaultModelForm.ocr_mode),
+    language: String(config.language || defaultModelForm.language),
+    page_limit: String(config.page_limit || defaultModelForm.page_limit),
+    image_dpi: String(config.image_dpi || defaultModelForm.image_dpi),
+    output_type: String(config.output_type || defaultModelForm.output_type),
+    max_image_pixels: String(config.max_image_pixels || defaultModelForm.max_image_pixels)
+  }
+}
+
+function toNumber(value: string, fallback: string) {
+  const parsed = Number(value || fallback)
+  return Number.isFinite(parsed) ? parsed : Number(fallback)
+}
+
+function EngineCard({ engine, item, note, title, detail }: { engine: string; item: IntegrationSummary['integrations'][number] | undefined; note?: string; title?: string; detail?: string }) {
+  const meta = engineLabels[engine] || { title: title || engine, detail: detail || '' }
+  return (
+    <article className="engine-card">
+      <div><strong>{title || meta.title}</strong><p>{detail || meta.detail}</p></div>
+      <TechnicalPill state={item ? item.ok ? 'ok' : 'down' : 'info'} label={item ? item.ok ? 'Up' : 'Down' : 'Configured'} />
+      {item?.detail && <small>{item.detail}</small>}
+      {note && <small>{note}</small>}
+    </article>
+  )
+}
+
+function TechnicalPill({ state, label }: { state: 'ok' | 'down' | 'info'; label: string }) {
+  return <span className={`technical-pill technical-pill-${state}`}>{label}</span>
 }

@@ -124,6 +124,19 @@ def configured_bad_belege_substrings() -> tuple[str, ...]:
         configured = []
     return tuple(dict.fromkeys([*BAD_BELEGE_SUBSTRINGS, *(str(item).lower() for item in configured)]))
 
+NEUTRAL_INVOICE_COLLECTIONS = {"eingangsrechnung", "ausgangsrechnung"}
+
+FINANCIAL_SIGNAL_RE = re.compile(
+    r"\b("
+    r"rechnung|rechnungs|invoice|beleg|quittung|receipt|"
+    r"betrag|summe|total|steuer|ust|mwst|vat|tax|"
+    r"iban|bic|konto|zahlung|payment|due|balance|"
+    r"bestell|order|lieferung|delivery|kundennummer|customer"
+    r")\b|€|eur\b|usd\b",
+    re.IGNORECASE,
+)
+
+
 ORG_HINTS = (
     "bank",
     "gmbh",
@@ -192,6 +205,57 @@ def compact_sender_token(value: str) -> str:
 
 def looks_technical(value: str) -> bool:
     return bool(re.match(r"^(scan|img|image|photo|document|file|bankcheckocrinput\d*|ocrinput\d*)", value or "", re.I))
+
+
+def has_financial_signal(text: str) -> bool:
+    return bool(FINANCIAL_SIGNAL_RE.search(text or ""))
+
+
+def neutral_title_base(text: str, original_filename: str = "") -> str:
+    candidates: list[str] = []
+    for raw in (text or "").splitlines()[:12]:
+        line = re.sub(r"\s+", " ", raw.strip())
+        if not line or len(line) < 4 or len(line) > 80:
+            continue
+        if has_financial_signal(line):
+            continue
+        if re.fullmatch(r"[0-9 ./:-]+", line):
+            continue
+        candidates.append(line)
+    if original_filename:
+        stem = re.sub(r"\.[A-Za-z0-9]{1,5}$", "", original_filename).strip()
+        stem = re.sub(r"[_-]+", " ", stem)
+        if stem and not looks_technical(stem) and not has_financial_signal(stem):
+            candidates.append(stem)
+    for candidate in candidates:
+        token = compact_sender_token(candidate)
+        if token and token.lower() != "dok" and len(token) >= 4:
+            return token
+    return "Dok"
+
+
+def is_neutral_invoice_file(text: str, *, invoice_number: str, amount: str) -> bool:
+    if has_financial_signal(text):
+        return False
+    if invoice_number and invoice_number != "NA":
+        return False
+    if amount and amount != "NA":
+        return False
+    return neutral_title_base(text) != "Dok"
+
+
+def neutral_invoice_result(payload: ExtractionInput, collection_name: str) -> ExtractionResult:
+    title = neutral_title_base(payload.ocr_text, payload.original_filename)
+    return ExtractionResult(
+        title=title,
+        metadata={
+            "collection": collection_name,
+            "title_schema_valid": True,
+            "neutral_file": True,
+            "document_kind": "neutral",
+            "neutral_reason": "no_invoice_financial_signals",
+        },
+    )
 
 
 def is_bad_belege_candidate(value: str) -> bool:
@@ -667,8 +731,10 @@ def extract_belege_title(payload: ExtractionInput) -> ExtractionResult:
 def extract_eingangsrechnung_title(payload: ExtractionInput) -> ExtractionResult:
     sender = extract_eingangsrechnung_sender(payload.ocr_text, payload.original_filename, payload.existing_title)
     invoice_number = extract_invoice_number(payload.ocr_text)
-    date = extract_invoice_date(payload.ocr_text, payload.created_at)
     amount = extract_invoice_amount(payload.ocr_text)
+    if is_neutral_invoice_file(payload.ocr_text, invoice_number=invoice_number, amount=amount):
+        return neutral_invoice_result(payload, "Eingangsrechnung")
+    date = extract_invoice_date(payload.ocr_text, payload.created_at)
     title = f"{sender}_{invoice_number}_{date}_{amount}"
     valid = validate_title_for_collection("Eingangsrechnung", title)
     return ExtractionResult(
@@ -684,8 +750,10 @@ def extract_eingangsrechnung_title(payload: ExtractionInput) -> ExtractionResult
 def extract_ausgangsrechnung_title(payload: ExtractionInput) -> ExtractionResult:
     recipient = extract_ausgangsrechnung_recipient(payload.ocr_text)
     invoice_number = extract_invoice_number(payload.ocr_text)
-    date = extract_invoice_date(payload.ocr_text, payload.created_at)
     amount = extract_invoice_amount(payload.ocr_text)
+    if is_neutral_invoice_file(payload.ocr_text, invoice_number=invoice_number, amount=amount):
+        return neutral_invoice_result(payload, "Ausgangsrechnung")
+    date = extract_invoice_date(payload.ocr_text, payload.created_at)
     title = f"{recipient}_{invoice_number}_{date}_{amount}"
     valid = validate_title_for_collection("Ausgangsrechnung", title)
     return ExtractionResult(

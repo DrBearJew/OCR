@@ -72,6 +72,24 @@ def test_ausgangsrechnung_golden_titles() -> None:
     assert extract_ausgangsrechnung_title(ExtractionInput("Ausgangsrechnung", muster)).title == "MusterkundeCo_2400_15/07/2019_2539,46"
 
 
+def test_neutral_file_in_invoice_collection_gets_plain_title() -> None:
+    result = extract_eingangsrechnung_title(
+        ExtractionInput(
+            "Eingangsrechnung",
+            "Natürliche Aktivierung\nAktiviert körpereigene Prozesse\nohne Fremdstoffe.",
+            original_filename="ChatGPT Image 2 апр. 2026 г., 22_36_32.png",
+            created_at=datetime(2026, 6, 15, tzinfo=timezone.utc),
+        )
+    )
+    assert result.title == "NaturlicheAktivierung"
+    assert result.sender is None
+    assert result.invoice_number is None
+    assert result.amount is None
+    assert result.date is None
+    assert result.metadata["neutral_file"] is True
+    assert result.metadata["document_kind"] == "neutral"
+
+
 def test_invoice_number_variants_and_date_normalization() -> None:
     assert extract_invoice_number("Invoice No. INV-22/7") == "INV-22/7"
     assert extract_invoice_number("Kundennummer 123\nRechnung-Nr. 2400") == "2400"

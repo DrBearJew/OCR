@@ -120,7 +120,7 @@ def move_record_to_folder(record_id: uuid.UUID, payload: FolderMovePayload, db: 
 
 
 def _folder_read(db: Session, folder: Folder) -> FolderRead:
-    document_count, record_count = folder_counts(db, folder)
+    document_count, record_count = folder_counts(db, folder, recursive=True)
     return FolderRead(
         id=folder.id,
         parent_id=folder.parent_id,
