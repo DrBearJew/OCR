@@ -387,10 +387,9 @@ export default function DashboardPage({ onOpenRecord, onOpenDocument }: Dashboar
 
         <section className="upload-review-workspace">
           <section className="workflow-card review-combo-card">
-            <div className="card-title-row"><h2>{t('dashboard.previewAndOcr')}</h2><span>{selected?.filename || t('dashboard.noFileSelected')}</span></div>
-            <div className="review-combo-grid">
+            <div className="card-title-row"><h2>{t('dashboard.filePreview')}</h2><span>{selected?.filename || t('dashboard.noFileSelected')}</span></div>
+            <div className="review-combo-grid preview-only-grid">
               <FilePreviewCard selected={selected} files={files} selectedId={selectedId} setSelectedId={setSelectedId} onAddMore={() => inputRef.current?.click()} />
-              <OCRTextPreview selected={selected} />
             </div>
           </section>
           <RecordSetupCard collectionName={collectionName} setCollectionName={setCollectionName} value={sharedTitle} setValue={setSharedTitle} folderPath={folderPath} setFolderPath={setFolderPath} />
@@ -398,9 +397,7 @@ export default function DashboardPage({ onOpenRecord, onOpenDocument }: Dashboar
 
         <aside className="metadata-redesign-rail">
           <MetadataForm metadata={metadata} setMetadata={updateSelectedMetadata} busy={busy} selected={selected} collectionName={collectionName} setCollectionName={setCollectionName} />
-        </aside>
-
-        <section className="workflow-bottom-bar">
+          <OCRTextPreview selected={selected} />
           <ProcessingOptionsPanel options={processingOptions} setOptions={setProcessingOptions} qwenStatus={qwenStatus} />
           <NextActionsBar
             disabled={Boolean(actionBusy) || busy}
@@ -411,7 +408,7 @@ export default function DashboardPage({ onOpenRecord, onOpenDocument }: Dashboar
             onExtract={() => void runSelected('metadata')}
             onReview={() => void runSelected('review')}
           />
-        </section>
+        </aside>
       </form>
     </main>
   )
@@ -511,8 +508,8 @@ function MetadataForm({ metadata, setMetadata, busy, selected, collectionName, s
   const { t } = useI18n()
   const set = (key: keyof MetadataFormState, value: string | string[]) => setMetadata({ ...metadata, [key]: value })
   return (
-    <section className="workflow-card metadata-card">
-      <h2>{t('dashboard.documentInformation')}</h2>
+    <details open className="workflow-card metadata-card metadata-collapsible-panel">
+      <summary><span><ChevronDown size={16} /> {t('dashboard.documentInformation')}</span></summary>
       <div className="metadata-grid">
         <FormField label={t('dashboard.recordCollection')} source={selected?.metadataSources.collection}><select value={collectionName} onChange={(event) => setCollectionName(event.target.value)}><option>Dokumente</option><option>Eingangsrechnung</option><option>Ausgangsrechnung</option><option>Belege</option></select></FormField>
         <FormField label={t('fields.documentType')} source={selected?.metadataSources.documentType}><select value={metadata.documentType} onChange={(event) => set('documentType', event.target.value)}><option value="">{t('common.none')}</option><option>Rechnung</option><option>Beleg</option><option>Vertrag</option><option>Dokument</option></select></FormField>
@@ -533,7 +530,7 @@ function MetadataForm({ metadata, setMetadata, busy, selected, collectionName, s
         <button type="button">{t('dashboard.saveDraft')}</button>
         <button type="button"><RotateCcw size={17} /> {t('common.reset')}</button>
       </div>
-    </section>
+    </details>
   )
 }
 
@@ -659,7 +656,13 @@ function ExtractedMetadataPreview({ metadata, sources }: { metadata: MetadataFor
 
 function OCRTextPreview({ selected }: { selected?: UploadDraftFile }) {
   const { t } = useI18n()
-  return <InspectorCard title={t('dashboard.ocrTextPreview')}><pre className="ocr-preview">{selected?.ocrSnippet || ''}</pre><div className="ocr-footer"><strong>{t('fields.confidence')}: {selected?.confidence || 0}%</strong><button type="button" onClick={() => navigator.clipboard?.writeText(selected?.ocrSnippet || '')}><Copy size={16} /> {t('common.copyText')}</button></div></InspectorCard>
+  return (
+    <details className="workflow-card inspector-card collapsed-side-panel ocr-side-panel">
+      <summary><span><ChevronDown size={16} /> {t('dashboard.ocrTextPreview')}</span><small>{t('fields.confidence')}: {selected?.confidence || 0}%</small></summary>
+      <pre className="ocr-preview">{selected?.ocrSnippet || ''}</pre>
+      <div className="ocr-footer"><strong>{t('fields.confidence')}: {selected?.confidence || 0}%</strong><button type="button" onClick={() => navigator.clipboard?.writeText(selected?.ocrSnippet || '')}><Copy size={16} /> {t('common.copyText')}</button></div>
+    </details>
+  )
 }
 
 function NextActionsBar({ disabled, hasUploadedRecord, actionBusy, onProcessAll, onRunOcr, onExtract, onReview }: { disabled: boolean; hasUploadedRecord: boolean; actionBusy: 'process' | 'ocr' | 'metadata' | 'review' | 'delete' | null; onProcessAll: () => void; onRunOcr: () => void; onExtract: () => void; onReview: () => void }) {
