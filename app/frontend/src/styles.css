@@ -9281,3 +9281,98 @@ main,
     align-self: stretch !important;
   }
 }
+
+
+/* Upload preview: document-console-grade zoom/pan and readable hover details. */
+.upload-preview-toolbar {
+  grid-template-columns: auto auto auto auto 1px auto 1px 1fr !important;
+}
+
+.upload-preview-toolbar .zoom-value {
+  min-width: 4rem;
+  justify-content: center;
+  font-weight: 900;
+}
+
+.document-preview-layout .upload-zoomable-preview {
+  display: block !important;
+  overflow: auto !important;
+  cursor: zoom-in;
+  padding: 1.25rem !important;
+}
+
+.document-preview-layout .upload-zoomable-preview .document-preview-stage {
+  min-width: 100%;
+  min-height: 100%;
+  width: max-content !important;
+  display: flex !important;
+  align-items: flex-start !important;
+  justify-content: flex-start !important;
+  padding: 2rem !important;
+  box-sizing: border-box !important;
+}
+
+.document-preview-layout .upload-zoomable-preview .document-preview-object {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  transform-origin: center center;
+  transition: transform 160ms ease;
+}
+
+.document-preview-layout .upload-zoomable-preview .upload-zoomable-preview-media {
+  flex: 0 0 auto;
+  max-width: none !important;
+  border: 0;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.32);
+}
+
+.document-preview-layout .upload-zoomable-preview img.upload-zoomable-preview-media {
+  height: auto !important;
+  min-height: 0 !important;
+  object-fit: contain;
+}
+
+.document-preview-layout .upload-zoomable-preview iframe.upload-zoomable-preview-media {
+  min-height: 620px;
+}
+
+.document-preview-layout .attachment-strip {
+  position: relative;
+  z-index: 8;
+  overflow: visible !important;
+}
+
+.document-preview-layout .attachment-tile {
+  position: relative;
+}
+
+.document-preview-layout .attachment-tile:hover .attachment-popover {
+  display: grid !important;
+  left: calc(100% + 0.85rem) !important;
+  top: 0 !important;
+  bottom: auto !important;
+  width: 300px !important;
+  max-width: min(300px, 35vw) !important;
+  z-index: 50 !important;
+  gap: 0.35rem !important;
+  color: #f8fafc !important;
+  background: rgba(8, 18, 30, 0.98) !important;
+  border: 1px solid rgba(94, 234, 212, 0.36) !important;
+  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.48) !important;
+}
+
+.document-preview-layout .attachment-popover b,
+.document-preview-layout .attachment-popover dd,
+.document-preview-layout .attachment-popover em {
+  color: #f8fafc !important;
+}
+
+.document-preview-layout .attachment-popover small,
+.document-preview-layout .attachment-popover p,
+.document-preview-layout .attachment-popover dl,
+.document-preview-layout .attachment-popover dt {
+  color: #cbd5e1 !important;
+}

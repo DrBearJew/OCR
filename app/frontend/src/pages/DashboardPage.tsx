@@ -1,5 +1,5 @@
 import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react'
-import type { MutableRefObject, ReactNode } from 'react'
+import type { MouseEvent, MutableRefObject, ReactNode } from 'react'
 import { Check, ChevronDown, ClipboardCheck, CloudUpload, Copy, FileImage, FileText, Maximize2, Minus, Plus, RefreshCw, RotateCcw, Save, Sparkles, Trash2, UploadCloud, XCircle } from 'lucide-react'
 import { api, previewUrl as documentPreviewUrl, thumbnailUrl as documentThumbnailUrl } from '../api/client'
 import type { Document } from '../types'
@@ -627,14 +627,56 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
   const [zoom, setZoom] = useState(100)
   const [rotation, setRotation] = useState(0)
   const [showOcr, setShowOcr] = useState(true)
-  const zoomLevels = [75, 100, 125, 150, 200]
-  const cycleZoom = () => setZoom((value) => zoomLevels[(zoomLevels.indexOf(value) + 1) % zoomLevels.length] || 100)
+  const previewSurfaceRef = useRef<HTMLDivElement | null>(null)
+  const isPdf = selected?.kind === 'pdf'
+  const mediaStyle = isPdf
+    ? { width: `${zoom}%`, maxWidth: zoom <= 100 ? '100%' : 'none', height: `${Math.round(620 * zoom / 100)}px` }
+    : { width: `${zoom}%`, maxWidth: zoom <= 100 ? '100%' : 'none' }
+
+  useEffect(() => {
+    setZoom(100)
+    setRotation(0)
+  }, [selected?.id])
+
+  function clampZoom(value: number) {
+    return Math.min(400, Math.max(50, value))
+  }
+
+  function centerRatio() {
+    const surface = previewSurfaceRef.current
+    if (!surface || !surface.scrollWidth || !surface.scrollHeight) return { x: 0.5, y: 0.5 }
+    return {
+      x: (surface.scrollLeft + surface.clientWidth / 2) / surface.scrollWidth,
+      y: (surface.scrollTop + surface.clientHeight / 2) / surface.scrollHeight
+    }
+  }
+
+  function setZoomAround(nextZoom: number, ratio = centerRatio()) {
+    const surface = previewSurfaceRef.current
+    setZoom(clampZoom(nextZoom))
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (!surface) return
+      surface.scrollLeft = Math.max(0, Math.min(surface.scrollWidth - surface.clientWidth, ratio.x * surface.scrollWidth - surface.clientWidth / 2))
+      surface.scrollTop = Math.max(0, Math.min(surface.scrollHeight - surface.clientHeight, ratio.y * surface.scrollHeight - surface.clientHeight / 2))
+    }))
+  }
+
+  function handlePreviewClick(event: MouseEvent<HTMLDivElement>) {
+    if (isPdf) return
+    const media = event.currentTarget.querySelector('.upload-zoomable-preview-media') as HTMLElement | null
+    if (!media) return
+    const rect = media.getBoundingClientRect()
+    const x = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
+    const y = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height))
+    setZoomAround(zoom >= 220 ? 100 : Math.max(220, zoom + 80), { x, y })
+  }
+
   const preview = selected?.serverPreviewUrl && selected.kind === 'pdf' ? (
-    <iframe src={selected.serverPreviewUrl} title={selected.filename} />
+    <iframe className="upload-zoomable-preview-media" style={mediaStyle} src={selected.serverPreviewUrl} title={selected.filename} />
   ) : selected?.serverPreviewUrl && selected.kind === 'image' ? (
-    <img src={selected.serverPreviewUrl} alt={selected.filename} />
+    <img className="upload-zoomable-preview-media" style={mediaStyle} src={selected.serverPreviewUrl} alt={selected.filename} />
   ) : selected?.previewUrl ? (
-    <img src={selected.previewUrl} alt={selected.filename} />
+    <img className="upload-zoomable-preview-media" style={mediaStyle} src={selected.previewUrl} alt={selected.filename} />
   ) : selected?.kind === 'pdf' ? (
     <PdfMockup />
   ) : (
@@ -647,9 +689,11 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
         <h2>{t('dashboard.filePreview')}</h2>
         <span>{selected?.filename || t('dashboard.noFileSelected')}</span>
       </div>
-      <div className="document-preview-toolbar">
+      <div className="document-preview-toolbar upload-preview-toolbar">
         <span><Maximize2 size={16} /> Zoom</span>
-        <button type="button" onClick={cycleZoom} aria-label="Zoom ändern">{zoom}% <ChevronDown size={14} /></button>
+        <button type="button" onClick={() => setZoomAround(zoom - 25)} aria-label={t('common.zoomOut')}><Minus size={15} /></button>
+        <button type="button" className="zoom-value" onClick={() => setZoomAround(100, { x: 0.5, y: 0.5 })} aria-label={t('common.resetZoom')}>{zoom}%</button>
+        <button type="button" onClick={() => setZoomAround(zoom + 25)} aria-label={t('common.zoomIn')}><Plus size={15} /></button>
         <i />
         <button type="button" onClick={() => setRotation((value) => (value + 90) % 360)}><RefreshCw size={16} /> {t('dashboard.rotate')}</button>
         <i />
@@ -657,9 +701,9 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
       </div>
       <div className="document-preview-layout">
         <AttachmentStrip files={files} selectedId={selectedId} onSelect={setSelectedId} onAddMore={onAddMore} />
-        <div className={`document-preview-surface ${showOcr ? 'show-ocr-overlay' : ''}`}>
+        <div ref={previewSurfaceRef} className={`document-preview-surface upload-zoomable-preview ${showOcr ? 'show-ocr-overlay' : ''}`} onClick={handlePreviewClick}>
           <div className="document-preview-stage">
-            <div className="document-preview-object" style={{ transform: `scale(${zoom / 100}) rotate(${rotation}deg)` }}>
+            <div className="document-preview-object" style={{ transform: `rotate(${rotation}deg)` }}>
               {preview}
             </div>
           </div>
