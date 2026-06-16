@@ -252,5 +252,5 @@ Still environment-dependent:
 
 ## 📚 More documentation
 
-Detailed setup and operations notes are in [`app/README.md`](app/README.md), including upload limits, optional converters, reverse proxy settings, migrations, tests, API routes, and the document model.
+The structural app guide lives in [`app/README.md`](app/README.md), covering runtime architecture, model/OCR modes, setup, document lifecycle, metadata/review behavior, operations, tests, and troubleshooting.
 

@@ -1,82 +1,297 @@
-# Dok OCR
+# Dok OCR App Guide
 
-Self-hosted document processing app for multi-file upload, external llama.cpp-backed GLM OCR, optional Qwen metadata refinement, local file storage, and PostgreSQL full-text search.
+This directory contains the runnable Dok OCR application: backend API, workers, frontend, database migrations, reference implementations, and local Docker Compose files.
 
-## Stack
+For the product overview, screenshots, and one-click smart PaddleOCR-VL stack installer, start with the repository-level [`../README.md`](../README.md). This file is the implementation and operations guide for the app itself.
 
-- Backend: FastAPI, SQLAlchemy, Alembic
-- Database: PostgreSQL
-- Worker: Celery, Redis
-- Frontend: React, Vite, TypeScript
-- Storage: local filesystem volume
-- OCR: GLM OCR through an external llama.cpp OpenAI-compatible multimodal server
-- Text reasoning: optional Qwen through a separate external llama.cpp server
-- Search: PostgreSQL full-text search over full OCR text
+---
 
-## Setup
+## 1. What this app does
 
-```powershell
-cd "C:\Users\Trent\Documents\New project\app"
-Copy-Item .env.example .env
+Dok OCR turns uploaded or consumed files into searchable, reviewable document records.
+
+The app pipeline is:
+
+```text
+File input
+  -> validation and storage
+  -> OCR / text extraction
+  -> deterministic metadata extraction
+  -> optional Qwen metadata/search enrichment
+  -> title generation and validation
+  -> review state assignment
+  -> PostgreSQL search indexing
+  -> record/document UI
+```
+
+The main user-facing objects are:
+
+| Object | Purpose |
+| --- | --- |
+| `Collection` | A schema/config bucket such as `Eingangsrechnung`, `Ausgangsrechnung`, `Dokumente`, or a custom collection. |
+| `Record` | The browseable parent row users work with. It aggregates one or more documents and has a derived status. |
+| `Document` | One physical uploaded/imported file, its OCR text, metadata, review state, events, pages, and retry path. |
+| `Batch` | Upload grouping and migration compatibility layer. It is not the primary user mental model. |
+
+A document is considered complete only when file storage, OCR, metadata extraction, title persistence, required-field validation, and search indexing are done. Optional Qwen enrichment can improve search metadata, but deterministic extraction remains the safe baseline.
+
+---
+
+## 2. Directory map
+
+```text
+app/
+  backend/                         FastAPI app, SQLAlchemy models, workers, tests
+    app/api/                       HTTP routes
+    app/config/                    Settings and collection/rule config
+    app/models/                    Database model definitions
+    app/prompts/                   OCR/Qwen prompt templates
+    app/services/                  Pipeline, OCR, metadata, search, folders, diagnostics
+    app/workers/                   Celery app and task entry points
+    app/tests/                     Backend regression tests
+    alembic/                       Database migrations
+
+  frontend/                        React + Vite + TypeScript UI
+    src/api/                       API client
+    src/components/                Shared UI components
+    src/i18n/                      English/German text dictionaries
+    src/pages/                     Dashboard, Records, Documents, Admin, Search, etc.
+    scripts/dashboard-static-tests.mjs
+
+  references/                      Compact TypeScript/Go/Rust ports of core rules
+
+  docker-compose.yml               Default app stack
+  docker-compose.converters.example.yml
+  docker-compose.llama.example.yml
+  .env.example                     Local app configuration template
+```
+
+---
+
+## 3. Runtime architecture
+
+The default Compose stack starts the app layer only:
+
+| Service | Role |
+| --- | --- |
+| `postgres` | Main database, metadata, document events, search data. |
+| `redis` | Celery broker/result backend. |
+| `backend` | FastAPI API server on host port `8001`. Runs migrations on startup. |
+| `worker` | General Celery worker for OCR, metadata, and maintenance queues. |
+| `worker-metadata` | Dedicated metadata queue worker. |
+| `worker-maintenance` | Dedicated maintenance/reconciliation queue worker. |
+| `worker-beat` | Periodic scans and reconciliation tasks. |
+| `frontend` | Nginx-served React app on host port `3001`; proxies `/api` to backend. |
+
+Storage is mounted as Docker volumes:
+
+| Volume | Use |
+| --- | --- |
+| `postgres-data` | PostgreSQL data. |
+| `redis-data` | Redis persistence. |
+| `document-storage` | Stored uploaded/imported documents, previews, thumbnails. |
+
+The app can talk to model servers, but it does not require them for basic development. Model services can be external, deployed by the smart installer, or started from examples.
+
+---
+
+## 4. Runtime modes
+
+Choose a mode before configuring `.env` or the Admin model setup page.
+
+| Mode | OCR provider | Intended use |
+| --- | --- | --- |
+| Basic dev/test | `fake` | Fast UI/backend development with no model server. |
+| Fast local OCR | `ppocrv6` | CPU/local OCR for ordinary text extraction. |
+| Smart document OCR | `paddle_vl` | PaddleOCR-VL via an OpenAI-compatible internal gateway. Best default for rich documents/diagrams. |
+| GLM fallback | `glm` | GLM multimodal OCR through llama.cpp-compatible endpoint. Kept as fallback path. |
+
+Qwen is separate from OCR. It is optional text reasoning for metadata candidates, search hints, tags/folders, and summaries.
+
+---
+
+## 5. First-time local setup
+
+From this directory:
+
+```bash
+cp .env.example .env
 ```
 
 Edit `.env` before real use:
 
-- change `ADMIN_PASSWORD`
-- change `SECRET_KEY`
-- set `OCR_PROVIDER=glm` when your llama.cpp OCR server is ready
+```env
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=change-this
+SECRET_KEY=change-this-to-a-long-random-value
+OCR_PROVIDER=fake
+```
 
-## External llama.cpp Model Layer
+Start the app:
 
-This app does not install, own, or mutate llama.cpp. Keep existing llama.cpp containers, ports, model mounts, GPU mapping, aliases, and reverse-proxy routes stable. The app is only an HTTP client.
+```bash
+docker compose up --build
+```
 
-Example environment:
+Open:
+
+| Target | URL |
+| --- | --- |
+| Frontend | <http://localhost:3001> |
+| API docs | <http://localhost:8001/docs> |
+| Health | <http://localhost:8001/api/health> |
+| Readiness | <http://localhost:8001/ready> |
+
+Stable UI sections:
+
+```text
+/dashboard
+/collections
+/records
+/documents
+/search
+/processing
+/failed
+/schemas
+/admin
+/activity
+```
+
+Migrations run automatically when `backend` starts. To run them manually:
+
+```bash
+docker compose run --rm backend alembic upgrade head
+```
+
+---
+
+## 6. Model and OCR configuration
+
+### Recommended smart setup
+
+For normal smart OCR, use PaddleOCR-VL through the packaged internal gateway setup from the repository root:
+
+```bash
+../scripts/install-smart-paddlevl.sh --dry-run
+../scripts/install-smart-paddlevl.sh
+```
+
+Then open:
+
+```text
+Admin -> Model Setup
+```
+
+Use the internal gateway, test PaddleOCR-VL, and save. The Admin setup stores model endpoint configuration in the app settings database so the API and workers see the same model config.
+
+### `.env` provider keys
+
+The important model settings are:
 
 ```env
-OCR_PROVIDER=glm
+# OCR provider: fake, ppocrv6, paddle_vl, glm
+OCR_PROVIDER=paddle_vl
+
+# PaddleOCR-VL through internal gateway / smart proxy
+PADDLE_VL_LLAMACPP_BASE_URL=http://smart-proxy:8081/v1
+PADDLE_VL_MODEL_PATH=paddleocr-vl
+PADDLE_VL_MMPROJ_PATH=/llm-models/paddleocr-vl-mmproj.gguf
+
+# Fast local PP-OCRv6
+PPOCRV6_TIER=medium
+PPOCRV6_ENGINE=onnxruntime
+PPOCRV6_DEVICE=cpu
+
+# GLM fallback
 GLM_LLAMACPP_BASE_URL=http://glm-llama:8080
 GLM_MODEL_PATH=/llm-models/glm.gguf
 GLM_MMPROJ_PATH=/llm-models/glm-mmproj.gguf
 
+# Optional Qwen text reasoning
 QWEN_LLAMACPP_BASE_URL=http://qwen-llama:8080
 QWEN_MODEL_PATH=/llm-models/qwen.gguf
 LLM_METADATA_REFINEMENT_ENABLED=false
+LLM_REQUEST_TIMEOUT_SECONDS=120
+LLM_MAX_TOKENS=4096
+LLM_TEMPERATURE=0
 ```
 
-Expected model split:
+### Model boundary
 
-- `glm.gguf` + `glm-mmproj.gguf`: multimodal OCR and visual document reading
-- `qwen.gguf`: optional metadata refinement, title suggestions, search assistance, and admin/debug text reasoning
+The app calls OpenAI-compatible HTTP endpoints. It does not hardcode GPU topology, llama.cpp flags, or model-manager behavior.
 
-If you need a fresh example only, see `docker-compose.llama.example.yml`. It is opt-in and intentionally separate from the default app Compose file.
-
-Example GLM server shape:
-
-```bash
-llama-server -m /llm-models/glm.gguf --mmproj /llm-models/glm-mmproj.gguf --host 0.0.0.0 --port 8080
-```
-
-The adapter posts to:
+Expected endpoint shape:
 
 ```text
 POST /v1/chat/completions
 ```
 
-with multimodal `image_url` content containing a data URL for the uploaded file. For development and automated tests, keep `OCR_PROVIDER=fake`.
+For PaddleOCR-VL and GLM image OCR, the request includes multimodal `image_url` content with a data URL. For Qwen, the request is text-only and expects compact JSON metadata candidates.
 
-Prompts are real files under `backend/app/prompts/`. Collection/OCR rules are YAML files under `backend/app/config/`. Prompt output can assist, but deterministic extraction and title validation remain the final authority.
+### Fallback behavior
 
-## Optional Converters
+The OCR path is deliberately conservative:
 
-Office documents and email files are accepted only when external converters are enabled. They are not part of the default stack.
+- PaddleOCR-VL is the smart OCR path.
+- PP-OCRv6 is available as fast/local OCR.
+- GLM remains available as fallback multimodal OCR.
+- If PaddleOCR-VL returns empty text for a non-PDF image, the backend can fall back to PP-OCRv6 instead of failing the document immediately.
+- Qwen failures should not erase deterministic metadata. Empty Qwen output is treated as no candidate; malformed non-empty JSON is recorded for review/diagnostics.
 
-Example only:
+---
 
-```powershell
+## 7. Upload and ingestion limits
+
+Large PDFs and multi-file batches are normal inputs. There are two gates.
+
+### Frontend Nginx gate
+
+`frontend/nginx.conf` sets request size and proxy behavior. If Nginx rejects a request first, the frontend catches HTTP `413` and shows a friendly upload-size message.
+
+To verify the live Nginx body limit:
+
+```bash
+docker compose exec frontend nginx -T | grep client_max_body_size
+```
+
+### Backend validation gate
+
+`.env` controls backend upload validation:
+
+```env
+MAX_UPLOAD_FILE_SIZE_MB=200
+MAX_UPLOAD_BATCH_SIZE_MB=500
+MAX_UPLOAD_FILES_PER_BATCH=50
+MAX_PDF_PAGES=100
+ALLOWED_EXTENSIONS=pdf,png,jpg,jpeg,webp,tif,tiff,txt,doc,docx,xls,xlsx,ppt,pptx,odt,ods,odp,rtf,eml,msg
+ALLOWED_MIME_TYPES=application/pdf,image/png,image/jpeg,image/webp,image/tiff,text/plain,...
+```
+
+Office and email files require converters. If converters are disabled, those uploads fail cleanly with a user-visible validation error.
+
+### Consume folder
+
+The default stack mounts:
+
+```text
+./consume -> /data/consume
+```
+
+Use the Admin UI to create/enable consume-folder ingestion sources before dropping files there. Celery beat scans enabled sources and creates ingestion jobs/documents.
+
+---
+
+## 8. Optional converters
+
+Converters are intentionally outside the default stack.
+
+Start example converter services:
+
+```bash
 docker compose -f docker-compose.yml -f docker-compose.converters.example.yml --profile converters up --build
 ```
 
-Then set:
+Enable them:
 
 ```env
 CONVERTERS_ENABLED=true
@@ -84,60 +299,246 @@ TIKA_BASE_URL=http://tika:9998
 GOTENBERG_BASE_URL=http://gotenberg:3000
 ```
 
-If converters are disabled, Office/email uploads and consume-folder imports fail cleanly with a user-visible validation error.
+Use converters for Office documents and email formats. Native PDF/image/text processing does not require them.
 
-## Start Services
+---
 
-```powershell
-docker compose up --build
+## 9. Document lifecycle
+
+The main document workflow states are:
+
+```text
+uploaded
+  -> queued_for_ocr
+  -> ocr_processing
+  -> ocr_done
+  -> metadata_processing
+  -> complete
 ```
 
-The default Compose file starts only the app layer: Postgres, Redis, backend, worker, Celery beat, and frontend. External llama.cpp services stay outside this stack unless you deliberately run the separate example file.
+Other terminal/special states:
 
-The default stack also mounts `./consume` into backend, worker, and beat as `/data/consume` for optional consume-folder polling. Put files there only after you create and enable a consume-folder ingestion source in the Admin UI.
-
-Open:
-
-- UI: `http://localhost:3001`
-- API docs: `http://localhost:8001/docs`
-- Stable UI routes: `/dashboard`, `/collections`, `/records`, `/documents`, `/search`, `/processing`, `/failed`, `/schemas`, `/admin`, `/activity`
-
-## Upload Limits
-
-Large PDFs and multi-file batches are normal inputs. The app has two upload gates:
-
-- Frontend Nginx: `frontend/nginx.conf` sets `client_max_body_size 250m` at `server` and `/api/`, disables request buffering for `/api/`, and raises proxy timeouts to 300 seconds.
-- Backend FastAPI: validates every batch before and during streaming.
-
-Backend limits in `.env`:
-
-```env
-MAX_UPLOAD_FILE_SIZE_MB=200
-MAX_UPLOAD_BATCH_SIZE_MB=500
-MAX_UPLOAD_FILES_PER_BATCH=50
-MAX_PDF_PAGES=100
-ALLOWED_EXTENSIONS=pdf,png,jpg,jpeg,webp,tif,tiff
-ALLOWED_MIME_TYPES=application/pdf,image/png,image/jpeg,image/webp,image/tiff
+```text
+needs_review
+failed
+duplicate
 ```
 
-Nginx config files do not automatically read `.env`. To change the Nginx body limit, update `frontend/nginx.conf`, rebuild/reload the frontend container, then verify inside the container with:
+Stage fields track finer-grained progress:
 
-```sh
-nginx -T | grep client_max_body_size
+| Field | Meaning |
+| --- | --- |
+| `ocr_state` | OCR stage: pending, processing, done, skipped, failed. |
+| `metadata_state` | Metadata stage: pending, processing, done, skipped, failed. |
+| `review_state` | Human review state: unreviewed, needs_review, reviewed. |
+| `processing_state` | Overall workflow state shown in status badges. |
+| `final_state` | Last derived terminal/visible workflow state. |
+
+Review is first-class. Marking a document as reviewed updates review metadata and promotes a review-only `needs_review` workflow state back to `complete`. Failed/OCR/queued states are not hidden by review actions.
+
+---
+
+## 10. Metadata, titles, and review warnings
+
+The deterministic extraction source of truth is:
+
+```text
+backend/app/services/extraction.py
 ```
 
-If Nginx rejects a request before FastAPI sees it, the frontend catches HTTP 413 and shows a friendly upload-size message instead of raw Nginx HTML.
+Supported built-in title patterns include:
 
-Default login from `.env.example`:
+| Collection | Title shape |
+| --- | --- |
+| `Belege` | `<Ersteller>_B_<MM/YY>_<Betrag>_<Zahlart>` |
+| `Eingangsrechnung` | `<Absender>_<Rechnungsnummer>_<DD/MM/YYYY>_<Betrag>` |
+| `Ausgangsrechnung` | `<Empfaenger>_<Rechnungsnummer>_<DD/MM/YYYY>_<Betrag>` |
+| `Dokumente` | General document title fallback. |
 
-- username: `admin`
-- password: `admin`
+Fallbacks are conservative, for example `Dok`, `NA`, `00/00`, and `00/00/0000`.
 
-## HTTPS / Reverse Proxy
+Manual edits and locks are respected:
 
-The containers serve HTTP internally. Terminate HTTPS in your existing reverse proxy and forward to the frontend container. API calls remain under `/api`, and Nginx forwards proxy headers to the backend.
+- `metadata_locked` protects current metadata from normal reprocessing.
+- Field-level locks protect individual fields.
+- Forced processing can overwrite where explicitly allowed.
+- Qwen can fill missing fields or search metadata, but deterministic extraction and manual locks remain authoritative.
 
-Useful deployment config:
+Review warnings are generated for missing required fields, weak/invalid title schema, OCR/model failures, duplicate signals, or other pipeline concerns. They are stored on the document and surfaced in the UI, filters, diagnostics, and activity trail.
+
+---
+
+## 11. Search and indexing
+
+Search is PostgreSQL-backed and uses stored OCR/metadata.
+
+Search covers:
+
+- full OCR text
+- generated/manual title
+- collection
+- workflow state
+- review state
+- date range
+- filename/title filters
+- correspondent
+- document type
+- tags
+- storage path
+- OCR mode
+- searchable custom fields
+
+The pipeline records a `search_indexed` marker after OCR and metadata are available. Diagnostics treat OCR text with completed/skipped OCR as implicitly searchable even if an older row lacks the marker.
+
+---
+
+## 12. Admin areas
+
+The Admin UI is the technical configuration area for:
+
+- model setup and endpoint tests
+- OCR provider/default settings
+- collections and schema metadata
+- correspondents, document types, tags, storage paths
+- ingestion sources and ingestion jobs
+- command/webhook hooks
+- failed jobs and retries
+- reconciliation tasks
+
+Normal users should see model setup as an internal model gateway, not as raw smart-proxy internals.
+
+---
+
+## 13. API map
+
+The complete interactive API reference is available at:
+
+```text
+http://localhost:8001/docs
+```
+
+High-level route groups:
+
+| Route group | Purpose |
+| --- | --- |
+| `/api/auth/*` | Login/session. |
+| `/api/batches/*` | Upload grouping and upload endpoints. |
+| `/api/collections/*` | Collections and custom field definitions. |
+| `/api/records/*` | Record list/detail, record processing, shared title metadata. |
+| `/api/documents/*` | Document detail, patch, bulk actions, OCR/reextract/retry, previews, diagnostics. |
+| `/api/search` | Full text and metadata search. |
+| `/api/admin/*` | Operational/admin configuration and recovery actions. |
+| `/api/dashboard`, `/api/processing`, `/api/failed`, `/api/activity` | App shell summary pages. |
+| `/health`, `/ready` | Health/readiness probes. |
+
+Prefer the generated OpenAPI docs for exact payload shapes, because route payloads evolve faster than a static endpoint list.
+
+---
+
+## 14. Development workflow
+
+### Backend tests
+
+From the app directory with Compose:
+
+```bash
+docker compose run --rm \
+  -e LLM_METADATA_REFINEMENT_ENABLED=false \
+  -e COMMAND_HOOKS_ALLOWED_COMMANDS=python,python3,python3.12 \
+  backend sh -lc "PYTHONPATH=/app pytest app/tests -q"
+```
+
+Focused examples:
+
+```bash
+docker compose run --rm backend sh -lc "PYTHONPATH=/app pytest app/tests/test_processing.py -q"
+docker compose run --rm backend sh -lc "PYTHONPATH=/app pytest app/tests/test_model_prompts.py -q"
+docker compose run --rm backend sh -lc "PYTHONPATH=/app pytest app/tests/test_app_shell.py -q"
+```
+
+### Frontend checks
+
+```bash
+cd frontend
+npm ci
+npm run build
+npm run test:dashboard
+```
+
+Or from the app directory:
+
+```bash
+docker run --rm -v "$PWD/frontend:/app" -w /app node:22-alpine \
+  sh -lc "npm ci >/tmp/npm-ci.log 2>&1 && npm run test:dashboard"
+```
+
+### Rebuild and restart
+
+```bash
+docker compose build backend frontend
+docker compose up -d backend frontend
+```
+
+### Useful logs
+
+```bash
+docker compose logs -f backend
+docker compose logs -f worker
+docker compose logs -f worker-metadata
+docker compose logs -f frontend
+```
+
+---
+
+## 15. Operations and recovery
+
+### Reconcile stuck work
+
+Celery beat periodically runs reconciliation. Manual command:
+
+```bash
+docker compose run --rm backend python -m app.cli reconcile-stuck
+```
+
+### Retry failures
+
+```bash
+docker compose run --rm backend python -m app.cli retry-failed
+```
+
+### Re-extract a collection
+
+```bash
+docker compose run --rm backend python -m app.cli reextract-collection Eingangsrechnung --force
+```
+
+### Rebuild search metadata
+
+```bash
+docker compose run --rm backend python -m app.cli rebuild-search
+```
+
+### Import/export legacy data
+
+```bash
+docker compose run --rm backend python -m app.cli import-legacy \
+  --files-dir /path/to/files \
+  --metadata /path/to/export.json \
+  --collection Belege \
+  --legacy-source paperless
+
+docker compose run --rm backend python -m app.cli export-documents --out /tmp/documents.json
+```
+
+Legacy import supports folder files plus CSV/JSON metadata/OCR exports. Useful fields include `filename`, `original_path`, `legacy_document_id`, `collection`, `title`, `metadata_json`, `raw_ocr_json`, `ocr_text`, and `mime_type`.
+
+---
+
+## 16. HTTPS and reverse proxy
+
+The containers serve HTTP internally. Terminate HTTPS at your reverse proxy and forward to the frontend container.
+
+Recommended deployment settings:
 
 ```env
 PUBLIC_BASE_URL=https://docs.example.local
@@ -147,221 +548,31 @@ CORS_ORIGINS=https://docs.example.local
 TRUSTED_PROXY_HEADERS=true
 ```
 
-Do not hardcode localhost in integrations or automations; use the public base URL when linking to the app from outside Docker.
+Keep external links and integrations on the public base URL. Avoid hardcoding localhost outside Docker/dev.
 
-## Migrations
+---
 
-Migrations run automatically in the backend container on startup.
+## 17. Troubleshooting guide
 
-Manual migration:
+| Symptom | Check |
+| --- | --- |
+| Upload fails before backend logs appear | Nginx body limit or proxy timeout. Inspect `frontend/nginx.conf` and `nginx -T`. |
+| Upload accepted but document never processes | Worker/Redis health, Celery queue logs, `processing_task_id`, `lease_until`, reconciliation status. |
+| OCR returns empty text | Check selected OCR provider, model endpoint, PaddleOCR-VL template/image support, and fallback events. |
+| Metadata looks wrong | Check OCR text first, then deterministic extraction, then Qwen candidates/sources. |
+| Status says `needs_review` after action | Compare `processing_state` and `review_state`; review-only states should promote to `complete` when marked reviewed. |
+| Qwen shows failed but document is complete | Inspect diagnostics. Empty Qwen output is optional/no-candidate; malformed non-empty JSON is a real Qwen candidate failure. |
+| Office/email files are rejected | Enable Tika/Gotenberg converters and set `CONVERTERS_ENABLED=true`. |
+| Browser still shows old UI | Rebuild/restart `frontend`, then hard-refresh the browser. |
 
-```powershell
-docker compose run --rm backend alembic upgrade head
-```
-
-## Running Tests
-
-Backend:
-
-```powershell
-cd backend
-python -m pip install -r requirements.txt
-python -m pytest app/tests
-```
-
-Frontend build:
-
-```powershell
-cd frontend
-npm install
-npm run build
-```
-
-Reference implementations:
-
-```powershell
-cd references/typescript
-npm install
-npm test
-
-cd ../go
-go test ./...
-
-cd ../rust
-cargo test
-```
-
-## Collection / Record / Document Model
-
-The user-facing model is now:
-
-- `Collection`: schema bucket such as Belege, Eingangsrechnung, Ausgangsrechnung, Dokumente, or future custom collections.
-- `Record`: PocketBase-like parent row users browse in the main list. A record owns one or many documents and has derived status/summary metadata.
-- `Document`: one uploaded file, one first-class row, one OCR text, one metadata/title state, one retry path, one audit trail.
-
-The legacy `batches` table remains as an upload grouping and migration compatibility layer. It is not the main user mental model.
-
-The browser UI is a PocketBase-like app shell with separate sections for Dashboard, Collections, Records, Documents, Search, Processing, Failed/Review, Schemas, Admin, and Activity. The same objects are available through JSON APIs; the UI does not have private-only behavior.
-
-Custom fields are schema-driven:
-
-- Definitions live per collection in `custom_field_definitions`.
-- Values live per document in `document_custom_field_values`.
-- Supported field types: string, text, number, date, boolean, select.
-- Values record source, confidence, lock state, raw value, and normalized value.
-- Locked values are not overwritten unless force is used.
-
-## Paperless-Like Ingestion And OCR Pipeline
-
-The app has a Paperless-inspired consumer layer without copying Paperless internals:
-
-- Uploads remain interactive and create one record per upload batch.
-- Consume-folder sources are polled by Celery beat and default to one record per file.
-- Every discovered file creates exactly one document row, unless it is skipped as an already-imported hash.
-- OCR modes are explicit: `skip`, `redo`, and `force`.
-- Effective OCR config is resolved from app defaults, collection config, source/document config, and document overrides.
-- Pipeline events are visible per document: validation, storage, dedupe, hooks, render/thumbnail, OCR, metadata, search indexing, and completion.
-
-OCR settings available in `.env` include language, cleanup mode, deskew, rotation, page limit, image DPI, output type, max image pixels, and default OCR mode. GLM receives these as pipeline context/trace for v1; final deterministic extraction remains code/config driven.
-
-Pre/post consume hooks can be command or webhook hooks. Blocking hook failures fail the document/job; non-blocking hook failures are recorded as document events.
-
-## API Overview
-
-- `POST /api/auth/login`
-- `GET /api/collections`
-- `POST /api/collections`
-- `PATCH /api/collections/{id}`
-- `GET /api/collection-summaries`
-- `GET /api/collection-pages/{slug}`
-- `GET /api/collections/{id}/fields`
-- `POST /api/collections/{id}/fields`
-- `PATCH /api/collections/{id}/fields/{field_id}`
-- `DELETE /api/collections/{id}/fields/{field_id}`
-- `GET /api/records`
-- `GET /api/records/{id}`
-- `PATCH /api/records/{id}`
-- `POST /api/batches/upload`
-- `GET /api/batches`
-- `GET /api/batches/{id}`
-- `GET /api/documents?collection_name=...&state=...&review_state=...&filename=...&title=...&correspondent_id=...&document_type_id=...&tag_id=...&storage_path_id=...&ocr_mode=...`
-- `GET /api/documents/{id}`
-- `PATCH /api/documents/{id}`
-- `POST /api/documents/bulk`
-- `POST /api/documents/{id}/retry`
-- `POST /api/documents/{id}/reextract`
-- `GET /api/documents/{id}/download`
-- `GET /api/documents/{id}/preview`
-- `GET /api/documents/{id}/thumbnail`
-- `GET /api/documents/{id}/events`
-- `GET /api/documents/{id}/pages`
-- `PATCH /api/documents/{id}/ocr-settings`
-- `POST /api/documents/{id}/ocr`
-- `GET /api/documents/{id}/pipeline`
-- `GET /api/documents/{id}/custom-fields`
-- `PUT /api/documents/{id}/custom-fields`
-- `GET /api/documents/duplicates`
-- `GET /api/search?q=...&collection_name=...&status=...&review_state=...&filename=...&title=...&date_from=...&date_to=...&custom_field=...&custom_value=...&correspondent_id=...&document_type_id=...&tag_id=...&storage_path_id=...&ocr_mode=...`
-- `GET /api/dashboard`
-- `GET /api/activity`
-- `GET /api/processing`
-- `GET /api/failed`
-- `GET /api/saved-views`
-- `POST /api/saved-views`
-- `PATCH /api/saved-views/{id}`
-- `DELETE /api/saved-views/{id}`
-- `GET /api/admin/jobs`
-- `GET /api/admin/failed`
-- `GET /api/admin/integrations`
-- `POST /api/admin/reconcile`
-- `POST /api/admin/retry-failed`
-- `POST /api/admin/reextract-collection`
-- `GET /api/admin/ingestion-sources`
-- `POST /api/admin/ingestion-sources`
-- `PATCH /api/admin/ingestion-sources/{source_id}`
-- `POST /api/admin/ingestion-sources/{source_id}/scan`
-- `POST /api/admin/ingestion-sources/scan-all`
-- `GET /api/admin/ingestion-jobs`
-- `POST /api/admin/ingestion-jobs/{job_id}/retry`
-- `GET /api/admin/hooks`
-- `POST /api/admin/hooks`
-- `POST /api/admin/hooks/{hook_id}/test`
-- `GET /api/admin/correspondents`
-- `POST /api/admin/correspondents`
-- `GET /api/admin/document-types`
-- `POST /api/admin/document-types`
-- `GET /api/admin/tags`
-- `POST /api/admin/tags`
-- `GET /api/admin/storage-paths`
-- `POST /api/admin/storage-paths`
-- `GET /health`
-- `GET /ready`
-
-## Processing Rules
-
-One uploaded file always creates one `documents` row. A batch is only a grouping record and never stores merged OCR. A document becomes `complete` only after OCR and metadata extraction both finish.
-
-Document states:
+Document diagnostics are available from the document detail advanced actions and backend route:
 
 ```text
-uploaded -> queued_for_ocr -> ocr_processing -> ocr_done -> metadata_processing -> complete
-failed
-duplicate
+GET /api/documents/{document_id}/diagnostics
 ```
 
-Batch status is derived from child documents:
+---
 
-```text
-pending
-processing
-partially_failed
-complete
-```
+## 18. Reference implementations
 
-## Extraction Rules
-
-The source of truth is `backend/app/services/extraction.py`.
-
-Supported collections:
-
-- `Belege`: `<Ersteller>_B_<MM/YY>_<Betrag>_<Zahlart>`
-- `Eingangsrechnung`: `<Absender>_<Rechnungsnummer>_<DD/MM/YYYY>_<Betrag>`
-- `Ausgangsrechnung`: `<Empfaenger>_<Rechnungsnummer>_<DD/MM/YYYY>_<Betrag>`
-
-Fallbacks are conservative: `Dok`, `NA`, `00/00`, `00/00/0000`.
-
-Manual metadata edits are supported. When `metadata_locked` is true, reprocessing records a candidate result in debug metadata but does not overwrite current manual/extracted values unless `force=true`.
-
-Each document also stores prompt/model trace JSON, optional Qwen response text, and a processing log for reproducibility.
-
-## Operational Hardening
-
-- Processing is idempotent: duplicate OCR/metadata task delivery is guarded by document state and heartbeat checks.
-- Celery beat runs `reconcile_stuck_documents_task` every five minutes to requeue stale `uploaded`, `queued_for_ocr`, `ocr_processing`, `ocr_done`, and `metadata_processing` rows.
-- Failed documents are retryable from the admin UI, CLI, or `POST /api/admin/retry-failed`.
-- Duplicate uploads are detected by SHA-256. The new row is kept for auditability, linked with `duplicate_of_document_id`, and not reprocessed unless force retried.
-- Upload validation enforces file extension, MIME type, max file size, and max PDF pages. A virus-scan hook is present as a v1 extension point.
-- Images and PDFs can get thumbnails; PDFs are inspected/rendered with `pypdfium2`, thumbnails use `Pillow`.
-- Per-document events are stored in `document_events`; optional page OCR fragments live in `document_pages`.
-- Search remains database-backed and includes snippets plus filters for collection, state, date range, filename, title, correspondent, document type, tag, storage path, OCR mode, and searchable custom fields.
-- Review state is first-class on documents: `unreviewed`, `needs_review`, and `reviewed`, with reason, reviewer, timestamp, filters, audit events, and bulk update support.
-- Saved views store reusable filter/sort/display JSON for Records, Documents, Search, Processing, and Failed/Review.
-
-## Admin CLI
-
-Run these inside the backend environment:
-
-```powershell
-python -m app.cli retry-failed
-python -m app.cli reconcile-stuck
-python -m app.cli reextract-collection Eingangsrechnung --force
-python -m app.cli rebuild-search
-python -m app.cli import-legacy --files-dir C:\path\to\files --metadata C:\path\to\export.json --collection Belege --legacy-source paperless
-python -m app.cli export-documents --out C:\path\to\documents.json
-```
-
-Legacy import supports folder files plus CSV/JSON metadata/OCR exports. Useful fields include `filename`, `original_path`, `legacy_document_id`, `collection`, `title`, `metadata_json`, `raw_ocr_json`, `ocr_text`, and `mime_type`.
-
-## References
-
-The `/references` directory contains compact ports of the core extraction and state logic in TypeScript, Go, and Rust. They are meant to preserve the business rules for future services, not to rebuild the app.
+The `references/` directory contains compact ports of core extraction/state logic in TypeScript, Go, and Rust. They preserve business rules for future services and test comparisons; they are not alternate production apps.
