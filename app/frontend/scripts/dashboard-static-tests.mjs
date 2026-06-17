@@ -38,6 +38,8 @@ const checks = [
   ['Upload PDF preview appends page-fit fragment', dashboard, 'pdfPreviewSrc(selected.serverPreviewUrl)'],
   ['Upload preview fit mode uses panel width minus small gutter', dashboard, 'surface.clientWidth - 48'],
   ['Upload preview fit repair CSS is present', styles, 'Upload preview fit repair: 100% fits'],
+  ['Upload PDF preview click zoom is enabled', dashboard, 'if (isPdf) return', true],
+  ['Upload PDF zoomed mode is unclamped', styles, 'Upload PDF preview zoom repair'],
   ['Documents page exposes delete selected action', documentsPage, 'documents.deleteSelected'],
   ['Documents page calls deleteDocument API', documentsPage, 'api.deleteDocument'],
   ['Documents bulk actions fall back to active row', documentsPage, 'selectedDocumentIdsForActions'],

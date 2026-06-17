@@ -693,7 +693,6 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
   }
 
   function handlePreviewClick(event: MouseEvent<HTMLDivElement>) {
-    if (isPdf) return
     const media = event.currentTarget.querySelector('.upload-zoomable-preview-media') as HTMLElement | null
     if (!media) return
     const rect = media.getBoundingClientRect()

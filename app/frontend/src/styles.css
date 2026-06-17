@@ -11008,3 +11008,24 @@ a.icon-button:not(.danger-button):hover {
     max-width: 100% !important;
   }
 }
+
+
+/* Upload PDF preview zoom repair: PDFs use the same app-level zoom as images. */
+.document-preview-layout .upload-zoomable-preview.zoomed-preview .document-preview-stage {
+  width: max(100%, max-content) !important;
+  min-width: 100% !important;
+  max-width: none !important;
+  padding: 5rem !important;
+}
+
+.document-preview-layout .upload-zoomable-preview.zoomed-preview .document-preview-object {
+  width: auto;
+  max-width: none !important;
+  min-width: 0 !important;
+}
+
+.document-preview-layout .upload-zoomable-preview.zoomed-preview iframe.upload-zoomable-preview-media,
+.document-preview-layout .upload-zoomable-preview.zoomed-preview img.upload-zoomable-preview-media {
+  width: 100% !important;
+  max-width: none !important;
+}
