@@ -2,7 +2,7 @@ import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState
 import type { MouseEvent, MutableRefObject, ReactNode } from 'react'
 import { Check, ChevronDown, ClipboardCheck, CloudUpload, Copy, FileImage, FileText, Maximize2, Minus, Plus, RefreshCw, RotateCcw, Save, Sparkles, Trash2, UploadCloud, XCircle } from 'lucide-react'
 import { api, previewUrl as documentPreviewUrl, thumbnailUrl as documentThumbnailUrl } from '../api/client'
-import type { Document } from '../types'
+import type { Collection, CustomFieldDefinition, Document } from '../types'
 import { useI18n } from '../i18n'
 
 interface DashboardPageProps {
@@ -47,6 +47,7 @@ interface MetadataFormState {
   currency: string
   tags: string[]
   notes: string
+  customFields: Record<string, string>
 }
 
 interface FieldSourceInfo {
@@ -90,7 +91,8 @@ const sampleMetadata: MetadataFormState = {
   taxAmount: '28,05',
   currency: 'EUR',
   tags: ['invoice', '2020', 'supplier:demo'],
-  notes: ''
+  notes: '',
+  customFields: {}
 }
 
 const seededFiles: UploadDraftFile[] = [
@@ -169,6 +171,8 @@ export default function DashboardPage({ onOpenDocument }: DashboardPageProps) {
   const { t } = useI18n()
   const [files, setFiles] = useState<UploadDraftFile[]>(seededFiles)
   const [selectedId, setSelectedId] = useState(seededFiles[0].id)
+  const [collections, setCollections] = useState<Collection[]>([])
+  const [customFieldDefinitions, setCustomFieldDefinitions] = useState<CustomFieldDefinition[]>([])
   const [collectionName, setCollectionNameState] = useState(sampleMetadata.collection)
   const [processingOptions, setProcessingOptions] = useState<ProcessingOptionsState>(defaultProcessingOptions)
   const [sharedTitle, setSharedTitle] = useState<SharedTitleState>({ sharedTitleBase: '', applySharedTitleToDocuments: false })
@@ -182,6 +186,30 @@ export default function DashboardPage({ onOpenDocument }: DashboardPageProps) {
   const selected = useMemo(() => files.find((file) => file.id === selectedId) || files[0], [files, selectedId])
   const metadata = selected?.metadata || sampleMetadata
   const qwenAvailable = qwenStatus === 'available'
+  const selectedCollection = useMemo(() => collections.find((item) => item.name === collectionName) || null, [collections, collectionName])
+
+  useEffect(() => {
+    void api.collections().then(setCollections).catch(() => setCollections([]))
+  }, [])
+
+  useEffect(() => {
+    if (!selectedCollection) {
+      setCustomFieldDefinitions([])
+      return
+    }
+    void api.customFields(selectedCollection.id).then(setCustomFieldDefinitions).catch(() => setCustomFieldDefinitions([]))
+  }, [selectedCollection?.id])
+
+  useEffect(() => {
+    if (!customFieldDefinitions.length) return
+    setFiles((current) => current.map((file) => ({
+      ...file,
+      metadata: {
+        ...file.metadata,
+        customFields: ensureCustomFieldDefaults(file.metadata.customFields, customFieldDefinitions),
+      },
+    })))
+  }, [customFieldDefinitions])
 
   useEffect(() => {
     void api.integrations().then((summary) => {
@@ -226,7 +254,7 @@ export default function DashboardPage({ onOpenDocument }: DashboardPageProps) {
         extractedTitle: file.name.replace(/\.[^.]+$/, ''),
         ocrSnippet: 'Queued for OCR. Select Run OCR after uploading the document.',
         confidence: 0,
-        metadata: { ...sampleMetadata, collection: collectionName, title: '', correspondent: '', recipient: '', date: '', invoiceNo: '', amount: '', taxAmount: '', notes: '' },
+        metadata: { ...sampleMetadata, collection: collectionName, title: '', correspondent: '', recipient: '', date: '', invoiceNo: '', amount: '', taxAmount: '', notes: '', customFields: ensureCustomFieldDefaults({}, customFieldDefinitions) },
         qwenRunStatus: 'not_run' as const,
         qwenMessage: 'Qwen will fill missing metadata after OCR when enabled.',
         qwenSuggestedFolder: '',
@@ -257,12 +285,18 @@ export default function DashboardPage({ onOpenDocument }: DashboardPageProps) {
       apply_shared_title_to_documents: sharedTitle.applySharedTitleToDocuments,
       folder_path: folderPath
     }))
-    form.set('document_metadata_json', JSON.stringify(realItems.map((item) => toDocumentMetadataPayload(item.metadata, item.metadataSources, processingOptions))))
+    form.set('document_metadata_json', JSON.stringify(realItems.map((item) => toDocumentMetadataPayload(item.metadata, item.metadataSources, processingOptions, customFieldDefinitions))))
     realItems.forEach((item) => item.file && form.append('files', item.file))
     try {
       const batch = await api.uploadBatch(form)
       const first = batch.documents[0]
-      setFiles(batch.documents.map((document, index) => draftFromDocument(document, index)))
+      setFiles(batch.documents.map((document, index) => ({
+        ...draftFromDocument(document, index),
+        metadata: {
+          ...draftFromDocument(document, index).metadata,
+          customFields: realItems[index]?.metadata.customFields || {},
+        },
+      })))
       setUploadedRecordId(first?.record_id || null)
       if (first?.collection_name) setCollectionNameState(first.collection_name)
       if (first) setSelectedId(first.id)
@@ -403,8 +437,8 @@ export default function DashboardPage({ onOpenDocument }: DashboardPageProps) {
             onExtract={() => void runSelected('metadata')}
             onReview={() => void runSelected('review')}
           />
-          <RecordSetupCard collectionName={collectionName} setCollectionName={setCollectionName} value={sharedTitle} setValue={setSharedTitle} folderPath={folderPath} setFolderPath={setFolderPath} />
-          <MetadataForm metadata={metadata} setMetadata={updateSelectedMetadata} busy={busy} selected={selected} collectionName={collectionName} setCollectionName={setCollectionName} />
+          <RecordSetupCard collectionName={collectionName} setCollectionName={setCollectionName} value={sharedTitle} setValue={setSharedTitle} folderPath={folderPath} setFolderPath={setFolderPath} collections={collections} />
+          <MetadataForm metadata={metadata} setMetadata={updateSelectedMetadata} busy={busy} selected={selected} collectionName={collectionName} setCollectionName={setCollectionName} customFieldDefinitions={customFieldDefinitions} />
           <OCRTextPreview selected={selected} />
           <ProcessingOptionsPanel options={processingOptions} setOptions={setProcessingOptions} qwenStatus={qwenStatus} />
         </aside>
@@ -451,7 +485,7 @@ function UploadDropzone({ inputRef, files, busy, onFiles }: { inputRef: MutableR
   )
 }
 
-function RecordSetupCard({ collectionName, setCollectionName, value, setValue, folderPath, setFolderPath }: { collectionName: string; setCollectionName: (value: string) => void; value: SharedTitleState; setValue: (value: SharedTitleState) => void; folderPath: string; setFolderPath: (value: string) => void }) {
+function RecordSetupCard({ collectionName, setCollectionName, value, setValue, folderPath, setFolderPath, collections }: { collectionName: string; setCollectionName: (value: string) => void; value: SharedTitleState; setValue: (value: SharedTitleState) => void; folderPath: string; setFolderPath: (value: string) => void; collections: Collection[] }) {
   const { t } = useI18n()
   const active = value.applySharedTitleToDocuments && value.sharedTitleBase.trim()
   const example = collectionName === 'Belege'
@@ -465,10 +499,9 @@ function RecordSetupCard({ collectionName, setCollectionName, value, setValue, f
         <label>
           {t('dashboard.collection')}
           <select value={collectionName} onChange={(event) => setCollectionName(event.target.value)}>
-            <option>Dokumente</option>
-            <option>Eingangsrechnung</option>
-            <option>Ausgangsrechnung</option>
-            <option>Belege</option>
+            {(collections.length ? collections : [{ name: 'Dokumente' }, { name: 'Eingangsrechnung' }, { name: 'Ausgangsrechnung' }, { name: 'Belege' }]).map((collection) => (
+              <option key={collection.name} value={collection.name}>{collection.name}</option>
+            ))}
           </select>
         </label>
         <label>
@@ -501,14 +534,15 @@ function RecordSetupCard({ collectionName, setCollectionName, value, setValue, f
   )
 }
 
-function MetadataForm({ metadata, setMetadata, busy, selected, collectionName, setCollectionName }: { metadata: MetadataFormState; setMetadata: (value: MetadataFormState) => void; busy: boolean; selected?: UploadDraftFile; collectionName: string; setCollectionName: (value: string) => void }) {
+function MetadataForm({ metadata, setMetadata, busy, selected, collectionName, setCollectionName, customFieldDefinitions }: { metadata: MetadataFormState; setMetadata: (value: MetadataFormState) => void; busy: boolean; selected?: UploadDraftFile; collectionName: string; setCollectionName: (value: string) => void; customFieldDefinitions: CustomFieldDefinition[] }) {
   const { t } = useI18n()
   const set = (key: keyof MetadataFormState, value: string | string[]) => setMetadata({ ...metadata, [key]: value })
+  const setCustomField = (slug: string, value: string) => setMetadata({ ...metadata, customFields: { ...(metadata.customFields || {}), [slug]: value } })
   return (
     <details className="workflow-card metadata-card metadata-collapsible-panel">
       <summary><span><ChevronDown size={16} /> {t('dashboard.documentInformation')}</span></summary>
       <div className="metadata-grid">
-        <FormField label={t('dashboard.recordCollection')} source={selected?.metadataSources.collection}><select value={collectionName} onChange={(event) => setCollectionName(event.target.value)}><option>Dokumente</option><option>Eingangsrechnung</option><option>Ausgangsrechnung</option><option>Belege</option></select></FormField>
+        <FormField label={t('dashboard.recordCollection')} source={selected?.metadataSources.collection}><input value={collectionName} onChange={(event) => setCollectionName(event.target.value)} placeholder="Dokumente" /></FormField>
         <FormField label={t('fields.documentType')} source={selected?.metadataSources.documentType}><select value={metadata.documentType} onChange={(event) => set('documentType', event.target.value)}><option value="">{t('common.none')}</option><option>Rechnung</option><option>Beleg</option><option>Vertrag</option><option>Dokument</option></select></FormField>
         <FormField label={t('fields.status')} source={selected?.metadataSources.status}><select value={metadata.status} onChange={(event) => set('status', event.target.value)}><option>{t('status.new')}</option><option>{t('status.ocrRunning')}</option><option>{t('status.needsReview')}</option><option>{t('status.synced')}</option></select></FormField>
         <FormField label={t('fields.title')} source={selected?.metadataSources.title} wide><input value={metadata.title} onChange={(event) => set('title', event.target.value)} placeholder={t('dashboard.optionalGeneratedLater')} /></FormField>
@@ -520,6 +554,12 @@ function MetadataForm({ metadata, setMetadata, busy, selected, collectionName, s
         <FormField label={t('fields.taxAmount')} source={selected?.metadataSources.taxAmount}><input value={metadata.taxAmount} onChange={(event) => set('taxAmount', event.target.value)} placeholder={t('common.optional')} /></FormField>
         <FormField label={t('fields.currency')}><select value={metadata.currency} onChange={(event) => set('currency', event.target.value)}><option>EUR</option><option>USD</option><option>CHF</option></select></FormField>
         <FormField label={t('fields.tags')}><TagInput tags={metadata.tags} onChange={(tags) => set('tags', tags)} /></FormField>
+        {customFieldDefinitions.length > 0 && <div className="metadata-section-label">{t('schemas.customFields')}</div>}
+        {customFieldDefinitions.map((field) => (
+          <FormField key={field.id} label={`${field.name}${field.required ? ' *' : ''}`}>
+            <CustomFieldInput field={field} value={(metadata.customFields || {})[field.slug] ?? ''} onChange={(value) => setCustomField(field.slug, value)} />
+          </FormField>
+        ))}
         <FormField label={t('fields.notesDescription')}><textarea value={metadata.notes} onChange={(event) => set('notes', event.target.value)} placeholder={t('dashboard.notesPlaceholder')} /></FormField>
       </div>
       <div className="button-row form-actions">
@@ -529,6 +569,26 @@ function MetadataForm({ metadata, setMetadata, busy, selected, collectionName, s
       </div>
     </details>
   )
+}
+
+function CustomFieldInput({ field, value, onChange }: { field: CustomFieldDefinition; value: string; onChange: (value: string) => void }) {
+  const options = Array.isArray(field.enum_options) ? field.enum_options.map(String).filter(Boolean) : []
+  if (field.field_type === 'boolean') {
+    return <select value={value} onChange={(event) => onChange(event.target.value)}><option value="">—</option><option value="true">true</option><option value="false">false</option></select>
+  }
+  if (field.field_type === 'select') {
+    return <select value={value} onChange={(event) => onChange(event.target.value)}><option value="">—</option>{options.map((option) => <option key={option} value={option}>{option}</option>)}</select>
+  }
+  if (field.field_type === 'text') {
+    return <textarea value={value} onChange={(event) => onChange(event.target.value)} placeholder={field.default_value || ''} />
+  }
+  if (field.field_type === 'number') {
+    return <input type="number" value={value} onChange={(event) => onChange(event.target.value)} placeholder={field.default_value || ''} />
+  }
+  if (field.field_type === 'date') {
+    return <input type="date" value={value} onChange={(event) => onChange(event.target.value)} />
+  }
+  return <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={field.default_value || ''} />
 }
 
 function ProcessingProfilePanel({ options, setOptions, qwenStatus }: { options: ProcessingOptionsState; setOptions: (value: ProcessingOptionsState) => void; qwenStatus: QwenStatus }) {
@@ -1009,7 +1069,7 @@ function qwenMessageFromDocument(document: Document): string {
   return 'Qwen has not produced metadata candidates yet.'
 }
 
-function toDocumentMetadataPayload(metadata: MetadataFormState, sources: Record<string, FieldSourceInfo>, options: ProcessingOptionsState) {
+function toDocumentMetadataPayload(metadata: MetadataFormState, sources: Record<string, FieldSourceInfo>, options: ProcessingOptionsState, customFieldDefinitions: CustomFieldDefinition[] = []) {
   return {
     title: metadata.title,
     sender: metadata.correspondent,
@@ -1022,6 +1082,7 @@ function toDocumentMetadataPayload(metadata: MetadataFormState, sources: Record<
     document_type: metadata.documentType,
     tags: metadata.tags,
     notes: metadata.notes,
+    custom_fields: Object.fromEntries(customFieldDefinitions.map((field) => [field.slug, metadata.customFields?.[field.slug] ?? '']).filter(([, value]) => String(value || '').trim() !== '')),
     field_locks: Object.fromEntries(Object.entries(sources).filter(([, info]) => info.source === 'manual' && options.preserveLockedFields).map(([field]) => [metadataFieldToCoreKey(field), true])),
   }
 }
@@ -1049,8 +1110,23 @@ function fromDocumentMetadata(document: { collection_name: string; extracted_tit
     taxAmount: String(document.metadata_json.tax_amount || ''),
     currency: String(document.metadata_json.currency || 'EUR'),
     tags: Array.isArray(document.metadata_json.tags) ? document.metadata_json.tags.map(String) : [],
-    notes: String(document.metadata_json.notes || '')
+    notes: String(document.metadata_json.notes || ''),
+    customFields: manualCustomFieldsFromMetadata(document.metadata_json)
   }
+}
+
+function manualCustomFieldsFromMetadata(metadata: Record<string, unknown>): Record<string, string> {
+  const manual = metadata.manual_upload_metadata
+  if (manual && typeof manual === 'object') {
+    const fields = (manual as Record<string, unknown>).custom_fields || (manual as Record<string, unknown>).customFields
+    if (fields && typeof fields === 'object') return Object.fromEntries(Object.entries(fields as Record<string, unknown>).map(([key, value]) => [key, value == null ? '' : String(value)]))
+  }
+  return {}
+}
+
+function ensureCustomFieldDefaults(values: Record<string, string> | undefined, definitions: CustomFieldDefinition[]): Record<string, string> {
+  const current = values || {}
+  return Object.fromEntries(definitions.map((field) => [field.slug, current[field.slug] ?? (field.default_value || '')]))
 }
 
 function fromDocumentSources(value: Record<string, unknown>): Record<string, FieldSourceInfo> {

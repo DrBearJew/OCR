@@ -10928,6 +10928,39 @@ a.icon-button:not(.danger-button):hover {
   color: #fff;
 }
 
+
+.metadata-section-label {
+  grid-column: 1 / -1;
+  margin-top: 0.35rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  color: #93c5fd;
+  font-size: 0.82rem;
+  font-weight: 950;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.schema-row-actions {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+.schema-page .schema-edit-button {
+  width: 2.1rem;
+  min-width: 2.1rem;
+  min-height: 2.1rem;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border-color: rgba(96, 165, 250, 0.36);
+  background: rgba(30, 64, 175, 0.35);
+  color: #bfdbfe;
+}
+.schema-page .schema-edit-button:hover:not(:disabled) {
+  border-color: rgba(96, 165, 250, 0.76);
+  background: rgba(37, 99, 235, 0.72);
+  color: #fff;
+}
 .schema-page .metadata-delete-button {
   width: 2.1rem;
   min-width: 2.1rem;

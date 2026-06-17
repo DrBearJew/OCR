@@ -154,6 +154,10 @@ export const api = {
   customFields: (collectionId: string) => request<CustomFieldDefinition[]>(`/api/collections/${collectionId}/fields`),
   createCustomField: (collectionId: string, payload: Partial<CustomFieldDefinition>) =>
     request<CustomFieldDefinition>(`/api/collections/${collectionId}/fields`, { method: 'POST', body: JSON.stringify(payload) }),
+  updateCustomField: (collectionId: string, fieldId: string, payload: Partial<CustomFieldDefinition>) =>
+    request<CustomFieldDefinition>(`/api/collections/${collectionId}/fields/${fieldId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteCustomField: (collectionId: string, fieldId: string) =>
+    request<{ ok: boolean }>(`/api/collections/${collectionId}/fields/${fieldId}`, { method: 'DELETE' }),
   records: () => request<RecordRow[]>('/api/records'),
   recordsPage: (params: Record<string, string> = {}) => {
     const query = new URLSearchParams(params)

@@ -12,11 +12,11 @@ from sqlalchemy.orm import Session, selectinload
 from app.auth import require_admin
 from app.config import get_settings
 from app.db import get_db
-from app.models import Batch, Document, Folder
+from app.models import Batch, Document, FieldValueSource, Folder
 from app.schemas import BatchDetail, BatchRead
 from app.services.document_assets import generate_thumbnail, inspect_page_count, virus_scan_placeholder
 from app.services.events import record_event
-from app.services.collections import create_record_for_upload, ensure_collection, update_record_status
+from app.services.collections import create_record_for_upload, ensure_collection, update_record_status, upsert_custom_field_value
 from app.services.folders import ensure_folder_path
 from app.services.processing import mark_duplicate_document, queue_full_process, queue_ocr, reserve_processing_task, update_batch_status
 from app.services.storage import LocalStorage
@@ -93,7 +93,7 @@ async def upload_batch(
             )
             db.add(document)
             db.flush()
-            _apply_manual_upload_metadata(document, metadata)
+            _apply_manual_upload_metadata(db, document, collection, metadata)
             document.thumbnail_path = generate_thumbnail(stored["path"], upload.content_type, document.id)
             record_event(db, document, "uploaded", "Document uploaded", metadata={"page_count": page_count})
             record_event(db, document, "stored", "Original file stored on local filesystem", metadata={"storage_path": stored["path"], "sha256": stored["sha256"], "size": stored["size"]})
@@ -184,7 +184,7 @@ def _load_document_metadata(value: str | None, expected_count: int) -> list[dict
     return result[:expected_count]
 
 
-def _apply_manual_upload_metadata(document: Document, metadata: dict[str, Any]) -> None:
+def _apply_manual_upload_metadata(db: Session, document: Document, collection, metadata: dict[str, Any]) -> None:
     field_map = {
         "title": "manual_title_override",
         "manual_title_override": "manual_title_override",
@@ -212,7 +212,26 @@ def _apply_manual_upload_metadata(document: Document, metadata: dict[str, Any]) 
     locks = metadata.get("field_locks_json") or metadata.get("field_locks") or {}
     if isinstance(locks, dict):
         document.field_locks_json = locks
-    extra = {key: value for key, value in metadata.items() if key not in field_map and key not in {"metadata_locked", "field_locks_json", "field_locks"}}
+    custom_fields = metadata.get("custom_fields") or metadata.get("customFields") or {}
+    if isinstance(custom_fields, dict) and custom_fields:
+        fields_by_slug = {field.slug: field for field in collection.custom_fields}
+        fields_by_name = {field.name: field for field in collection.custom_fields}
+        for raw_key, raw_value in custom_fields.items():
+            if raw_value is None or str(raw_value).strip() == "":
+                continue
+            field = fields_by_slug.get(str(raw_key)) or fields_by_name.get(str(raw_key))
+            if field is None:
+                continue
+            upsert_custom_field_value(
+                db,
+                document,
+                field,
+                raw_value,
+                source=FieldValueSource.manual,
+                confidence=100,
+                force=True,
+            )
+    extra = {key: value for key, value in metadata.items() if key not in field_map and key not in {"custom_fields", "customFields", "metadata_locked", "field_locks_json", "field_locks"}}
     if extra:
         document.metadata_json = {**(document.metadata_json or {}), "manual_upload_metadata": extra}
     document.metadata_sources_json = sources

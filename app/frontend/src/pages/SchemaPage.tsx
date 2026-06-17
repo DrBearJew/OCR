@@ -1,10 +1,11 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { api } from '../api/client'
 import type { Collection, CustomFieldDefinition, CustomFieldType, PaperlessMetadata } from '../types'
 import { useI18n } from '../i18n'
 
 const fieldTypes: CustomFieldType[] = ['string', 'text', 'number', 'date', 'boolean', 'select']
+const emptyFieldForm = { name: '', slug: '', enumOptions: '', defaultValue: '' }
 
 export default function SchemaPage() {
   const { t } = useI18n()
@@ -13,6 +14,8 @@ export default function SchemaPage() {
   const [fields, setFields] = useState<CustomFieldDefinition[]>([])
   const [name, setName] = useState('')
   const [slug, setSlug] = useState('')
+  const [defaultValue, setDefaultValue] = useState('')
+  const [editingFieldId, setEditingFieldId] = useState('')
   const [fieldType, setFieldType] = useState<CustomFieldType>('string')
   const [required, setRequired] = useState(false)
   const [searchable, setSearchable] = useState(true)
@@ -51,19 +54,58 @@ export default function SchemaPage() {
   async function addField(event: FormEvent) {
     event.preventDefault()
     if (!selected) return
-    await api.createCustomField(selected, {
+    const payload = {
       name,
       slug,
       field_type: fieldType,
       required,
       searchable,
+      default_value: defaultValue.trim() || null,
       enum_options: enumOptions.split(',').map((item) => item.trim()).filter(Boolean),
-      display_order: fields.length + 1
-    })
-    setName('')
-    setSlug('')
-    setEnumOptions('')
+      display_order: editingFieldId ? fields.find((field) => field.id === editingFieldId)?.display_order || fields.length + 1 : fields.length + 1
+    }
+    if (editingFieldId) await api.updateCustomField(selected, editingFieldId, payload)
+    else await api.createCustomField(selected, payload)
+    resetFieldForm()
     setFields(await api.customFields(selected))
+  }
+
+  function resetFieldForm() {
+    setName(emptyFieldForm.name)
+    setSlug(emptyFieldForm.slug)
+    setDefaultValue(emptyFieldForm.defaultValue)
+    setEnumOptions(emptyFieldForm.enumOptions)
+    setFieldType('string')
+    setRequired(false)
+    setSearchable(true)
+    setEditingFieldId('')
+  }
+
+  function editField(field: CustomFieldDefinition) {
+    setEditingFieldId(field.id)
+    setName(field.name)
+    setSlug(field.slug)
+    setFieldType(field.field_type)
+    setRequired(field.required)
+    setSearchable(field.searchable)
+    setDefaultValue(field.default_value || '')
+    setEnumOptions(Array.isArray(field.enum_options) ? field.enum_options.map(String).join(', ') : '')
+  }
+
+  async function deleteField(field: CustomFieldDefinition) {
+    if (!selected) return
+    if (!confirm(t('schemas.deleteFieldConfirm', 'Delete field "{name}"? Existing values for this field will be removed.').replace('{name}', field.name))) return
+    setError('')
+    setBusyDelete(`field:${field.id}`)
+    try {
+      await api.deleteCustomField(selected, field.id)
+      if (editingFieldId === field.id) resetFieldForm()
+      setFields(await api.customFields(selected))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('schemas.deleteFieldError', 'Could not delete field.'))
+    } finally {
+      setBusyDelete('')
+    }
   }
 
   async function addCollection(event: FormEvent) {
@@ -171,13 +213,15 @@ export default function SchemaPage() {
                 {fieldTypes.map((type) => <option key={type}>{type}</option>)}
               </select>
               <input placeholder={t('schemas.enumOptions')} value={enumOptions} onChange={(event) => setEnumOptions(event.target.value)} />
+              <input placeholder={t('schemas.defaultValue', 'Default value')} value={defaultValue} onChange={(event) => setDefaultValue(event.target.value)} />
               <label className="check"><input type="checkbox" checked={required} onChange={(event) => setRequired(event.target.checked)} /> {t('schemas.required')}</label>
               <label className="check"><input type="checkbox" checked={searchable} onChange={(event) => setSearchable(event.target.checked)} /> {t('schemas.searchable')}</label>
-              <button className="primary"><Plus size={18} /> {t('schemas.addField')}</button>
+              <button className="primary"><Plus size={18} /> {editingFieldId ? t('schemas.saveField', 'Save field') : t('schemas.addField')}</button>
+              {editingFieldId && <button type="button" onClick={resetFieldForm}>{t('common.cancel')}</button>}
             </form>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>{t('schemas.order')}</th><th>{t('schemas.name')}</th><th>{t('schemas.slug')}</th><th>{t('schemas.type')}</th><th>{t('schemas.required')}</th><th>{t('schemas.searchable')}</th></tr></thead>
+                <thead><tr><th>{t('schemas.order')}</th><th>{t('schemas.name')}</th><th>{t('schemas.slug')}</th><th>{t('schemas.type')}</th><th>{t('schemas.defaultValue', 'Default value')}</th><th>{t('schemas.required')}</th><th>{t('schemas.searchable')}</th><th>{t('common.actions')}</th></tr></thead>
                 <tbody>
                   {fields.map((field) => (
                     <tr key={field.id}>
@@ -185,8 +229,13 @@ export default function SchemaPage() {
                       <td>{field.name}</td>
                       <td>{field.slug}</td>
                       <td>{field.field_type}</td>
+                      <td>{field.default_value || ''}</td>
                       <td>{field.required ? t('common.yes') : t('common.no')}</td>
                       <td>{field.searchable ? t('common.yes') : t('common.no')}</td>
+                      <td className="schema-row-actions">
+                        <button type="button" className="schema-edit-button" title={t('schemas.editField', 'Edit field')} onClick={() => editField(field)}><Pencil size={14} /></button>
+                        <button type="button" className="schema-delete-button metadata-delete-button" title={t('schemas.deleteField', 'Delete field')} disabled={busyDelete === `field:${field.id}`} onClick={() => void deleteField(field)}><Trash2 size={14} /></button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
