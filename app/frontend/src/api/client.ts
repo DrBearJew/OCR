@@ -1,4 +1,4 @@
-import type { ActivityItem, AdminActionResult, Batch, BatchDetail, Collection, CollectionPageData, CollectionSummary, CustomFieldDefinition, DashboardSummary, Document, DocumentListPage, DocumentCustomFieldValue, DocumentEvent, DocumentPage, FailedReviewSummary, Folder, FolderContentsPage, IngestionJob, IngestionSource, IntegrationSummary, ModelEndpointTestResult, ModelSetup, JobInfo, PaperlessMetadata, ProcessingHook, ProcessingSummary, RecordListPage, RecordRow, SavedView, SearchResult } from '../types'
+import type { ActivityItem, AdminActionResult, Batch, BatchDetail, Collection, CollectionPageData, CollectionSummary, CustomFieldDefinition, DashboardSummary, Document, DocumentListPage, DocumentCustomFieldValue, DocumentEvent, DocumentPage, FailedReviewSummary, Folder, FolderContentsPage, IngestionJob, IngestionSource, IntegrationSummary, ModelEndpointTestResult, ModelSetup, JobInfo, PaperlessMetadata, ProcessingHook, ProcessingSummary, RecordListPage, RecordRow, SavedView, SearchResult, SearchResultPage } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 const TOKEN_KEY = 'dokocr_token'
@@ -68,6 +68,49 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new Error(text || response.statusText)
   }
   return response.json() as Promise<T>
+}
+
+interface SearchParams {
+  q: string
+  collection?: string
+  status?: string
+  filename?: string
+  title?: string
+  dateFrom?: string
+  dateTo?: string
+  customField?: string
+  customValue?: string
+  correspondentId?: string
+  documentTypeId?: string
+  tagId?: string
+  storagePathId?: string
+  folderId?: string
+  ocrMode?: string
+  reviewState?: string
+  limit?: string
+  cursor?: string
+}
+
+function searchParams(params: SearchParams) {
+  const query = new URLSearchParams({ q: params.q })
+  if (params.collection) query.set('collection_name', params.collection)
+  if (params.status) query.set('status', params.status)
+  if (params.filename) query.set('filename', params.filename)
+  if (params.title) query.set('title', params.title)
+  if (params.dateFrom) query.set('date_from', params.dateFrom)
+  if (params.dateTo) query.set('date_to', params.dateTo)
+  if (params.customField) query.set('custom_field', params.customField)
+  if (params.customValue) query.set('custom_value', params.customValue)
+  if (params.correspondentId) query.set('correspondent_id', params.correspondentId)
+  if (params.documentTypeId) query.set('document_type_id', params.documentTypeId)
+  if (params.tagId) query.set('tag_id', params.tagId)
+  if (params.storagePathId) query.set('storage_path_id', params.storagePathId)
+  if (params.folderId) query.set('folder_id', params.folderId)
+  if (params.ocrMode) query.set('ocr_mode', params.ocrMode)
+  if (params.reviewState) query.set('review_state', params.reviewState)
+  if (params.limit) query.set('limit', params.limit)
+  if (params.cursor) query.set('cursor', params.cursor)
+  return query
 }
 
 export async function login(username: string, password: string): Promise<void> {
@@ -182,24 +225,13 @@ export const api = {
   },
   bulkDocuments: (payload: Record<string, unknown>) =>
     request<Record<string, unknown>>('/api/documents/bulk', { method: 'POST', body: JSON.stringify(payload) }),
-  search: (params: { q: string; collection?: string; status?: string; filename?: string; title?: string; dateFrom?: string; dateTo?: string; customField?: string; customValue?: string; correspondentId?: string; documentTypeId?: string; tagId?: string; storagePathId?: string; folderId?: string; ocrMode?: string; reviewState?: string }) => {
-    const query = new URLSearchParams({ q: params.q })
-    if (params.collection) query.set('collection_name', params.collection)
-    if (params.status) query.set('status', params.status)
-    if (params.filename) query.set('filename', params.filename)
-    if (params.title) query.set('title', params.title)
-    if (params.dateFrom) query.set('date_from', params.dateFrom)
-    if (params.dateTo) query.set('date_to', params.dateTo)
-    if (params.customField) query.set('custom_field', params.customField)
-    if (params.customValue) query.set('custom_value', params.customValue)
-    if (params.correspondentId) query.set('correspondent_id', params.correspondentId)
-    if (params.documentTypeId) query.set('document_type_id', params.documentTypeId)
-    if (params.tagId) query.set('tag_id', params.tagId)
-    if (params.storagePathId) query.set('storage_path_id', params.storagePathId)
-    if (params.folderId) query.set('folder_id', params.folderId)
-    if (params.ocrMode) query.set('ocr_mode', params.ocrMode)
-    if (params.reviewState) query.set('review_state', params.reviewState)
+  search: (params: SearchParams) => {
+    const query = searchParams(params)
     return request<SearchResult[]>(`/api/search?${query.toString()}`)
+  },
+  searchPage: (params: SearchParams) => {
+    const query = searchParams(params)
+    return request<SearchResultPage>(`/api/search/page?${query.toString()}`)
   },
   savedViews: (section = '') => request<SavedView[]>(`/api/saved-views${section ? `?section=${encodeURIComponent(section)}` : ''}`),
   createSavedView: (payload: Partial<SavedView>) => request<SavedView>('/api/saved-views', { method: 'POST', body: JSON.stringify(payload) }),

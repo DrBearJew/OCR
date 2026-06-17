@@ -7,14 +7,20 @@ import StatusBadge from '../components/StatusBadge'
 import type { CollectionPageData, Document, RecordRow } from '../types'
 import { useI18n } from '../i18n'
 
+const COLLECTION_RECORD_PAGE_LIMIT = 50
+
 export default function CollectionDetailPage({ slug, onOpenRecord, onOpenDocument }: { slug: string; onOpenRecord: (id: string) => void; onOpenDocument: (id: string) => void }) {
   const { t, language } = useI18n()
   const [data, setData] = useState<CollectionPageData | null>(null)
+  const [records, setRecords] = useState<RecordRow[]>([])
   const [status, setStatus] = useState('')
   const [query, setQuery] = useState('')
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [totalEstimate, setTotalEstimate] = useState(0)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState('')
 
-  async function load() {
+  async function loadCollection() {
     setError('')
     try {
       setData(await api.collectionPage(slug))
@@ -23,16 +29,45 @@ export default function CollectionDetailPage({ slug, onOpenRecord, onOpenDocumen
     }
   }
 
-  useEffect(() => { void load() }, [slug])
+  async function loadRecords(append = false, cursor: string | null = null, nextStatus = status, nextQuery = query) {
+    setError('')
+    if (append) setLoadingMore(true)
+    try {
+      const params: Record<string, string> = { collection_slug: slug, limit: String(COLLECTION_RECORD_PAGE_LIMIT) }
+      if (nextStatus) params.status_filter = nextStatus
+      if (nextQuery.trim()) params.q = nextQuery.trim()
+      if (cursor) params.cursor = cursor
+      const page = await api.recordsPage(params)
+      setRecords((current) => append ? [...current, ...page.items] : page.items)
+      setNextCursor(page.next_cursor)
+      setTotalEstimate(page.total_estimate)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load collection records')
+    } finally {
+      if (append) setLoadingMore(false)
+    }
+  }
 
-  const records = (data?.records || []).filter((record) => {
-    const matchesStatus = !status || record.status === status
-    const needle = query.trim().toLowerCase()
-    const matchesQuery = !needle || record.title.toLowerCase().includes(needle) || record.documents.some((document) =>
-      document.original_filename.toLowerCase().includes(needle) || (document.extracted_title || '').toLowerCase().includes(needle)
-    )
-    return matchesStatus && matchesQuery
-  })
+  async function refresh() {
+    await Promise.all([loadCollection(), loadRecords(false, null)])
+  }
+
+  function loadMoreCollectionRecords() {
+    if (!nextCursor || loadingMore) return
+    void loadRecords(true, nextCursor)
+  }
+
+  useEffect(() => {
+    setRecords([])
+    setNextCursor(null)
+    setTotalEstimate(0)
+    void refresh()
+  }, [slug])
+
+  useEffect(() => {
+    void loadRecords(false, null, status, query)
+  }, [status, query])
+
   const totalDocs = records.reduce((sum, record) => sum + record.document_count, 0)
 
   return (
@@ -44,7 +79,7 @@ export default function CollectionDetailPage({ slug, onOpenRecord, onOpenDocumen
         </div>
         <div className="button-row">
           <button><Settings2 size={17} /> Schema</button>
-          <button className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={18} /></button>
+          <button className="icon-button" title={t('common.refresh')} onClick={() => void refresh()}><RefreshCw size={18} /></button>
         </div>
       </header>
       {error && <p className="error">{error}</p>}
@@ -52,10 +87,10 @@ export default function CollectionDetailPage({ slug, onOpenRecord, onOpenDocumen
         <div>
           <span className="eyebrow">{t('dashboard.collection')}</span>
           <h2>{data?.collection.name || slug}</h2>
-          <p>{records.length} visible records, {totalDocs} searchable document OCR units.</p>
+          <p>{records.length} / {totalEstimate} {t('common.records')} · {totalDocs} {t('common.documents')}</p>
         </div>
         <div className="collection-detail-stats">
-          <span><strong>{data?.records.length || 0}</strong> {t('common.records')}</span>
+          <span><strong>{totalEstimate}</strong> {t('common.records')}</span>
           <span><strong>{totalDocs}</strong> {t('common.documents')}</span>
           <span><strong>{data?.status_counts.needs_review || 0}</strong> {t('common.needsReview')}</span>
           <span><strong>{data?.status_counts.complete || 0}</strong> {t('common.complete')}</span>
@@ -81,6 +116,12 @@ export default function CollectionDetailPage({ slug, onOpenRecord, onOpenDocumen
           {records.map((record) => <CollectionRecordCard key={record.id} record={record} onOpenRecord={onOpenRecord} onOpenDocument={onOpenDocument} />)}
           {!records.length && <p className="muted-empty">{t('records.noMatches')}</p>}
         </div>
+        {nextCursor && (
+          <div className="pagination-footer">
+            <span>{records.length} / {totalEstimate} {t('common.records')}</span>
+            <button onClick={loadMoreCollectionRecords} disabled={loadingMore}>{loadingMore ? t('common.loading') : t('common.loadMore')}</button>
+          </div>
+        )}
       </section>
     </main>
   )

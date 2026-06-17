@@ -114,6 +114,13 @@ export interface SearchResult {
   rank: number
 }
 
+export interface SearchResultPage {
+  items: SearchResult[]
+  limit: number
+  next_cursor: string | null
+  total_estimate: number
+}
+
 export interface Collection {
   id: string
   name: string
@@ -428,4 +435,7 @@ export interface CollectionPageData {
   collection: Pick<Collection, 'id' | 'name' | 'slug' | 'icon' | 'color' | 'display_config'>
   records: RecordRow[]
   status_counts: Record<string, number>
+  limit?: number
+  next_cursor?: string | null
+  total_estimate?: number
 }

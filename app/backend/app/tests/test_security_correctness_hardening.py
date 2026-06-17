@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.api.app_shell import collection_page
 from app.api.collections import create_collection, delete_collection, update_collection
 from app.api.documents import list_documents_page, patch_document
 from app.api.folders import delete_folder, folder_contents, update_folder
@@ -18,7 +19,7 @@ from app.services.folders import create_folder
 from app.services.paperless_metadata import apply_paperless_metadata
 from app.services.processing import is_stale
 from app.services.reconciliation import reconcile_stuck_documents
-from app.services.search import search_documents
+from app.services.search import search_documents, search_documents_page
 from app.services.storage import LocalStorage
 
 
@@ -256,6 +257,17 @@ def test_documents_and_records_page_endpoints_are_keyset_paginated(db_session: S
     assert len(second_records["items"]) == 2
     assert {row["id"] for row in first_records["items"]}.isdisjoint({row["id"] for row in second_records["items"]})
 
+    collection_payload = collection_page("page-schema", db=db_session)
+    assert collection_payload["records"] == []
+    assert collection_payload["total_estimate"] == 4
+
+    first_search = search_documents_page(db_session, "PageNeedle", collection_name="Page Schema", limit=2)
+    assert first_search["total_estimate"] == 4
+    assert len(first_search["items"]) == 2
+    assert first_search["next_cursor"]
+    second_search = search_documents_page(db_session, "PageNeedle", collection_name="Page Schema", limit=2, cursor=first_search["next_cursor"])
+    assert len(second_search["items"]) == 2
+    assert {row.document_id for row in first_search["items"]}.isdisjoint({row.document_id for row in second_search["items"]})
 
 
 def test_search_filters_coerce_enums_and_distinct_combined_filters(db_session: Session, tmp_path: Path) -> None:

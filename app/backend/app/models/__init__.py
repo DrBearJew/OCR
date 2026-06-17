@@ -209,6 +209,7 @@ class Record(Base):
         Index("ix_records_collection_status", "collection_id", "status"),
         Index("ix_records_deleted_updated_id", "deleted_at", "updated_at", "id"),
         Index("ix_records_deleted_folder_updated_id", "deleted_at", "folder_id", "updated_at", "id"),
+        Index("ix_records_deleted_collection_updated_id", "deleted_at", "collection_id", "updated_at", "id"),
     )
 
 

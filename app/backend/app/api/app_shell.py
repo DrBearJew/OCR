@@ -21,7 +21,7 @@ from app.models import (
     StageState,
 )
 from app.schemas import DocumentEventRead, DocumentRead, IngestionJobRead, RecordRead, SavedViewRead, SavedViewWrite
-from app.services.collections import seed_default_collections, slugify, update_record_status
+from app.services.collections import seed_default_collections, slugify
 from app.services.diagnostics import document_completion_diagnostics
 from app.services.integrations import check_celery_workers
 from app.services.processing import is_stale
@@ -207,17 +207,7 @@ def collection_page(slug: str, db: Session = Depends(get_db)) -> dict:
     collection = db.scalars(select(Collection).where(Collection.slug == slug)).first()
     if collection is None:
         raise HTTPException(status_code=404, detail="Collection not found")
-    records = db.scalars(
-        select(Record)
-        .where(Record.collection_id == collection.id)
-        .where(Record.deleted_at.is_(None))
-        .options(selectinload(Record.collection), selectinload(Record.documents))
-        .order_by(Record.updated_at.desc())
-        .limit(200)
-    ).all()
-    for record in records:
-        update_record_status(db, record.id)
-    db.commit()
+    record_count = db.scalar(select(func.count(Record.id)).where(Record.collection_id == collection.id).where(Record.deleted_at.is_(None))) or 0
     return {
         "collection": {
             "id": str(collection.id),
@@ -227,7 +217,10 @@ def collection_page(slug: str, db: Session = Depends(get_db)) -> dict:
             "color": collection.color,
             "display_config": collection.display_config,
         },
-        "records": [RecordRead.model_validate(row).model_dump(mode="json") for row in records],
+        "records": [],
+        "limit": 0,
+        "next_cursor": None,
+        "total_estimate": int(record_count),
         "status_counts": _status_counts_for_collection(db, collection.name),
     }
 

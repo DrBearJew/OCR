@@ -8,6 +8,7 @@ const searchPage = readFileSync(resolve(root, 'src/pages/SearchPage.tsx'), 'utf8
 const documentsPage = readFileSync(resolve(root, 'src/pages/DocumentsPage.tsx'), 'utf8')
 const foldersPage = readFileSync(resolve(root, 'src/pages/FoldersPage.tsx'), 'utf8')
 const collectionsPage = readFileSync(resolve(root, 'src/pages/CollectionsPage.tsx'), 'utf8')
+const collectionDetailPage = readFileSync(resolve(root, 'src/pages/CollectionDetailPage.tsx'), 'utf8')
 const schemaPage = readFileSync(resolve(root, 'src/pages/SchemaPage.tsx'), 'utf8')
 const adminPage = readFileSync(resolve(root, 'src/pages/AdminPage.tsx'), 'utf8')
 const processingPage = readFileSync(resolve(root, 'src/pages/ProcessingPage.tsx'), 'utf8')
@@ -66,6 +67,10 @@ const checks = [
   ['Schemas page exposes create collection action', schemaPage, 'collections.create'],
   ['Records page uses cursor-paginated API', `${client}\n${readFileSync(resolve(root, 'src/pages/RecordListPage.tsx'), 'utf8')}`, 'api.recordsPage'],
   ['Records page exposes Load more pagination', readFileSync(resolve(root, 'src/pages/RecordListPage.tsx'), 'utf8'), 'loadMoreRecords'],
+  ['Collection detail uses paginated records API', collectionDetailPage, 'api.recordsPage'],
+  ['Collection detail exposes Load more pagination', collectionDetailPage, 'loadMoreCollectionRecords'],
+  ['Search page uses cursor-paginated API', `${client}\n${searchPage}`, 'api.searchPage'],
+  ['Search page exposes Load more pagination', searchPage, 'loadMoreSearchResults'],
   ['Schemas page calls createCollection API', schemaPage, 'api.createCollection'],
   ['Schemas page calls deleteCollection API', `${schemaPage}\n${client}`, 'api.deleteCollection'],
   ['Schemas page exposes schema delete button', schemaPage, 'schema-delete-button'],

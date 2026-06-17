@@ -6,6 +6,8 @@ import StatusBadge from '../components/StatusBadge'
 import type { SearchResult } from '../types'
 import { useI18n } from '../i18n'
 
+const SEARCH_PAGE_LIMIT = 25
+
 export default function SearchPage({ onOpenDocument }: { onOpenDocument: (id: string) => void }) {
   const { t } = useI18n()
   const [query, setQuery] = useState('')
@@ -24,16 +26,56 @@ export default function SearchPage({ onOpenDocument }: { onOpenDocument: (id: st
   const [ocrMode, setOcrMode] = useState('')
   const [reviewState, setReviewState] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [totalEstimate, setTotalEstimate] = useState(0)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState('')
+
+  function currentSearchParams(cursor: string | null = null) {
+    return {
+      q: query,
+      collection,
+      status,
+      filename,
+      title,
+      dateFrom,
+      dateTo,
+      customField,
+      customValue,
+      correspondentId,
+      documentTypeId,
+      tagId,
+      storagePathId,
+      ocrMode,
+      reviewState,
+      limit: String(SEARCH_PAGE_LIMIT),
+      ...(cursor ? { cursor } : {}),
+    }
+  }
+
+  async function runSearch(append = false, cursor: string | null = null) {
+    setError('')
+    if (append) setLoadingMore(true)
+    try {
+      const page = await api.searchPage(currentSearchParams(cursor))
+      setResults((current) => append ? [...current, ...page.items] : page.items)
+      setNextCursor(page.next_cursor)
+      setTotalEstimate(page.total_estimate)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('search.failed'))
+    } finally {
+      if (append) setLoadingMore(false)
+    }
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault()
-    setError('')
-    try {
-      setResults(await api.search({ q: query, collection, status, filename, title, dateFrom, dateTo, customField, customValue, correspondentId, documentTypeId, tagId, storagePathId, ocrMode, reviewState }))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('search.failed'))
-    }
+    await runSearch(false, null)
+  }
+
+  function loadMoreSearchResults() {
+    if (!nextCursor || loadingMore) return
+    void runSearch(true, nextCursor)
   }
 
   return (
@@ -113,6 +155,12 @@ export default function SearchPage({ onOpenDocument }: { onOpenDocument: (id: st
           </button>
         ))}
       </div>
+      {nextCursor && (
+        <div className="pagination-footer">
+          <span>{results.length} / {totalEstimate} {t('common.documents')}</span>
+          <button onClick={loadMoreSearchResults} disabled={loadingMore}>{loadingMore ? t('common.loading') : t('common.loadMore')}</button>
+        </div>
+      )}
     </main>
   )
 }

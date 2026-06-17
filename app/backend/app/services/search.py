@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from datetime import date
+import base64
+from datetime import date, datetime
+import json
 import uuid
 
-from sqlalchemy import case, cast, func, or_, select, String, text
+from sqlalchemy import String, and_, case, cast, func, literal, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.models import CustomFieldDefinition, Document, DocumentCustomFieldValue, DocumentState, OCRMode, ReviewState, document_tags
@@ -30,47 +32,103 @@ def search_documents(
     review_state: str | None = None,
     limit: int = 25,
 ) -> list[SearchResult]:
-    query = (query or "").strip()
-    if not query:
-        return []
+    return search_documents_page(
+        db,
+        query,
+        collection_name=collection_name,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+        filename=filename,
+        title=title,
+        custom_field=custom_field,
+        custom_value=custom_value,
+        correspondent_id=correspondent_id,
+        document_type_id=document_type_id,
+        tag_id=tag_id,
+        storage_path_id=storage_path_id,
+        folder_id=folder_id,
+        ocr_mode=ocr_mode,
+        review_state=review_state,
+        limit=limit,
+    )["items"]
 
+
+def search_documents_page(
+    db: Session,
+    query: str,
+    collection_name: str | None = None,
+    status: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    filename: str | None = None,
+    title: str | None = None,
+    custom_field: str | None = None,
+    custom_value: str | None = None,
+    correspondent_id: str | None = None,
+    document_type_id: str | None = None,
+    tag_id: str | None = None,
+    storage_path_id: str | None = None,
+    folder_id: str | None = None,
+    ocr_mode: str | None = None,
+    review_state: str | None = None,
+    limit: int = 25,
+    cursor: str | None = None,
+) -> dict:
+    query = (query or "").strip()
+    normalized_limit = max(1, min(limit, 200))
+    if not query:
+        return {"items": [], "limit": normalized_limit, "next_cursor": None, "total_estimate": 0}
+
+    metadata_rank_expr = _ranking_expression(query)
     if db.bind and db.bind.dialect.name == "postgresql":
         ts_query = func.websearch_to_tsquery("simple", query)
-        snippet = func.ts_headline(
+        text_rank_expr = func.ts_rank(text("documents.ocr_search"), ts_query)
+        snippet_expr = func.ts_headline(
             "simple",
             func.coalesce(Document.ocr_text, ""),
             ts_query,
             "StartSel=<mark>, StopSel=</mark>, MaxWords=24, MinWords=8",
         )
         stmt = (
-            select(Document, snippet.label("snippet"), _ranking_expression(query).label("metadata_rank"))
+            select(Document, snippet_expr.label("snippet"), metadata_rank_expr.label("metadata_rank"), text_rank_expr.label("text_rank"))
             .where(or_(text("documents.ocr_search @@ websearch_to_tsquery('simple', :q)"), _metadata_match_expression(query)))
             .where(Document.deleted_at.is_(None))
             .params(q=query)
-            .order_by(text("metadata_rank DESC"), func.ts_rank(text("documents.ocr_search"), ts_query).desc())
-            .limit(limit)
         )
-        stmt = _apply_filters(stmt, collection_name, status, date_from, date_to, filename, title, custom_field, custom_value, correspondent_id, document_type_id, tag_id, storage_path_id, folder_id, ocr_mode, review_state)
-        rows = db.execute(stmt).all()
-        return [_to_result(document, row_snippet or "", query, float(rank or 0)) for document, row_snippet, rank in rows]
+    else:
+        like = f"%{query.lower()}%"
+        text_rank_expr = literal(0.0)
+        stmt = (
+            select(Document, literal("").label("snippet"), metadata_rank_expr.label("metadata_rank"), text_rank_expr.label("text_rank"))
+            .where(
+                Document.deleted_at.is_(None),
+                or_(
+                    func.lower(func.coalesce(Document.ocr_text, "")).like(like),
+                    func.lower(func.coalesce(Document.extracted_title, "")).like(like),
+                    func.lower(Document.original_filename).like(like),
+                    func.lower(func.coalesce(Document.llm_summary, "")).like(like),
+                    func.lower(cast(Document.llm_keywords, String)).like(like),
+                    func.lower(cast(Document.llm_entities, String)).like(like),
+                    func.lower(func.coalesce(Document.llm_document_purpose, "")).like(like),
+                    func.lower(func.coalesce(Document.llm_suggested_folder, "")).like(like),
+                ),
+            )
+        )
 
-    like = f"%{query.lower()}%"
-    stmt = select(Document).where(
-        Document.deleted_at.is_(None),
-        or_(
-            func.lower(func.coalesce(Document.ocr_text, "")).like(like),
-            func.lower(func.coalesce(Document.extracted_title, "")).like(like),
-            func.lower(Document.original_filename).like(like),
-            func.lower(func.coalesce(Document.llm_summary, "")).like(like),
-            func.lower(cast(Document.llm_keywords, String)).like(like),
-            func.lower(cast(Document.llm_entities, String)).like(like),
-            func.lower(func.coalesce(Document.llm_document_purpose, "")).like(like),
-            func.lower(func.coalesce(Document.llm_suggested_folder, "")).like(like),
-        )
-    )
     stmt = _apply_filters(stmt, collection_name, status, date_from, date_to, filename, title, custom_field, custom_value, correspondent_id, document_type_id, tag_id, storage_path_id, folder_id, ocr_mode, review_state)
-    documents = db.scalars(stmt.order_by(_ranking_expression(query).desc(), Document.created_at.desc()).limit(limit)).all()
-    return [_to_result(document, _plain_snippet(document.ocr_text or "", query), query, _metadata_rank(document, query)) for document in documents]
+    total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0
+    stmt = _apply_search_cursor(stmt, cursor, metadata_rank_expr, text_rank_expr)
+    rows = db.execute(
+        stmt.order_by(metadata_rank_expr.desc(), text_rank_expr.desc(), Document.created_at.desc(), Document.id.desc()).limit(normalized_limit + 1)
+    ).all()
+    page_rows = rows[:normalized_limit]
+    items = [_to_result(document, row_snippet or "", query, float(metadata_rank or 0)) for document, row_snippet, metadata_rank, _text_rank in page_rows]
+    next_cursor = None
+    if len(rows) > normalized_limit and page_rows:
+        document, _snippet, metadata_rank, text_rank = page_rows[-1]
+        next_cursor = _encode_search_cursor(document, float(metadata_rank or 0), float(text_rank or 0))
+    return {"items": items, "limit": normalized_limit, "next_cursor": next_cursor, "total_estimate": int(total)}
 
 
 def _apply_filters(
@@ -128,6 +186,39 @@ def _apply_filters(
     if (custom_field and custom_value) or tag_id:
         stmt = stmt.distinct()
     return stmt
+
+
+def _apply_search_cursor(stmt, cursor: str | None, metadata_rank_expr, text_rank_expr):
+    decoded = _decode_search_cursor(cursor)
+    if decoded is None:
+        return stmt
+    metadata_rank, text_rank, created_at, row_id = decoded
+    return stmt.where(or_(
+        metadata_rank_expr < metadata_rank,
+        and_(metadata_rank_expr == metadata_rank, text_rank_expr < text_rank),
+        and_(metadata_rank_expr == metadata_rank, text_rank_expr == text_rank, Document.created_at < created_at),
+        and_(metadata_rank_expr == metadata_rank, text_rank_expr == text_rank, Document.created_at == created_at, Document.id < row_id),
+    ))
+
+
+def _encode_search_cursor(document: Document, metadata_rank: float, text_rank: float) -> str:
+    payload = {"metadata_rank": metadata_rank, "text_rank": text_rank, "created_at": document.created_at.isoformat(), "id": str(document.id)}
+    return base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("ascii")
+
+
+def _decode_search_cursor(cursor: str | None) -> tuple[float, float, datetime, uuid.UUID] | None:
+    if not cursor:
+        return None
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8"))
+        return (
+            float(payload["metadata_rank"]),
+            float(payload.get("text_rank", 0.0)),
+            datetime.fromisoformat(str(payload["created_at"])),
+            uuid.UUID(str(payload["id"])),
+        )
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("Invalid cursor") from exc
 
 
 def _uuid(value: str):

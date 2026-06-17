@@ -461,6 +461,13 @@ class SearchResult(BaseModel):
     rank: float = 0.0
 
 
+class SearchResultPage(BaseModel):
+    items: list[SearchResult] = Field(default_factory=list)
+    limit: int
+    next_cursor: str | None = None
+    total_estimate: int
+
+
 class JobInfo(BaseModel):
     document_id: uuid.UUID
     batch_id: uuid.UUID
