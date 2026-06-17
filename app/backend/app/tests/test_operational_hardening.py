@@ -14,12 +14,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.batches import upload_batch
-from app.api.documents import apply_document_extraction_preview, document_diagnostics, preview_document_extraction, reextract_document, reindex_document, run_document_ocr
+from app.api.documents import apply_document_extraction_preview, document_diagnostics, preview_document_extraction, preview_document_page, reextract_document, reindex_document, run_document_ocr
 from app.api.admin import reindex_documents, storage_integrity
 from app.api.app_shell import failed_and_review
 from app.api.documents import list_documents
 from app.cli import import_legacy
-from app.models import Batch, Document, DocumentEvent, DocumentState, StageState
+from app.models import Batch, Document, DocumentEvent, DocumentPage, DocumentState, StageState
 from app.services.extraction import ExtractionInput, extract_metadata, normalize_amount
 from app.services.ocr_glm import OCRProviderError, OCRResult
 from app.services.processing import (
@@ -291,6 +291,51 @@ def test_document_events_capture_processing_timeline(db_session: Session, tmp_pa
     events = db_session.scalars(select(DocumentEvent).where(DocumentEvent.document_id == doc.id)).all()
     event_types = {event.event_type for event in events}
     assert {"queued_for_ocr", "ocr_queued", "ocr_started", "ocr_done", "metadata_started", "metadata_deterministic_done", "title_generated", "search_indexed", "complete"} <= event_types
+
+
+def test_pdf_preview_page_renders_on_demand(db_session: Session, tmp_path: Path, monkeypatch) -> None:
+    storage_root = tmp_path / "storage"
+    storage_root.mkdir()
+    monkeypatch.setenv("STORAGE_PATH", str(storage_root))
+    import app.config as config_module
+
+    config_module.get_settings.cache_clear()
+    pdf_path = storage_root / "invoice.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 test")
+    batch = Batch(collection_name="Dokumente", document_count=1)
+    db_session.add(batch)
+    db_session.flush()
+    document = Document(
+        batch_id=batch.id,
+        collection_name="Dokumente",
+        original_filename="invoice.pdf",
+        storage_path=str(pdf_path),
+        mime_type="application/pdf",
+        file_size=pdf_path.stat().st_size,
+        sha256="p" * 64,
+    )
+    db_session.add(document)
+    db_session.commit()
+
+    def fake_render(path: str, document_id, *, page_limit: int, image_dpi: int) -> list[str]:
+        assert path == str(pdf_path.resolve())
+        assert page_limit == 1
+        assert image_dpi == config_module.get_settings().ocr_image_dpi
+        page_dir = storage_root / "pages" / str(document_id)
+        page_dir.mkdir(parents=True)
+        page_path = page_dir / "page_0001.jpg"
+        page_path.write_bytes(b"jpeg")
+        return [str(page_path)]
+
+    monkeypatch.setattr("app.api.documents.render_pdf_pages", fake_render)
+    response = preview_document_page(document.id, 1, db=db_session, _admin="admin")
+
+    assert response.media_type == "image/jpeg"
+    assert Path(response.path) == storage_root / "pages" / str(document.id) / "page_0001.jpg"
+    page = db_session.scalars(select(DocumentPage).where(DocumentPage.document_id == document.id)).one()
+    assert page.page_number == 1
+    assert page.rendered_image_path == str(response.path)
+    config_module.get_settings.cache_clear()
 
 
 def test_document_diagnostics_extraction_preview_and_reindex(db_session: Session, tmp_path: Path) -> None:

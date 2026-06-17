@@ -1,7 +1,7 @@
 import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent, MutableRefObject, ReactNode } from 'react'
 import { Check, ChevronDown, ClipboardCheck, CloudUpload, Copy, FileImage, FileText, Maximize2, Minus, Plus, RefreshCw, RotateCcw, Save, Sparkles, Trash2, UploadCloud, XCircle } from 'lucide-react'
-import { api, previewUrl as documentPreviewUrl, thumbnailUrl as documentThumbnailUrl } from '../api/client'
+import { api, previewPageUrl as documentPreviewPageUrl, previewUrl as documentPreviewUrl, thumbnailUrl as documentThumbnailUrl } from '../api/client'
 import type { Document } from '../types'
 import { useI18n } from '../i18n'
 
@@ -701,17 +701,16 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
     setZoomAround(zoom >= 220 ? 100 : Math.max(220, zoom + 80), { x, y })
   }
 
-  function pdfPreviewSrc(url: string) {
-    if (!url || url.includes('#')) return url
-    return `${url}#zoom=page-fit&pagemode=none`
-  }
+  const pdfPreviewImageUrl = selected?.kind === 'pdf' && selected.documentId ? documentPreviewPageUrl(selected.documentId, 1) : null
 
-  const preview = selected?.serverPreviewUrl && selected.kind === 'pdf' ? (
-    <iframe className="upload-zoomable-preview-media" style={pdfMediaStyle} src={pdfPreviewSrc(selected.serverPreviewUrl)} title={selected.filename} />
+  const preview = pdfPreviewImageUrl ? (
+    <img className="upload-zoomable-preview-media upload-pdf-page-preview" src={pdfPreviewImageUrl} alt={selected?.filename || 'PDF preview'} />
+  ) : selected?.serverPreviewUrl && selected.kind === 'pdf' ? (
+    <iframe className="upload-zoomable-preview-media" style={pdfMediaStyle} src={selected.serverPreviewUrl} title={selected.filename} />
   ) : selected?.serverPreviewUrl && selected.kind === 'image' ? (
-    <img className="upload-zoomable-preview-media" src={selected.serverPreviewUrl} alt={selected.filename} />
+    <img className="upload-zoomable-preview-media" src={selected.serverPreviewUrl} alt={selected?.filename || 'PDF preview'} />
   ) : selected?.previewUrl ? (
-    <img className="upload-zoomable-preview-media" src={selected.previewUrl} alt={selected.filename} />
+    <img className="upload-zoomable-preview-media" src={selected.previewUrl} alt={selected?.filename || 'PDF preview'} />
   ) : selected?.kind === 'pdf' ? (
     <PdfMockup />
   ) : (

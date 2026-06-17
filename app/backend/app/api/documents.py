@@ -11,6 +11,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin
+from app.config import get_settings
 from app.db import get_db
 from app.models import Collection, CustomFieldDefinition, Document, DocumentCustomFieldValue, DocumentEvent, DocumentPage, Folder
 from app.models import DocumentState, OCRMode, ReviewState, StageState, Tag
@@ -28,6 +29,7 @@ from app.schemas import (
 )
 from app.services.collections import create_record_for_upload, update_record_status, upsert_custom_field_value
 from app.services.diagnostics import extraction_preview, document_completion_diagnostics
+from app.services.document_assets import render_pdf_pages
 from app.services.events import record_event
 from app.services.ocr_pipeline import resolve_ocr_config
 from app.services.folders import purge_document_storage, restore_document, soft_delete_document
@@ -861,6 +863,55 @@ def upsert_document_custom_field(
     db.commit()
     db.refresh(value)
     return DocumentCustomFieldValueRead.model_validate(value)
+
+
+@router.get("/{document_id}/preview-page/{page_number}")
+def preview_document_page(
+    document_id: uuid.UUID,
+    page_number: int = 1,
+    db: Session = Depends(get_db),
+    _admin: str = Depends(require_admin),
+) -> FileResponse:
+    if page_number < 1:
+        raise HTTPException(status_code=404, detail="Preview page not found")
+    document = db.get(Document, document_id)
+    if document is None or document.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    is_pdf = (document.mime_type or "").lower() == "application/pdf" or document.storage_path.lower().endswith(".pdf")
+    if not is_pdf:
+        raise HTTPException(status_code=404, detail="Preview pages are only available for PDF documents")
+
+    storage = LocalStorage()
+    page = db.scalars(
+        select(DocumentPage)
+        .where(DocumentPage.document_id == document.id)
+        .where(DocumentPage.page_number == page_number)
+    ).first()
+    if page and page.rendered_image_path:
+        try:
+            path = storage.resolve(page.rendered_image_path)
+            return FileResponse(path, media_type="image/jpeg")
+        except (FileNotFoundError, ValueError):
+            page.rendered_image_path = None
+
+    source_path = storage.resolve(document.storage_path)
+    rendered_paths = render_pdf_pages(
+        str(source_path),
+        document.id,
+        page_limit=page_number,
+        image_dpi=get_settings().ocr_image_dpi,
+    )
+    if len(rendered_paths) < page_number:
+        raise HTTPException(status_code=404, detail="Preview page not found")
+
+    rendered_path = rendered_paths[page_number - 1]
+    if page is None:
+        page = DocumentPage(document_id=document.id, page_number=page_number, ocr_text=None, raw_ocr_json={})
+        db.add(page)
+    page.rendered_image_path = rendered_path
+    db.commit()
+    path = storage.resolve(rendered_path)
+    return FileResponse(path, media_type="image/jpeg")
 
 
 @router.get("/{document_id}/thumbnail")

@@ -289,6 +289,10 @@ export function previewUrl(id: string): string {
   return `${API_BASE}/api/documents/${id}/preview`
 }
 
+export function previewPageUrl(id: string, pageNumber = 1): string {
+  return `${API_BASE}/api/documents/${id}/preview-page/${pageNumber}`
+}
+
 export function downloadUrl(id: string): string {
   return `${API_BASE}/api/documents/${id}/download`
 }
