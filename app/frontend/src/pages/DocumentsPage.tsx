@@ -10,7 +10,7 @@ import { useI18n } from '../i18n'
 const DOCUMENT_PAGE_LIMIT = 50
 const DOCUMENT_BULK_FILTER_LIMIT = 1000
 
-export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpenDocument: (id: string) => void; onOpenRecord: (id: string) => void }) {
+export default function DocumentsPage({ onOpenDocument }: { onOpenDocument: (id: string) => void }) {
   const { t } = useI18n()
   const [documents, setDocuments] = useState<Document[]>([])
   const [selectedId, setSelectedId] = useState('')
@@ -223,7 +223,7 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
 
   async function deleteDocument(document: Document) {
     if (document.id.startsWith('demo-')) return
-    if (!confirm(`Delete "${document.original_filename}"? This soft-deletes this document only; sibling files stay in the record.`)) return
+    if (!confirm(`Delete "${document.original_filename}"? This soft-deletes this document only; sibling files stay available.`)) return
     setError('')
     try {
       await api.deleteDocument(document.id)
@@ -350,7 +350,7 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
           </div>
         </section>
         {selected && <DocumentPreviewPanel document={selected} pages={selectedPages} loading={detailLoading} onOpenDocument={onOpenDocument} />}
-        {selected && <DocumentInspector document={selected} events={selectedEvents} loading={detailLoading} busy={Boolean(busyAction)} onOpenDocument={onOpenDocument} onOpenRecord={onOpenRecord} onMarkReviewed={() => void markReviewed(selected)} onDelete={() => void deleteDocument(selected)} />}
+        {selected && <DocumentInspector document={selected} events={selectedEvents} loading={detailLoading} busy={Boolean(busyAction)} onOpenDocument={onOpenDocument} onMarkReviewed={() => void markReviewed(selected)} onDelete={() => void deleteDocument(selected)} />}
       </section>
     </main>
   )
@@ -509,7 +509,7 @@ function LayoutPreview({ pages, loading }: { pages: DocumentPage[]; loading: boo
   }, [pages])
 
   if (loading) return <p className="tab-empty">Loading page layout…</p>
-  if (!pages.length) return <p className="tab-empty">No page layout records are stored for this document yet.</p>
+  if (!pages.length) return <p className="tab-empty">No page layout data is stored for this document yet.</p>
   const selectedPage = pages.find((page) => page.id === selectedPageId) || pages[0]
   return (
     <div className="layout-preview">
@@ -526,7 +526,7 @@ function LayoutPreview({ pages, loading }: { pages: DocumentPage[]; loading: boo
   )
 }
 
-function DocumentInspector({ document, events, loading, busy, onOpenDocument, onOpenRecord, onMarkReviewed, onDelete }: { document: Document; events: DocumentEvent[]; loading: boolean; busy: boolean; onOpenDocument: (id: string) => void; onOpenRecord: (id: string) => void; onMarkReviewed: () => void; onDelete: () => void }) {
+function DocumentInspector({ document, events, loading, busy, onOpenDocument, onMarkReviewed, onDelete }: { document: Document; events: DocumentEvent[]; loading: boolean; busy: boolean; onOpenDocument: (id: string) => void; onMarkReviewed: () => void; onDelete: () => void }) {
   const { t } = useI18n()
   const [activeTab, setActiveTab] = useState<InspectorTab>('details')
 
@@ -546,7 +546,6 @@ function DocumentInspector({ document, events, loading, busy, onOpenDocument, on
       {activeTab === 'activity' && <DocumentActivityPanel document={document} events={events} loading={loading} />}
       <div className="detail-actions">
         <button type="button" onClick={() => onOpenDocument(document.id)}>{t('common.open')}</button>
-        {document.record_id && <button type="button" onClick={() => onOpenRecord(document.record_id!)}>{t('common.record')}</button>}
         <button type="button" className="primary" disabled={busy || document.id.startsWith('demo-') || document.review_state === 'reviewed'} onClick={onMarkReviewed}>{t('documents.markReviewed')}</button>
         <button type="button" className="danger-button" disabled={document.id.startsWith('demo-')} onClick={onDelete}><Trash2 size={16} /> {t('common.delete')}</button>
       </div>

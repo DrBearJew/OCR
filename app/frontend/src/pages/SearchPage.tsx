@@ -148,7 +148,7 @@ export default function SearchPage({ onOpenDocument }: { onOpenDocument: (id: st
           <button key={result.document_id} onClick={() => onOpenDocument(result.document_id)}>
             <div>
               <strong>{result.extracted_title || result.original_filename}</strong>
-              <span>{result.collection_name} · {result.record_title || t('common.record')} · {new Date(result.created_at).toLocaleDateString()}</span>
+              <span>{result.collection_name} · {result.original_filename} · {new Date(result.created_at).toLocaleDateString()}</span>
             </div>
             <StatusBadge value={result.status} />
             <p><HighlightedSnippet snippet={result.snippet} /></p>

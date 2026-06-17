@@ -4,15 +4,15 @@ import { FileText, RefreshCw, Search, Settings2 } from 'lucide-react'
 import { api, previewPageUrl, previewUrl, thumbnailUrl } from '../api/client'
 import SavedViewsBar from '../components/SavedViewsBar'
 import StatusBadge from '../components/StatusBadge'
-import type { CollectionPageData, Document, RecordRow } from '../types'
+import type { CollectionPageData, Document } from '../types'
 import { useI18n } from '../i18n'
 
-const COLLECTION_RECORD_PAGE_LIMIT = 50
+const COLLECTION_DOCUMENT_PAGE_LIMIT = 50
 
-export default function CollectionDetailPage({ slug, onOpenRecord, onOpenDocument }: { slug: string; onOpenRecord: (id: string) => void; onOpenDocument: (id: string) => void }) {
+export default function CollectionDetailPage({ slug, onOpenDocument }: { slug: string; onOpenDocument: (id: string) => void }) {
   const { t, language } = useI18n()
   const [data, setData] = useState<CollectionPageData | null>(null)
-  const [records, setRecords] = useState<RecordRow[]>([])
+  const [documents, setDocuments] = useState<Document[]>([])
   const [status, setStatus] = useState('')
   const [query, setQuery] = useState('')
   const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -20,55 +20,62 @@ export default function CollectionDetailPage({ slug, onOpenRecord, onOpenDocumen
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState('')
 
-  async function loadCollection() {
+  async function loadCollection(): Promise<CollectionPageData | null> {
     setError('')
     try {
-      setData(await api.collectionPage(slug))
+      const page = await api.collectionPage(slug)
+      setData(page)
+      return page
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load collection')
+      return null
     }
   }
 
-  async function loadRecords(append = false, cursor: string | null = null, nextStatus = status, nextQuery = query) {
+  async function loadDocuments(append = false, cursor: string | null = null, nextStatus = status, nextQuery = query, collectionName = data?.collection.name) {
+    if (!collectionName) return
     setError('')
     if (append) setLoadingMore(true)
     try {
-      const params: Record<string, string> = { collection_slug: slug, limit: String(COLLECTION_RECORD_PAGE_LIMIT) }
-      if (nextStatus) params.status_filter = nextStatus
-      if (nextQuery.trim()) params.q = nextQuery.trim()
+      const params: Record<string, string> = { collection_name: collectionName, limit: String(COLLECTION_DOCUMENT_PAGE_LIMIT) }
+      if (nextStatus === 'needs_review') params.review_state = 'needs_review'
+      else if (nextStatus) params.state = nextStatus
+      if (nextQuery.trim()) params.title = nextQuery.trim()
       if (cursor) params.cursor = cursor
-      const page = await api.recordsPage(params)
-      setRecords((current) => append ? [...current, ...page.items] : page.items)
+      const page = await api.documentsPage(params)
+      setDocuments((current) => append ? [...current, ...page.items] : page.items)
       setNextCursor(page.next_cursor)
       setTotalEstimate(page.total_estimate)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load collection records')
+      setError(err instanceof Error ? err.message : 'Could not load collection documents')
     } finally {
       if (append) setLoadingMore(false)
     }
   }
 
   async function refresh() {
-    await Promise.all([loadCollection(), loadRecords(false, null)])
+    const page = await loadCollection()
+    await loadDocuments(false, null, status, query, page?.collection.name)
   }
 
-  function loadMoreCollectionRecords() {
+  function loadMoreCollectionDocuments() {
     if (!nextCursor || loadingMore) return
-    void loadRecords(true, nextCursor)
+    void loadDocuments(true, nextCursor)
   }
 
   useEffect(() => {
-    setRecords([])
+    setDocuments([])
     setNextCursor(null)
     setTotalEstimate(0)
     void refresh()
   }, [slug])
 
   useEffect(() => {
-    void loadRecords(false, null, status, query)
+    if (data?.collection.name) void loadDocuments(false, null, status, query, data.collection.name)
   }, [status, query])
 
-  const totalDocs = records.reduce((sum, record) => sum + record.document_count, 0)
+  const needsReview = documents.filter((document) => document.review_state === 'needs_review').length || data?.status_counts.needs_review || 0
+  const complete = documents.filter((document) => document.processing_state === 'complete').length || data?.status_counts.complete || 0
 
   return (
     <main className="collection-detail-console">
@@ -87,16 +94,15 @@ export default function CollectionDetailPage({ slug, onOpenRecord, onOpenDocumen
         <div>
           <span className="eyebrow">{t('dashboard.collection')}</span>
           <h2>{data?.collection.name || slug}</h2>
-          <p>{records.length} / {totalEstimate} {t('common.records')} · {totalDocs} {t('common.documents')}</p>
+          <p>{documents.length} / {totalEstimate || documents.length} {t('common.documents')}</p>
         </div>
         <div className="collection-detail-stats">
-          <span><strong>{totalEstimate}</strong> {t('common.records')}</span>
-          <span><strong>{totalDocs}</strong> {t('common.documents')}</span>
-          <span><strong>{data?.status_counts.needs_review || 0}</strong> {t('common.needsReview')}</span>
-          <span><strong>{data?.status_counts.complete || 0}</strong> {t('common.complete')}</span>
+          <span><strong>{totalEstimate || documents.length}</strong> {t('common.documents')}</span>
+          <span><strong>{needsReview}</strong> {t('common.needsReview')}</span>
+          <span><strong>{complete}</strong> {t('common.complete')}</span>
         </div>
       </section>
-      <section className="workflow-card collection-record-panel">
+      <section className="workflow-card collection-record-panel collection-document-panel">
         <div className="document-toolbar collection-detail-toolbar">
           <label className="toolbar-search">
             <Search size={17} />
@@ -104,59 +110,25 @@ export default function CollectionDetailPage({ slug, onOpenRecord, onOpenDocumen
           </label>
           <select value={status} onChange={(event) => setStatus(event.target.value)}>
             <option value="">{t('search.anyStatus')}</option>
-            <option value="pending">{t('status.pending')}</option>
-            <option value="processing">{t('status.processing')}</option>
-            <option value="partially_failed">{t('status.partially_failed')}</option>
-            <option value="complete">{t('status.complete')}</option>
-            <option value="needs_review">{t('status.needs_review')}</option>
+            <option value="complete">{t('common.complete')}</option>
+            <option value="failed">{t('common.failed')}</option>
+            <option value="ocr_processing">{t('common.processing')}</option>
+            <option value="needs_review">{t('common.needsReview')}</option>
           </select>
           <SavedViewsBar section="collections" filters={{ status, query }} onApply={(filters) => { setStatus(filters.status || ''); setQuery(filters.query || '') }} />
         </div>
-        <div className="collection-record-list">
-          {records.map((record) => <CollectionRecordCard key={record.id} record={record} onOpenRecord={onOpenRecord} onOpenDocument={onOpenDocument} />)}
-          {!records.length && <p className="muted-empty">{t('records.noMatches')}</p>}
+        <div className="collection-record-list collection-document-list">
+          {documents.map((document) => <CollectionDocumentCard key={document.id} document={document} onOpenDocument={onOpenDocument} />)}
+          {!documents.length && <p className="muted-empty">{t('documents.noMatches')}</p>}
         </div>
         {nextCursor && (
           <div className="pagination-footer">
-            <span>{records.length} / {totalEstimate} {t('common.records')}</span>
-            <button onClick={loadMoreCollectionRecords} disabled={loadingMore}>{loadingMore ? t('common.loading') : t('common.loadMore')}</button>
+            <span>{documents.length} / {totalEstimate} {t('common.documents')}</span>
+            <button onClick={loadMoreCollectionDocuments} disabled={loadingMore}>{loadingMore ? t('common.loading') : t('common.loadMore')}</button>
           </div>
         )}
       </section>
     </main>
-  )
-}
-
-function CollectionRecordCard({ record, onOpenRecord, onOpenDocument }: { record: RecordRow; onOpenRecord: (id: string) => void; onOpenDocument: (id: string) => void }) {
-  const { t, language } = useI18n()
-  const firstDoc = record.documents[0]
-  return (
-    <div
-      className="collection-record-card"
-      role="button"
-      tabIndex={0}
-      onClick={() => onOpenRecord(record.id)}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          onOpenRecord(record.id)
-        }
-      }}
-    >
-      <div className="record-main-meta">
-        <span className="record-type-icon"><FileText size={18} /></span>
-        <div>
-          <strong>{record.title}</strong>
-          <span>{record.document_count} {record.document_count === 1 ? t('records.documentSingular') : t('records.documentPlural')} · {t('records.updated')} {new Date(record.updated_at).toLocaleString(language === 'de' ? 'de-DE' : undefined)}</span>
-          <small>{firstDoc?.extracted_invoice_number || firstDoc?.extracted_amount || firstDoc?.original_filename || t('records.noMetadataYet')}</small>
-        </div>
-      </div>
-      <div className="thumb-strip" onClick={(event) => event.stopPropagation()}>
-        {record.documents.slice(0, 6).map((document) => <CollectionDocThumb key={document.id} document={document} onOpenDocument={onOpenDocument} />)}
-        {record.documents.length > 6 && <span className="count-badge">+{record.documents.length - 6}</span>}
-      </div>
-      <StatusBadge value={record.status} />
-    </div>
   )
 }
 
@@ -166,8 +138,8 @@ function collectionDocumentHoverPreviewUrl(document: Document): string | null {
   return document.thumbnail_path ? thumbnailUrl(document.id) : null
 }
 
-function CollectionDocThumb({ document, onOpenDocument }: { document: Document; onOpenDocument: (id: string) => void }) {
-  const { t } = useI18n()
+function CollectionDocumentCard({ document, onOpenDocument }: { document: Document; onOpenDocument: (id: string) => void }) {
+  const { t, language } = useI18n()
   const previewSource = collectionDocumentHoverPreviewUrl(document)
   function open(event: MouseEvent | KeyboardEvent) {
     event.stopPropagation()
@@ -175,11 +147,10 @@ function CollectionDocThumb({ document, onOpenDocument }: { document: Document; 
   }
 
   return (
-    <span
-      className="record-thumb"
+    <div
+      className="collection-record-card collection-document-card"
       role="button"
       tabIndex={0}
-      title={`${t('common.open')} ${document.original_filename}`}
       onClick={open}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -188,16 +159,27 @@ function CollectionDocThumb({ document, onOpenDocument }: { document: Document; 
         }
       }}
     >
-      {document.thumbnail_path ? <img src={thumbnailUrl(document.id)} alt="" /> : <span className="file-icon">{document.original_filename.split('.').pop()?.toUpperCase() || 'DOC'}</span>}
-      <span className={`status-dot dot-${document.processing_state}`} />
-      <span className="hover-preview high-res-document-preview">
-        {previewSource && <img src={previewSource} alt="" />}
-        <strong>{document.original_filename}</strong>
-        <em>{t(`status.${document.processing_state}`, document.processing_state)}</em>
-        <span>{document.extracted_title || t('records.noTitleYet')}</span>
-        <small>{document.extracted_invoice_number || document.extracted_payment_method || ''} {document.extracted_amount || ''}</small>
-        <p>{(document.ocr_text || '').slice(0, 220)}</p>
+      <div className="record-main-meta">
+        <span className="record-type-icon"><FileText size={18} /></span>
+        <div>
+          <strong>{document.manual_title_override || document.extracted_title || document.original_filename}</strong>
+          <span>{document.original_filename} · {new Date(document.updated_at).toLocaleString(language === 'de' ? 'de-DE' : undefined)}</span>
+          <small>{document.extracted_invoice_number || document.extracted_amount || document.extracted_sender || t('documents.noMetadataYet')}</small>
+        </div>
+      </div>
+      <span className="record-thumb collection-document-thumb" title={`${t('common.open')} ${document.original_filename}`}>
+        {document.thumbnail_path ? <img src={thumbnailUrl(document.id)} alt="" /> : <span className="file-icon">{document.original_filename.split('.').pop()?.toUpperCase() || 'DOC'}</span>}
+        <span className={`status-dot dot-${document.processing_state}`} />
+        <span className="hover-preview high-res-document-preview">
+          {previewSource && <img src={previewSource} alt="" />}
+          <strong>{document.original_filename}</strong>
+          <em>{t(`status.${document.processing_state}`, document.processing_state)}</em>
+          <span>{document.extracted_title || t('documents.noTitleYet')}</span>
+          <small>{document.extracted_invoice_number || document.extracted_payment_method || ''} {document.extracted_amount || ''}</small>
+          <p>{(document.ocr_text || '').slice(0, 220)}</p>
+        </span>
       </span>
-    </span>
+      <StatusBadge value={document.review_state === 'needs_review' ? 'needs_review' : document.processing_state} />
+    </div>
   )
 }

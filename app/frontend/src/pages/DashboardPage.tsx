@@ -6,7 +6,6 @@ import type { Document } from '../types'
 import { useI18n } from '../i18n'
 
 interface DashboardPageProps {
-  onOpenRecord: (id: string) => void
   onOpenDocument: (id: string) => void
   onSearch: () => void
 }
@@ -166,7 +165,7 @@ const defaultProcessingOptions: ProcessingOptionsState = {
   collectionRules: true
 }
 
-export default function DashboardPage({ onOpenRecord, onOpenDocument }: DashboardPageProps) {
+export default function DashboardPage({ onOpenDocument }: DashboardPageProps) {
   const { t } = useI18n()
   const [files, setFiles] = useState<UploadDraftFile[]>(seededFiles)
   const [selectedId, setSelectedId] = useState(seededFiles[0].id)
@@ -225,7 +224,7 @@ export default function DashboardPage({ onOpenRecord, onOpenDocument }: Dashboar
         kind,
         ocrStatus: 'queued' as const,
         extractedTitle: file.name.replace(/\.[^.]+$/, ''),
-        ocrSnippet: 'Queued for OCR. Select Run OCR after saving the record.',
+        ocrSnippet: 'Queued for OCR. Select Run OCR after uploading the document.',
         confidence: 0,
         metadata: { ...sampleMetadata, collection: collectionName, title: '', correspondent: '', recipient: '', date: '', invoiceNo: '', amount: '', taxAmount: '', notes: '' },
         qwenRunStatus: 'not_run' as const,
@@ -334,7 +333,7 @@ export default function DashboardPage({ onOpenRecord, onOpenDocument }: Dashboar
 
   async function runSelected(action: 'ocr' | 'metadata' | 'review') {
     if (!selected?.documentId) {
-      setMessage('Save the record before running actions on a real document.')
+      setMessage('Upload the document before running actions on it.')
       return
     }
     setActionBusy(action)
@@ -374,7 +373,6 @@ export default function DashboardPage({ onOpenRecord, onOpenDocument }: Dashboar
           <p>{t('dashboard.subtitle')}</p>
         </div>
         <div className="upload-header-actions">
-          <button type="button" disabled={!uploadedRecordId} onClick={() => uploadedRecordId && onOpenRecord(uploadedRecordId)}>{t('dashboard.openRecord')}</button>
           <button type="button" disabled={!selected?.documentId} onClick={() => selected?.documentId && onOpenDocument(selected.documentId)}>{t('dashboard.openSelectedDocument')}</button>
           <button type="button" disabled={actionBusy === 'delete'} onClick={() => void deleteSelected()}><Trash2 size={15} /> {t('dashboard.deleteSelected')}</button>
         </div>

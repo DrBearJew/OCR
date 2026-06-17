@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
+const app = readFileSync(resolve(root, 'src/App.tsx'), 'utf8')
+const appShell = readFileSync(resolve(root, 'src/components/AppShell.tsx'), 'utf8')
 const dashboard = readFileSync(resolve(root, 'src/pages/DashboardPage.tsx'), 'utf8')
 const client = readFileSync(resolve(root, 'src/api/client.ts'), 'utf8')
 const searchPage = readFileSync(resolve(root, 'src/pages/SearchPage.tsx'), 'utf8')
@@ -12,13 +14,19 @@ const collectionDetailPage = readFileSync(resolve(root, 'src/pages/CollectionDet
 const schemaPage = readFileSync(resolve(root, 'src/pages/SchemaPage.tsx'), 'utf8')
 const adminPage = readFileSync(resolve(root, 'src/pages/AdminPage.tsx'), 'utf8')
 const processingPage = readFileSync(resolve(root, 'src/pages/ProcessingPage.tsx'), 'utf8')
-const recordDetailPage = readFileSync(resolve(root, 'src/pages/RecordDetailPage.tsx'), 'utf8')
-const recordListPage = readFileSync(resolve(root, 'src/pages/RecordListPage.tsx'), 'utf8')
 const documentDetailPage = readFileSync(resolve(root, 'src/pages/DocumentDetailPage.tsx'), 'utf8')
 const styles = readFileSync(resolve(root, 'src/styles.css'), 'utf8')
 const packageJson = readFileSync(resolve(root, 'package.json'), 'utf8')
+const enTranslations = readFileSync(resolve(root, 'src/i18n/en.ts'), 'utf8')
+const deTranslations = readFileSync(resolve(root, 'src/i18n/de.ts'), 'utf8')
 
 const checks = [
+  ['Records are hidden from main navigation', appShell, "labelKey: 'nav.records'", true],
+  ['Records route redirects to documents', app, "if (name === 'records') return { name: 'documents' }"],
+  ['App does not render RecordListPage', app, 'RecordListPage', true],
+  ['App does not render RecordDetailPage', app, 'RecordDetailPage', true],
+  ['Documents inspector does not expose Record action', documentsPage, 'onOpenRecord', true],
+  ['Activity page does not expose Record action', readFileSync(resolve(root, 'src/pages/ActivityPage.tsx'), 'utf8'), 'onOpenRecord', true],
   ['collection_name comes from record-level collectionName', dashboard, "form.set('collection_name', collectionName || 'Dokumente')"],
   ['record metadata contains shared title base', dashboard, 'shared_title_base: sharedTitle.sharedTitleBase'],
   ['record metadata contains shared title toggle', dashboard, 'apply_shared_title_to_documents: sharedTitle.applySharedTitleToDocuments'],
@@ -31,7 +39,15 @@ const checks = [
   ['primary action is process all', dashboard, 'dashboard.processAllDocuments'],
   ['stage-only actions are advanced', dashboard, 'dashboard.advancedActions'],
   ['dashboard selected delete confirmation exists', dashboard, 'dashboard.deleteSelected'],
-  ['upload does not auto-navigate to record', dashboard, 'dashboard.message.uploadedSuffix'],
+  ['Dashboard hides Open Record action', dashboard, 'dashboard.openRecord', true],
+  ['English translations do not expose common.record', enTranslations, 'common.record', true],
+  ['English translations do not ship legacy Record Detail labels', enTranslations, 'recordDetail.', true],
+  ['English translations avoid Save Record copy', enTranslations, 'Save Record', true],
+  ['English translations avoid uploaded-into-record copy', enTranslations, 'into one record', true],
+  ['English translations avoid record-context copy', enTranslations, 'record context', true],
+  ['German translations avoid visible Vorgang copy', deTranslations, 'Vorgang', true],
+  ['German translations avoid visible Vorgänge copy', deTranslations, 'Vorgänge', true],
+  ['German translations do not ship legacy record detail labels', deTranslations, 'recordDetail.', true],
   ['selected document refreshes after actions', dashboard, 'updateDraftFromDocument(document)'],
   ['Qwen option is sent to reextract endpoint', `${dashboard}\n${client}`, 'qwen_enabled'],
   ['OCR engine option is submitted', dashboard, 'ocr_engine: options.ocrEngine'],
@@ -91,22 +107,15 @@ const checks = [
   ['Collections page exposes create collection action', collectionsPage, 'collections.create'],
   ['Collections page calls createCollection API', collectionsPage, 'api.createCollection'],
   ['Schemas page exposes create collection action', schemaPage, 'collections.create'],
-  ['Records page labels record envelope rows', recordListPage, 'records.envelopeLabel'],
-  ['Records page labels child document strip', recordListPage, 'records.childDocuments'],
-  ['Records hover preview uses high-res PDF page preview', recordListPage, 'previewPageUrl(document.id, 1)'],
+  ['Collection detail uses paginated documents API', collectionDetailPage, 'api.documentsPage'],
+  ['Collection detail exposes Load more document pagination', collectionDetailPage, 'loadMoreCollectionDocuments'],
   ['Collection detail hover preview uses high-res PDF page preview', collectionDetailPage, 'previewPageUrl(document.id, 1)'],
-  ['Records page has separation styles', styles, 'Records page: make Record vs Document separation explicit'],
-  ['Records page uses cursor-paginated API', `${client}\n${readFileSync(resolve(root, 'src/pages/RecordListPage.tsx'), 'utf8')}`, 'api.recordsPage'],
-  ['Records page exposes Load more pagination', readFileSync(resolve(root, 'src/pages/RecordListPage.tsx'), 'utf8'), 'loadMoreRecords'],
   ['Document detail PDF preview uses native viewer', documentDetailPage, 'document-native-pdf-preview'],
   ['Document detail PDF preview explains native toolbar', documentDetailPage, 'Use the PDF toolbar for pages and zoom.'],
-  ['Record detail PDF preview uses native viewer', recordDetailPage, 'record-native-pdf-preview'],
-  ['Record detail can delete a single child document', recordDetailPage, 'api.deleteDocument(document.id)'],
-  ['Record detail distinguishes document delete from record delete', recordDetailPage, 'recordDetail.deleteDocumentConfirm'],
-  ['Collection detail uses paginated records API', collectionDetailPage, 'api.recordsPage'],
-  ['Collection detail exposes Load more pagination', collectionDetailPage, 'loadMoreCollectionRecords'],
   ['Search page uses cursor-paginated API', `${client}\n${searchPage}`, 'api.searchPage'],
   ['Search page exposes Load more pagination', searchPage, 'loadMoreSearchResults'],
+  ['Search page does not expose record fallback label', searchPage, "result.record_title || t('common.record')", true],
+  ['Dashboard upload defaults copy avoids record wording', enTranslations, 'Upload defaults'],
   ['Schemas page calls createCollection API', schemaPage, 'api.createCollection'],
   ['Schemas page calls deleteCollection API', `${schemaPage}\n${client}`, 'api.deleteCollection'],
   ['Schemas page exposes schema delete button', schemaPage, 'schema-delete-button'],

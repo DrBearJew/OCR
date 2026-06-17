@@ -4,7 +4,7 @@ import { api } from '../api/client'
 import type { ActivityItem } from '../types'
 import { useI18n } from '../i18n'
 
-export default function ActivityPage({ onOpenDocument, onOpenRecord }: { onOpenDocument: (id: string) => void; onOpenRecord: (id: string) => void }) {
+export default function ActivityPage({ onOpenDocument }: { onOpenDocument: (id: string) => void }) {
   const { t, language } = useI18n()
   const [rows, setRows] = useState<ActivityItem[]>([])
   const [filters, setFilters] = useState<Record<string, string>>({})
@@ -53,7 +53,6 @@ export default function ActivityPage({ onOpenDocument, onOpenRecord }: { onOpenD
             <p>{translateActivityMessage(row.message || row.document_title || '', t)}</p>
             <div className="button-row">
               <button onClick={() => onOpenDocument(row.document_id)}>{t('common.document')}</button>
-              {row.record_id && <button onClick={() => onOpenRecord(row.record_id!)}>{t('common.record')}</button>}
             </div>
           </div>
         ))}

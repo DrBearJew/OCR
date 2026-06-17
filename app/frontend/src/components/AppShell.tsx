@@ -1,11 +1,11 @@
 import type { ReactNode } from 'react'
-import { Activity, AlertTriangle, BarChart3, Bell, CircleHelp, Database, FileSearch, FileText, FolderKanban, FolderTree, Layers, ListChecks, Menu, Search, Settings, UploadCloud } from 'lucide-react'
+import { Activity, AlertTriangle, BarChart3, Bell, CircleHelp, Database, FileSearch, FileText, FolderTree, Layers, ListChecks, Menu, Search, Settings, UploadCloud } from 'lucide-react'
 import { api } from '../api/client'
 import { useEffect, useState } from 'react'
 import type { IntegrationSummary } from '../types'
 import { useI18n, type Language } from '../i18n'
 
-type NavKey = 'dashboard' | 'collections' | 'collection' | 'folders' | 'records' | 'record' | 'documents' | 'document' | 'search' | 'processing' | 'failed' | 'schemas' | 'admin' | 'activity' | 'batches' | 'batch'
+type NavKey = 'dashboard' | 'collections' | 'collection' | 'folders' | 'documents' | 'document' | 'search' | 'processing' | 'failed' | 'schemas' | 'admin' | 'activity' | 'batches' | 'batch'
 
 type TFn = (key: string, fallback?: string) => string
 
@@ -20,7 +20,6 @@ const navItems = [
   { keys: ['dashboard'], path: '/dashboard', labelKey: 'nav.dashboard', icon: BarChart3 },
   { keys: ['collections', 'collection'], path: '/collections', labelKey: 'nav.collections', icon: Layers },
   { keys: ['folders'], path: '/folders', labelKey: 'nav.folders', icon: FolderTree },
-  { keys: ['records', 'record'], path: '/records', labelKey: 'nav.records', icon: FolderKanban },
   { keys: ['documents', 'document'], path: '/documents', labelKey: 'nav.documents', icon: FileText },
   { keys: ['search'], path: '/search', labelKey: 'nav.search', icon: Search },
   { keys: ['processing'], path: '/processing', labelKey: 'nav.processing', icon: ListChecks },

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { Database, FileText, Plus, RefreshCw, Search, Settings2, SlidersHorizontal } from 'lucide-react'
+import { Database, FileText, Plus, RefreshCw, Search, Settings2 } from 'lucide-react'
 import type { CSSProperties, ReactNode } from 'react'
 import { api } from '../api/client'
 import type { CollectionSummary } from '../types'
@@ -41,7 +41,6 @@ export default function CollectionsPage({ onOpenCollection, onSchemas }: Collect
 
   const totals = useMemo(() => ({
     collections: collections.length,
-    records: collections.reduce((sum, item) => sum + item.record_count, 0),
     documents: collections.reduce((sum, item) => sum + item.document_count, 0),
     needsReview: collections.reduce((sum, item) => sum + (item.status_counts.needs_review || 0), 0)
   }), [collections])
@@ -93,7 +92,6 @@ export default function CollectionsPage({ onOpenCollection, onSchemas }: Collect
 
       <section className="collections-summary-grid">
         <SummaryCard icon={<Database size={23} />} label={t('nav.collections')} value={totals.collections} detail={t('collections.schemaBuckets')} />
-        <SummaryCard icon={<SlidersHorizontal size={23} />} label={t('nav.records')} value={totals.records} detail={t('collections.browseableRows')} />
         <SummaryCard icon={<FileText size={23} />} label={t('nav.documents')} value={totals.documents} detail={t('collections.ocrUnits')} />
         <SummaryCard icon={<Settings2 size={23} />} label={t('common.needsReview')} value={totals.needsReview} detail={t('collections.acrossSchemas')} tone="orange" />
       </section>
@@ -123,7 +121,6 @@ export default function CollectionsPage({ onOpenCollection, onSchemas }: Collect
               </div>
 
               <div className="collection-meter-row">
-                <span><strong>{item.record_count}</strong> {t('common.records')}</span>
                 <span><strong>{item.document_count}</strong> {t('common.documents')}</span>
                 <span><strong>{item.status_counts.complete || 0}</strong> {t('common.complete')}</span>
               </div>
@@ -146,7 +143,6 @@ export default function CollectionsPage({ onOpenCollection, onSchemas }: Collect
 
               <div className="collection-actions">
                 <button onClick={onSchemas}>{t('common.schema')}</button>
-                <button onClick={() => onOpenCollection(item.collection.slug)}>{t('common.records')}</button>
                 <button className="primary" onClick={() => onOpenCollection(item.collection.slug)}>{t('common.open')}</button>
               </div>
             </article>
