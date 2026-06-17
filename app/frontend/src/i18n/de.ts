@@ -318,6 +318,7 @@ export const de: Record<string, string> = {
   'recordDetail.openDocument': 'Dokument öffnen',
   'recordDetail.documentMetadata': 'Dokumentmetadaten',
   'documents.preview': 'Vorschau',
+  'documents.noTags': 'Keine Tags',
   'documentDetail.loadError': 'Dokument konnte nicht geladen werden',
   'documentDetail.processDocument': 'Dokument verarbeiten',
   'documentDetail.readableSize': 'Lesbare Größe',

@@ -538,22 +538,25 @@ function DocumentInspector({ document, events, loading, busy, onOpenDocument, on
 
 function DocumentDetailsFields({ document }: { document: Document }) {
   const { t } = useI18n()
+  const tags = document.llm_suggested_tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
+  const field = (value: string | null | undefined) => value?.trim() || 'NA'
+  const currency = typeof document.metadata_json?.currency === 'string' ? document.metadata_json.currency : document.extracted_amount ? 'EUR' : 'NA'
   return (
     <div className="detail-tab-panel">
       <label>{t('fields.title')}<input value={document.manual_title_override || document.extracted_title || document.original_filename} readOnly /></label>
       <label>{t('dashboard.collection')}<select value={document.collection_name} disabled><option>{document.collection_name}</option></select></label>
-      <label>{t('fields.correspondentSender')}<input value={document.extracted_sender || 'Demo Ges.mbh'} readOnly /></label>
-      <label>{t('fields.recipientCustomer')}<input value={document.extracted_recipient || 'UniTech Technische Produkte'} readOnly /></label>
+      <label>{t('fields.correspondentSender')}<input value={field(document.extracted_sender)} readOnly /></label>
+      <label>{t('fields.recipientCustomer')}<input value={field(document.extracted_recipient)} readOnly /></label>
       <div className="detail-two">
-        <label>{t('fields.invoiceNumber')}<input value={document.extracted_invoice_number || 'PR400000005'} readOnly /></label>
-        <label>{t('fields.invoiceDate')}<input value={document.extracted_date || '12/10/2020'} readOnly /></label>
+        <label>{t('fields.invoiceNumber')}<input value={field(document.extracted_invoice_number)} readOnly /></label>
+        <label>{t('fields.invoiceDate')}<input value={field(document.extracted_date)} readOnly /></label>
       </div>
       <div className="detail-two">
-        <label>{t('fields.amountGross')}<input value={document.extracted_amount || '205,25'} readOnly /></label>
-        <label>{t('fields.currency')}<select value="EUR" disabled><option>EUR</option></select></label>
+        <label>{t('fields.amountGross')}<input value={field(document.extracted_amount)} readOnly /></label>
+        <label>{t('fields.currency')}<select value={currency} disabled><option>{currency}</option></select></label>
       </div>
       <label>{t('fields.statusReviewState')}<select value={document.review_state} disabled><option>{document.review_state}</option></select></label>
-      <label>{t('fields.tags')}<div className="tag-input"><button type="button">invoice</button><button type="button">2020</button><button type="button">supplier:demo</button></div></label>
+      <label>{t('fields.tags')}<div className="tag-input">{tags.length ? tags.map((tag) => <button type="button" key={tag}>{tag}</button>) : <span>{t('documents.noTags', 'No tags')}</span>}</div></label>
       <label>{t('fields.notes')}<textarea placeholder={t('documents.addNotes')} readOnly /></label>
     </div>
   )
