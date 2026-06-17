@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { KeyboardEvent, MouseEvent } from 'react'
 import { FileText, RefreshCw, Search, Settings2 } from 'lucide-react'
-import { api, previewUrl, thumbnailUrl } from '../api/client'
+import { api, previewPageUrl, previewUrl, thumbnailUrl } from '../api/client'
 import SavedViewsBar from '../components/SavedViewsBar'
 import StatusBadge from '../components/StatusBadge'
 import type { CollectionPageData, Document, RecordRow } from '../types'
@@ -160,8 +160,15 @@ function CollectionRecordCard({ record, onOpenRecord, onOpenDocument }: { record
   )
 }
 
+function collectionDocumentHoverPreviewUrl(document: Document): string | null {
+  if (document.mime_type === 'application/pdf') return previewPageUrl(document.id, 1)
+  if (document.mime_type?.startsWith('image/')) return previewUrl(document.id)
+  return document.thumbnail_path ? thumbnailUrl(document.id) : null
+}
+
 function CollectionDocThumb({ document, onOpenDocument }: { document: Document; onOpenDocument: (id: string) => void }) {
   const { t } = useI18n()
+  const previewSource = collectionDocumentHoverPreviewUrl(document)
   function open(event: MouseEvent | KeyboardEvent) {
     event.stopPropagation()
     onOpenDocument(document.id)
@@ -183,8 +190,8 @@ function CollectionDocThumb({ document, onOpenDocument }: { document: Document; 
     >
       {document.thumbnail_path ? <img src={thumbnailUrl(document.id)} alt="" /> : <span className="file-icon">{document.original_filename.split('.').pop()?.toUpperCase() || 'DOC'}</span>}
       <span className={`status-dot dot-${document.processing_state}`} />
-      <span className="hover-preview">
-        {document.thumbnail_path && <img src={document.mime_type?.startsWith('image/') ? previewUrl(document.id) : thumbnailUrl(document.id)} alt="" />}
+      <span className="hover-preview high-res-document-preview">
+        {previewSource && <img src={previewSource} alt="" />}
         <strong>{document.original_filename}</strong>
         <em>{t(`status.${document.processing_state}`, document.processing_state)}</em>
         <span>{document.extracted_title || t('records.noTitleYet')}</span>

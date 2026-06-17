@@ -13,6 +13,7 @@ const schemaPage = readFileSync(resolve(root, 'src/pages/SchemaPage.tsx'), 'utf8
 const adminPage = readFileSync(resolve(root, 'src/pages/AdminPage.tsx'), 'utf8')
 const processingPage = readFileSync(resolve(root, 'src/pages/ProcessingPage.tsx'), 'utf8')
 const recordDetailPage = readFileSync(resolve(root, 'src/pages/RecordDetailPage.tsx'), 'utf8')
+const recordListPage = readFileSync(resolve(root, 'src/pages/RecordListPage.tsx'), 'utf8')
 const documentDetailPage = readFileSync(resolve(root, 'src/pages/DocumentDetailPage.tsx'), 'utf8')
 const styles = readFileSync(resolve(root, 'src/styles.css'), 'utf8')
 const packageJson = readFileSync(resolve(root, 'package.json'), 'utf8')
@@ -90,6 +91,11 @@ const checks = [
   ['Collections page exposes create collection action', collectionsPage, 'collections.create'],
   ['Collections page calls createCollection API', collectionsPage, 'api.createCollection'],
   ['Schemas page exposes create collection action', schemaPage, 'collections.create'],
+  ['Records page labels record envelope rows', recordListPage, 'records.envelopeLabel'],
+  ['Records page labels child document strip', recordListPage, 'records.childDocuments'],
+  ['Records hover preview uses high-res PDF page preview', recordListPage, 'previewPageUrl(document.id, 1)'],
+  ['Collection detail hover preview uses high-res PDF page preview', collectionDetailPage, 'previewPageUrl(document.id, 1)'],
+  ['Records page has separation styles', styles, 'Records page: make Record vs Document separation explicit'],
   ['Records page uses cursor-paginated API', `${client}\n${readFileSync(resolve(root, 'src/pages/RecordListPage.tsx'), 'utf8')}`, 'api.recordsPage'],
   ['Records page exposes Load more pagination', readFileSync(resolve(root, 'src/pages/RecordListPage.tsx'), 'utf8'), 'loadMoreRecords'],
   ['Document detail PDF preview uses native viewer', documentDetailPage, 'document-native-pdf-preview'],

@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { FileText, Layers3, RefreshCw, Search, Upload } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { api, previewUrl, thumbnailUrl } from '../api/client'
+import { api, previewPageUrl, previewUrl, thumbnailUrl } from '../api/client'
 import SavedViewsBar from '../components/SavedViewsBar'
 import StatusBadge from '../components/StatusBadge'
 import type { Document, RecordRow } from '../types'
@@ -11,16 +11,23 @@ const RECORD_PAGE_LIMIT = 50
 
 const collections = ['Belege', 'Eingangsrechnung', 'Ausgangsrechnung', 'Dokumente']
 
+function documentHoverPreviewUrl(document: Document): string | null {
+  if (document.mime_type === 'application/pdf') return previewPageUrl(document.id, 1)
+  if (document.mime_type?.startsWith('image/')) return previewUrl(document.id)
+  return document.thumbnail_path ? thumbnailUrl(document.id) : null
+}
+
 function Thumb({ document }: { document: Document }) {
   const { t } = useI18n()
+  const previewSource = documentHoverPreviewUrl(document)
   return (
-    <span className="record-thumb">
+    <span className="record-thumb" aria-label={`${t('records.childDocument')}: ${document.original_filename}`}>
       {document.thumbnail_path ? <img src={thumbnailUrl(document.id)} alt="" /> : <span className="file-icon">{document.original_filename.split('.').pop()?.toUpperCase() || 'DOC'}</span>}
       <span className={`status-dot dot-${document.processing_state}`} />
-      <span className="hover-preview">
-        {document.thumbnail_path && <img src={document.mime_type?.startsWith('image/') ? previewUrl(document.id) : thumbnailUrl(document.id)} alt="" />}
+      <span className="hover-preview high-res-document-preview">
+        {previewSource && <img src={previewSource} alt="" />}
         <strong>{document.original_filename}</strong>
-        <em>{document.processing_state}</em>
+        <em>{t('records.childDocument')} · {document.processing_state}</em>
         <span>{document.extracted_title || t('records.noTitleYet')}</span>
         <small>{document.extracted_invoice_number || document.extracted_payment_method || ''} {document.extracted_amount || ''}</small>
         <p>{(document.ocr_text || '').slice(0, 220)}</p>
@@ -164,14 +171,18 @@ export default function RecordListPage({ onOpenRecord }: { onOpenRecord: (id: st
               <div className="record-main-meta">
                 <span className="record-type-icon"><Layers3 size={18} /></span>
                 <div>
+                  <span className="record-object-label">{t('records.envelopeLabel')}</span>
                   <strong>{record.title}</strong>
                   <span>{record.collection?.name || record.collection_id} · {record.document_count} {record.document_count === 1 ? t('records.documentSingular') : t('records.documentPlural')} · {t('records.updated')} {new Date(record.updated_at).toLocaleString(language === 'de' ? 'de-DE' : undefined)}</span>
                   <small>{String(record.summary_metadata?.invoice_number || record.summary_metadata?.amount || t('records.metadataPerFile'))}</small>
                 </div>
               </div>
-              <div className="thumb-strip" onClick={(event) => event.stopPropagation()}>
-                {record.documents.slice(0, 8).map((document) => <Thumb key={document.id} document={document} />)}
-                {record.documents.length > 8 && <span className="count-badge">+{record.documents.length - 8}</span>}
+              <div className="record-documents-cluster" onClick={(event) => event.stopPropagation()}>
+                <span className="record-documents-label">{t('records.childDocuments')}</span>
+                <div className="thumb-strip">
+                  {record.documents.slice(0, 8).map((document) => <Thumb key={document.id} document={document} />)}
+                  {record.documents.length > 8 && <span className="count-badge">+{record.documents.length - 8}</span>}
+                </div>
               </div>
               <StatusBadge value={record.status} />
             </button>

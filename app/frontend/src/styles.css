@@ -11029,3 +11029,46 @@ a.icon-button:not(.danger-button):hover {
   width: 100% !important;
   max-width: none !important;
 }
+
+
+/* Records page: make Record vs Document separation explicit. */
+.records-console .record-object-label,
+.records-console .record-documents-label {
+  display: inline-flex !important;
+  align-items: center;
+  width: fit-content;
+  margin: 0 0 0.25rem !important;
+  padding: 0.12rem 0.48rem;
+  border: 1px solid rgba(94, 234, 212, 0.34);
+  border-radius: 999px;
+  color: #7dd3fc !important;
+  background: rgba(14, 165, 233, 0.1);
+  font-size: 0.68rem !important;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.records-console .record-documents-cluster {
+  display: grid;
+  gap: 0.32rem;
+  justify-self: start;
+  min-width: 0;
+}
+
+.records-console .record-documents-cluster .thumb-strip {
+  width: auto;
+}
+
+.records-console .record-thumb .hover-preview.high-res-document-preview img,
+.collection-detail-console .record-thumb .hover-preview.high-res-document-preview img {
+  image-rendering: auto;
+  height: min(68vh, 760px) !important;
+  max-height: 760px !important;
+}
+
+@media (max-width: 980px) {
+  .records-console .record-documents-cluster {
+    justify-self: start;
+  }
+}
