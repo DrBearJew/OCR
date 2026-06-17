@@ -12,6 +12,7 @@ const collectionDetailPage = readFileSync(resolve(root, 'src/pages/CollectionDet
 const schemaPage = readFileSync(resolve(root, 'src/pages/SchemaPage.tsx'), 'utf8')
 const adminPage = readFileSync(resolve(root, 'src/pages/AdminPage.tsx'), 'utf8')
 const processingPage = readFileSync(resolve(root, 'src/pages/ProcessingPage.tsx'), 'utf8')
+const recordDetailPage = readFileSync(resolve(root, 'src/pages/RecordDetailPage.tsx'), 'utf8')
 const styles = readFileSync(resolve(root, 'src/styles.css'), 'utf8')
 const packageJson = readFileSync(resolve(root, 'package.json'), 'utf8')
 
@@ -76,6 +77,8 @@ const checks = [
   ['Schemas page exposes create collection action', schemaPage, 'collections.create'],
   ['Records page uses cursor-paginated API', `${client}\n${readFileSync(resolve(root, 'src/pages/RecordListPage.tsx'), 'utf8')}`, 'api.recordsPage'],
   ['Records page exposes Load more pagination', readFileSync(resolve(root, 'src/pages/RecordListPage.tsx'), 'utf8'), 'loadMoreRecords'],
+  ['Record detail can delete a single child document', recordDetailPage, 'api.deleteDocument(document.id)'],
+  ['Record detail distinguishes document delete from record delete', recordDetailPage, 'recordDetail.deleteDocumentConfirm'],
   ['Collection detail uses paginated records API', collectionDetailPage, 'api.recordsPage'],
   ['Collection detail exposes Load more pagination', collectionDetailPage, 'loadMoreCollectionRecords'],
   ['Search page uses cursor-paginated API', `${client}\n${searchPage}`, 'api.searchPage'],

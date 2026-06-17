@@ -11,7 +11,7 @@ export default function RecordDetailPage({ id, onOpenDocument }: { id: string; o
   const [selectedId, setSelectedId] = useState<string>('')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
-  const [busy, setBusy] = useState<'process' | 'delete' | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
   const [sharedTitleBase, setSharedTitleBase] = useState('')
   const [applySharedTitle, setApplySharedTitle] = useState(false)
 
@@ -22,7 +22,7 @@ export default function RecordDetailPage({ id, onOpenDocument }: { id: string; o
       setRecord(row)
       setSharedTitleBase(row.shared_title_base || '')
       setApplySharedTitle(row.apply_shared_title_to_documents)
-      setSelectedId((current) => current || row.documents[0]?.id || '')
+      setSelectedId((current) => row.documents.some((doc) => doc.id === current) ? current : row.documents[0]?.id || '')
     } catch (err) {
       setError(err instanceof Error ? err.message : t('recordDetail.loadError'))
     }
@@ -68,13 +68,30 @@ export default function RecordDetailPage({ id, onOpenDocument }: { id: string; o
 
   async function deleteRecord() {
     if (!record) return
-    if (!confirm(`Delete record "${record.title}" and all ${record.document_count} child document${record.document_count === 1 ? '' : 's'}? This is a soft delete.`)) return
+    if (!confirm(t('recordDetail.deleteRecordConfirm', 'Delete record "{title}" and all {count} child documents? This soft-deletes the whole record.').replace('{title}', record.title).replace('{count}', String(record.document_count)))) return
     setBusy('delete')
     try {
       await api.deleteRecord(record.id)
-      setMessage('Record and child documents deleted. They are hidden from default lists and search.')
+      setMessage(t('recordDetail.deleteRecordSuccess', 'Record and child documents deleted. They are hidden from default lists and search.'))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not delete record')
+      setError(err instanceof Error ? err.message : t('recordDetail.deleteRecordFailed', 'Could not delete record'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function deleteSelectedDocument(document: Document) {
+    if (!record) return
+    if (!confirm(t('recordDetail.deleteDocumentConfirm', 'Delete "{filename}" from this record? This soft-deletes only this file.').replace('{filename}', document.original_filename))) return
+    setError('')
+    setMessage('')
+    setBusy(`delete-document:${document.id}`)
+    try {
+      await api.deleteDocument(document.id)
+      setMessage(t('recordDetail.deleteDocumentSuccess', 'Document deleted from this record.'))
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('recordDetail.deleteDocumentFailed', 'Could not delete document'))
     } finally {
       setBusy(null)
     }
@@ -130,13 +147,13 @@ export default function RecordDetailPage({ id, onOpenDocument }: { id: string; o
             </button>
           ))}
         </aside>
-        {selected ? <SelectedDocument document={selected} onOpenDocument={onOpenDocument} /> : <p>{t('recordDetail.noDocuments')}</p>}
+        {selected ? <SelectedDocument document={selected} onOpenDocument={onOpenDocument} onDelete={deleteSelectedDocument} busy={busy === `delete-document:${selected.id}`} /> : <p>{t('recordDetail.noDocuments')}</p>}
       </section>
     </main>
   )
 }
 
-function SelectedDocument({ document, onOpenDocument }: { document: Document; onOpenDocument: (id: string) => void }) {
+function SelectedDocument({ document, onOpenDocument, onDelete, busy }: { document: Document; onOpenDocument: (id: string) => void; onDelete: (document: Document) => void; busy: boolean }) {
   const { t } = useI18n()
   const canPreview = document.mime_type?.startsWith('image/') || document.mime_type === 'application/pdf'
   return (
@@ -144,6 +161,7 @@ function SelectedDocument({ document, onOpenDocument }: { document: Document; on
       <div className="selected-toolbar">
         <button onClick={() => onOpenDocument(document.id)}>{t('recordDetail.openDocument')}</button>
         <a className="icon-button" href={downloadUrl(document.id)} title={t('common.download')}><Download size={18} /></a>
+        <button className="icon-button danger-button" title={t('recordDetail.deleteDocument', 'Delete this document')} onClick={() => onDelete(document)} disabled={busy}><Trash2 size={18} /></button>
       </div>
       <div className="preview-pane">
         {canPreview ? (
