@@ -103,8 +103,8 @@ Choose a mode before configuring `.env` or the Admin model setup page.
 | --- | --- | --- |
 | Basic dev/test | `fake` | Fast UI/backend development with no model server. |
 | Fast local OCR | `ppocrv6` | CPU/local OCR for ordinary text extraction. |
-| Smart document OCR | `paddle_vl` | PaddleOCR-VL via an OpenAI-compatible internal gateway. Best default for rich documents/diagrams. |
-| GLM fallback | `glm` | GLM multimodal OCR through llama.cpp-compatible endpoint. Kept as fallback path. |
+| Smart document OCR | `paddle_vl` | Strict PaddleOCR-VL via the OpenVINO CPU gateway, internal gateway, or another compatible endpoint. Best default for rich documents/diagrams. |
+| GLM OCR | `glm` | GLM multimodal OCR through a compatible endpoint. Kept as a selectable OCR provider. |
 
 Qwen is separate from OCR. It is optional text reasoning for metadata candidates, search hints, tags/folders, and summaries.
 
@@ -169,11 +169,26 @@ docker compose run --rm backend alembic upgrade head
 
 ### Recommended smart setup
 
-For normal smart OCR, use PaddleOCR-VL through the packaged internal gateway setup from the repository root:
+For CPU-only smart OCR, use the OpenVINO PaddleOCR-VL gateway from the repository root:
 
 ```bash
-../scripts/install-smart-paddlevl.sh --dry-run
-../scripts/install-smart-paddlevl.sh
+../scripts/install-smart-paddlevl.sh --backend openvino-cpu --dry-run
+sudo ../scripts/install-smart-paddlevl.sh --backend openvino-cpu
+```
+
+The OpenVINO path serves both single-image OpenAI-compatible OCR and a Dok OCR batch endpoint:
+
+```text
+GET  /health
+GET  /v1/models
+POST /v1/chat/completions
+POST /v1/ocr/batch       # up to 4 rendered PDF pages, one loaded model
+```
+
+For legacy llama.cpp/GGUF deployments, use:
+
+```bash
+sudo ../scripts/install-smart-paddlevl.sh --backend llamacpp
 ```
 
 Then open:
@@ -182,7 +197,7 @@ Then open:
 Admin -> Model Setup
 ```
 
-Use the internal gateway, test PaddleOCR-VL, and save. The Admin setup stores model endpoint configuration in the app settings database so the API and workers see the same model config.
+Set the PaddleOCR-VL endpoint printed by the installer, test PaddleOCR-VL, adjust the OCR time budget if needed, and save. The Admin setup stores model endpoint and timeout-policy configuration in the app settings database so the API and workers see the same model config.
 
 ### `.env` provider keys
 
@@ -192,8 +207,9 @@ The important model settings are:
 # OCR provider: fake, ppocrv6, paddle_vl, glm
 OCR_PROVIDER=paddle_vl
 
-# PaddleOCR-VL through internal gateway / smart proxy
-PADDLE_VL_LLAMACPP_BASE_URL=http://smart-proxy:8081/v1
+# PaddleOCR-VL through OpenVINO gateway, internal gateway, or smart proxy
+# For OpenVINO host-level service, use the Docker network gateway printed by the installer.
+PADDLE_VL_LLAMACPP_BASE_URL=http://172.19.0.1:8091/v1
 PADDLE_VL_MODEL_PATH=paddleocr-vl
 PADDLE_VL_MMPROJ_PATH=/llm-models/paddleocr-vl-mmproj.gguf
 
@@ -216,6 +232,27 @@ LLM_MAX_TOKENS=4096
 LLM_TEMPERATURE=0
 ```
 
+
+### OCR time budgets for large documents
+
+Celery OCR task limits are page-aware instead of one fixed 600 second ceiling. The Admin **Model Setup → OCR time budget** section lets operators choose:
+
+- minimum OCR soft/hard limits
+- hard-limit and queue-lease grace seconds
+- base overhead per document
+- PaddleOCR-VL seconds per 4-page chunk
+- GLM and PP-OCRv6 seconds per page
+
+The PaddleOCR-VL estimate is:
+
+```text
+soft_limit = max(configured_floor, base_overhead + ceil(page_count / ocr_concurrency) * seconds_per_chunk)
+hard_limit = max(configured_hard_floor, soft_limit + hard_grace)
+lease = max(default_lease, hard_limit + lease_grace)
+```
+
+These are kill ceilings, not speed predictions. Users with slower CPUs or very large books can raise the values in Admin; faster hosts can lower them after benchmarking.
+
 ### Model boundary
 
 The app calls OpenAI-compatible HTTP endpoints. It does not hardcode GPU topology, llama.cpp flags, or model-manager behavior.
@@ -228,14 +265,15 @@ POST /v1/chat/completions
 
 For PaddleOCR-VL and GLM image OCR, the request includes multimodal `image_url` content with a data URL. For Qwen, the request is text-only and expects compact JSON metadata candidates.
 
-### Fallback behavior
+### Provider behavior
 
-The OCR path is deliberately conservative:
+The OCR path is deliberately conservative and explicit:
 
-- PaddleOCR-VL is the smart OCR path.
-- PP-OCRv6 is available as fast/local OCR.
-- GLM remains available as fallback multimodal OCR.
-- If PaddleOCR-VL returns empty text for a non-PDF image, the backend can fall back to PP-OCRv6 instead of failing the document immediately.
+- PaddleOCR-VL is the strict smart OCR path when `ocr_engine = paddle_vl`.
+- PP-OCRv6 is available as a separate fast/local OCR provider.
+- GLM remains available as a separate multimodal OCR provider.
+- Strict PaddleOCR-VL PDFs are rendered to page images and processed by PaddleOCR-VL; embedded PDF text is not silently substituted.
+- Strict PaddleOCR-VL failures are surfaced for retry/review instead of silently switching to PP-OCRv6.
 - Qwen failures should not erase deterministic metadata. Empty Qwen output is treated as no candidate; malformed non-empty JSON is recorded for review/diagnostics.
 
 ---
@@ -558,7 +596,7 @@ Keep external links and integrations on the public base URL. Avoid hardcoding lo
 | --- | --- |
 | Upload fails before backend logs appear | Nginx body limit or proxy timeout. Inspect `frontend/nginx.conf` and `nginx -T`. |
 | Upload accepted but document never processes | Worker/Redis health, Celery queue logs, `processing_task_id`, `lease_until`, reconciliation status. |
-| OCR returns empty text | Check selected OCR provider, model endpoint, PaddleOCR-VL template/image support, and fallback events. |
+| OCR returns empty text | Check selected OCR provider, model endpoint, PaddleOCR-VL template/image support, rendered page images, and provider error events. |
 | Metadata looks wrong | Check OCR text first, then deterministic extraction, then Qwen candidates/sources. |
 | Status says `needs_review` after action | Compare `processing_state` and `review_state`; review-only states should promote to `complete` when marked reviewed. |
 | Qwen shows failed but document is complete | Inspect diagnostics. Empty Qwen output is optional/no-candidate; malformed non-empty JSON is a real Qwen candidate failure. |

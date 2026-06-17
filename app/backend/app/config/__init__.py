@@ -21,6 +21,18 @@ class Settings(BaseSettings):
     ocr_worker_concurrency: int = 1
     ocr_task_soft_time_limit: int = 600
     ocr_task_time_limit: int = 660
+    ocr_task_hard_time_limit_grace_seconds: int = 120
+    ocr_task_lease_grace_seconds: int = 300
+    # Portable CPU-only OCR timeout budgets. These are kill ceilings, not target
+    # throughput numbers. The estimator scales long PaddleOCR-VL PDFs by 4-page
+    # OCR chunks so normal invoices keep the existing 600s floor while books
+    # receive enough runtime. Operators can raise these after benchmarking slower
+    # CPUs or lower them after benchmarking faster hosts.
+    ocr_task_base_overhead_seconds: int = 300
+    ocr_task_paddle_vl_seconds_per_chunk: int = 180
+    ocr_task_glm_seconds_per_page: int = 180
+    ocr_task_ppocrv6_seconds_per_page: int = 30
+    ocr_task_fake_seconds_per_page: int = 5
     ocr_max_retries: int = 2
     task_lease_seconds: int = 420
 

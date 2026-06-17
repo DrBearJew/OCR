@@ -305,8 +305,8 @@ def test_process_endpoint_publishes_with_reserved_task_id_when_delay_is_not_patc
     document = make_document(db_session, tmp_path, "Demo GmbH", title="task-id.txt")
     published: dict[str, object] = {}
 
-    def fake_apply_async(*, args, kwargs=None, task_id=None, queue=None):
-        published.update({"args": args, "kwargs": kwargs, "task_id": task_id, "queue": queue})
+    def fake_apply_async(*, args, kwargs=None, task_id=None, queue=None, **options):
+        published.update({"args": args, "kwargs": kwargs, "task_id": task_id, "queue": queue, **options})
 
     monkeypatch.setattr("app.api.documents.process_document_task.apply_async", fake_apply_async)
 

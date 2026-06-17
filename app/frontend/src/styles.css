@@ -7658,6 +7658,25 @@ main,
   flex-wrap: wrap;
 }
 
+.runtime-budget-section {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.65rem;
+  padding: 0.85rem;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.35);
+}
+.runtime-budget-section > div:first-child {
+  grid-column: 1 / -1;
+}
+.runtime-budget-section p {
+  margin: 0.15rem 0 0;
+  color: #9db4cc;
+  font-size: 0.82rem;
+}
+
 
 /* Admin operational i18n spacing: keep status pills and details visually separated. */
 .technical-row .technical-pill {

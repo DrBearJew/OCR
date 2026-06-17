@@ -43,6 +43,30 @@ def test_saved_model_setup_overrides_settings_and_preserves_lmstudio_model_id(db
     assert settings.llm_metadata_refinement_enabled is True
 
 
+def test_saved_model_setup_overrides_ocr_timeout_budget(db_session):
+    save_model_setup(db_session, {
+        "ocr_task_soft_time_limit": 900,
+        "ocr_task_time_limit": 990,
+        "ocr_task_hard_time_limit_grace_seconds": 180,
+        "ocr_task_lease_grace_seconds": 420,
+        "ocr_task_base_overhead_seconds": 240,
+        "ocr_task_paddle_vl_seconds_per_chunk": 150,
+        "ocr_task_glm_seconds_per_page": 210,
+        "ocr_task_ppocrv6_seconds_per_page": 45,
+    })
+
+    settings = settings_with_model_setup(db_session, Settings())
+
+    assert settings.ocr_task_soft_time_limit == 900
+    assert settings.ocr_task_time_limit == 990
+    assert settings.ocr_task_hard_time_limit_grace_seconds == 180
+    assert settings.ocr_task_lease_grace_seconds == 420
+    assert settings.ocr_task_base_overhead_seconds == 240
+    assert settings.ocr_task_paddle_vl_seconds_per_chunk == 150
+    assert settings.ocr_task_glm_seconds_per_page == 210
+    assert settings.ocr_task_ppocrv6_seconds_per_page == 45
+
+
 def test_model_setup_rejects_invalid_ocr_provider(db_session):
     saved = save_model_setup(db_session, {"ocr_provider": "qwen", "mode": "smart"})
 

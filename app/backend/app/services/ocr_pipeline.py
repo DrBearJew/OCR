@@ -22,6 +22,7 @@ class EffectiveOCRConfig:
     image_dpi: int
     output_type: str
     max_image_pixels: int
+    ocr_concurrency: int
 
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -47,6 +48,7 @@ def resolve_ocr_config(document: Document, settings: Settings | None = None) -> 
         "image_dpi": settings.ocr_image_dpi,
         "output_type": settings.ocr_output_type,
         "max_image_pixels": settings.ocr_max_image_pixels,
+        "ocr_concurrency": settings.ocr_concurrency,
         **collection_config,
         **document_config,
     }
@@ -70,6 +72,7 @@ def resolve_ocr_config(document: Document, settings: Settings | None = None) -> 
         image_dpi=int(merged["image_dpi"]),
         output_type=str(merged["output_type"]),
         max_image_pixels=int(merged["max_image_pixels"]),
+        ocr_concurrency=int(merged["ocr_concurrency"]),
     )
 
 

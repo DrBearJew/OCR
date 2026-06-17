@@ -230,6 +230,92 @@ class PaddleVLLlamaCppOCRProvider:
             model_response_text=text,
         )
 
+    def extract_text_batch(self, file_paths: list[str]) -> list[OCRResult]:
+        paths = [Path(file_path) for file_path in file_paths]
+        if not paths:
+            return []
+        if len(paths) == 1:
+            return [self.extract_text(str(paths[0]))]
+        for path in paths:
+            if not path.exists():
+                raise OCRProviderError(f"File not found: {path}")
+        self._validate_multimodal_config()
+        prompt = self.prompt_loader.render("ocr_prompt.tmpl")
+        images = []
+        for path in paths:
+            mime_type, data = _image_data_for_llama(path)
+            images.append(
+                {
+                    "filename": path.name,
+                    "image_url": f"data:{mime_type};base64,{data}",
+                }
+            )
+        payload = {
+            "model": self.settings.paddle_vl_model_name,
+            # The OpenVINO slot-batched path is fastest and most stable with the
+            # native PaddleOCR-VL task cue. The full Dok OCR prompt is still
+            # traced, but repeating it into every batch slot makes CPU batch
+            # decode slower than sequential single-page OCR.
+            "prompt": "OCR:",
+            "images": images,
+            "temperature": 0.0,
+            "max_tokens": min(int(self.settings.llm_max_tokens), 2048),
+            "early_stop_ratio": 0.0,
+        }
+        headers = {"Content-Type": "application/json"}
+        url = llama_ocr_batch_url(self.settings.paddle_vl_llamacpp_base_url)
+        try:
+            response = httpx.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=self.settings.llm_request_timeout_seconds,
+            )
+            response.raise_for_status()
+            raw = response.json()
+        except httpx.TimeoutException as exc:
+            raise OCRProviderError(f"PaddleOCR-VL batch request timed out after {self.settings.llm_request_timeout_seconds}s") from exc
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in {404, 405}:
+                logger.info("PaddleOCR-VL batch endpoint unavailable at %s; falling back to sequential OCR", url)
+                return [self.extract_text(str(path)) for path in paths]
+            raise OCRProviderError(f"PaddleOCR-VL batch request failed with HTTP {exc.response.status_code}: {exc.response.text[:500]}") from exc
+        except httpx.HTTPError as exc:
+            raise OCRProviderError(f"PaddleOCR-VL batch request failed: {exc}") from exc
+        except ValueError as exc:
+            raise OCRProviderError("PaddleOCR-VL batch endpoint returned invalid JSON") from exc
+
+        pages = raw.get("pages") if isinstance(raw, dict) else None
+        if not isinstance(pages, list):
+            raise OCRProviderError("PaddleOCR-VL batch endpoint returned no pages")
+        if len(pages) != len(paths):
+            raise OCRProviderError(f"PaddleOCR-VL batch endpoint returned {len(pages)} pages for {len(paths)} inputs")
+
+        batch_meta = {
+            "id": raw.get("id"),
+            "batch_size": raw.get("batch_size"),
+            "timings": raw.get("timings"),
+        }
+        results: list[OCRResult] = []
+        for path, page in zip(paths, pages, strict=True):
+            text = _compact_repeated_ocr_lines(str(page.get("text") or "").strip()) if isinstance(page, dict) else ""
+            text = _format_diagram_ocr_markdown_if_needed(text)
+            if not text:
+                raise OCRProviderError(f"PaddleOCR-VL batch endpoint returned empty text for {path.name}")
+            results.append(
+                OCRResult(
+                    text=text,
+                    raw_response={"provider": "paddle_vl", "raw": page, "batch": batch_meta},
+                    prompt_name=prompt.name,
+                    prompt_version=prompt.version,
+                    model_role="paddleocr_vl",
+                    model_endpoint=self.settings.paddle_vl_llamacpp_base_url,
+                    model_name=self.settings.paddle_vl_model_name,
+                    model_response_text=text,
+                )
+            )
+        return results
+
     def _validate_multimodal_config(self) -> None:
         if not str(self.settings.paddle_vl_mmproj_path or "").strip():
             raise OCRProviderError("PaddleOCR-VL multimodal configuration error: PADDLE_VL_MMPROJ_PATH is empty")
@@ -626,6 +712,13 @@ def llama_chat_completions_url(base_url: str) -> str:
     if base.endswith("/v1"):
         return f"{base}/chat/completions"
     return f"{base}/v1/chat/completions"
+
+
+def llama_ocr_batch_url(base_url: str) -> str:
+    base = base_url.rstrip("/")
+    if base.endswith("/v1"):
+        return f"{base}/ocr/batch"
+    return f"{base}/v1/ocr/batch"
 
 
 def llama_health_urls(base_url: str) -> list[str]:

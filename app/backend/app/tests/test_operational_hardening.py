@@ -4,9 +4,9 @@ import asyncio
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
-import sys
 
 from starlette.datastructures import Headers, UploadFile
 from fastapi import HTTPException
@@ -25,6 +25,7 @@ from app.services.ocr_glm import OCRProviderError, OCRResult
 from app.services.processing import (
     clear_processing_lease,
     mark_duplicate_document,
+    estimate_ocr_task_budget,
     queue_ocr,
     reserve_processing_task,
     run_metadata_for_document,
@@ -652,114 +653,110 @@ def test_pdf_upload_records_page_count_without_requiring_metadata(db_session: Se
     assert doc.thumbnail_path.endswith("pdf-thumb.jpg")
 
 
-def test_pdf_ocr_uses_embedded_text_layer_before_page_image_ocr(db_session: Session, tmp_path: Path, monkeypatch) -> None:
+def test_pdf_ocr_with_paddlevl_renders_pages_and_calls_provider(db_session: Session, tmp_path: Path, monkeypatch) -> None:
     doc = make_doc(db_session, tmp_path, "%PDF", collection="Eingangsrechnung", sha="p" * 64)
     doc.mime_type = "application/pdf"
-    doc.ocr_config_json = {"page_limit": 3}
+    doc.ocr_config_json = {"ocr_engine": "paddle_vl", "page_limit": 3, "ocr_concurrency": 1}
     queue_ocr(db_session, doc)
     db_session.commit()
-
-    class FakeTextPage:
-        def __init__(self, text: str) -> None:
-            self.text = text
-
-        def get_text_range(self) -> str:
-            return self.text
-
-        def close(self) -> None:
-            return None
-
-    class FakePage:
-        def __init__(self, text: str) -> None:
-            self.text = text
-
-        def get_textpage(self) -> FakeTextPage:
-            return FakeTextPage(self.text)
-
-        def close(self) -> None:
-            return None
-
-    class FakePdf:
-        pages = [
-            "Invoice ACME GmbH\r\nAmount 42,00 EUR",
-            "Second page with payment terms and delivery notes",
-        ]
-
-        def __init__(self, path: str) -> None:
-            self.path = path
-
-        def __len__(self) -> int:
-            return len(self.pages)
-
-        def __getitem__(self, index: int) -> FakePage:
-            return FakePage(self.pages[index])
-
-        def close(self) -> None:
-            return None
-
-    monkeypatch.setitem(sys.modules, "pypdfium2", SimpleNamespace(PdfDocument=FakePdf))
-    monkeypatch.setattr("app.services.processing.render_pdf_pages", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("rendering should not run")))
-
-    run_ocr_for_document(db_session, doc.id, FailingProvider(), enqueue_metadata=False)
-    db_session.refresh(doc)
-    assert doc.ocr_text == "Invoice ACME GmbH\nAmount 42,00 EUR\fSecond page with payment terms and delivery notes"
-    assert doc.raw_ocr_json["source"] == "pdf_text_layer"
-    assert doc.model_trace_json["ocr"]["role"] == "pdf_text_layer"
-    assert doc.page_count == 2
-    assert [page.ocr_text for page in doc.pages] == ["Invoice ACME GmbH\nAmount 42,00 EUR", "Second page with payment terms and delivery notes"]
-
-
-def test_pdf_ocr_combines_page_fragments_when_text_layer_is_empty(db_session: Session, tmp_path: Path, monkeypatch) -> None:
-    doc = make_doc(db_session, tmp_path, "%PDF", collection="Eingangsrechnung", sha="s" * 64)
-    doc.mime_type = "application/pdf"
-    doc.ocr_config_json = {"page_limit": 2}
-    queue_ocr(db_session, doc)
-    db_session.commit()
-
-    class EmptyTextPage:
-        def get_text_range(self) -> str:
-            return ""
-
-        def close(self) -> None:
-            return None
-
-    class EmptyPage:
-        def get_textpage(self) -> EmptyTextPage:
-            return EmptyTextPage()
-
-        def close(self) -> None:
-            return None
-
-    class EmptyPdf:
-        def __init__(self, path: str) -> None:
-            self.path = path
-
-        def __len__(self) -> int:
-            return 2
-
-        def __getitem__(self, index: int) -> EmptyPage:
-            return EmptyPage()
-
-        def close(self) -> None:
-            return None
 
     page1 = tmp_path / "page1.jpg"
     page2 = tmp_path / "page2.jpg"
     page1.write_text("one", encoding="utf-8")
     page2.write_text("two", encoding="utf-8")
-    monkeypatch.setitem(sys.modules, "pypdfium2", SimpleNamespace(PdfDocument=EmptyPdf))
     monkeypatch.setattr("app.services.processing.render_pdf_pages", lambda *args, **kwargs: [str(page1), str(page2)])
+
+    calls: list[str] = []
+
+    class PaddleOnlyProvider:
+        def extract_text(self, file_path: str) -> OCRResult:
+            calls.append(file_path)
+            return OCRResult(text=f"paddlevl:{Path(file_path).stem}", raw_response={"provider": "paddle_vl", "file": file_path}, model_role="paddleocr_vl")
+
+    run_ocr_for_document(db_session, doc.id, PaddleOnlyProvider(), enqueue_metadata=False)
+    db_session.refresh(doc)
+    assert calls == [str(page1), str(page2)]
+    assert doc.ocr_text == "paddlevl:page1paddlevl:page2"
+    assert doc.raw_ocr_json["source"] == "pdf_page_rendering"
+    assert doc.raw_ocr_json["provider"] == "paddle_vl"
+    assert doc.raw_ocr_json["page_ocr_concurrency"] == 1
+    assert doc.model_trace_json["ocr"]["role"] == "paddleocr_vl"
+    assert doc.page_count == 2
+    assert [page.rendered_image_path for page in doc.pages] == [str(page1), str(page2)]
+
+
+def test_paddlevl_pdf_page_ocr_uses_bounded_parallel_page_requests(db_session: Session, tmp_path: Path, monkeypatch) -> None:
+    doc = make_doc(db_session, tmp_path, "%PDF", collection="Eingangsrechnung", sha="s" * 64)
+    doc.mime_type = "application/pdf"
+    doc.ocr_config_json = {"ocr_engine": "paddle_vl", "page_limit": 8, "ocr_concurrency": 4}
+    queue_ocr(db_session, doc)
+    db_session.commit()
+
+    pages = []
+    for index in range(1, 7):
+        page = tmp_path / f"page{index}.jpg"
+        page.write_text(str(index), encoding="utf-8")
+        pages.append(str(page))
+    monkeypatch.setattr("app.services.processing.render_pdf_pages", lambda *args, **kwargs: pages)
 
     class PageProvider:
         def extract_text(self, file_path: str) -> OCRResult:
-            return OCRResult(text=Path(file_path).stem, raw_response={"file": file_path})
+            # Return reversed completion speed by not depending on call order; the
+            # production combiner must still preserve page order.
+            return OCRResult(text=Path(file_path).stem, raw_response={"provider": "paddle_vl", "file": file_path}, model_role="paddleocr_vl")
 
     run_ocr_for_document(db_session, doc.id, PageProvider(), enqueue_metadata=False)
     db_session.refresh(doc)
-    assert doc.ocr_text == "page1\fpage2"
+    assert doc.ocr_text == "page1page2page3page4page5page6"
     assert doc.raw_ocr_json["source"] == "pdf_page_rendering"
-    assert doc.page_count == 2
-    assert [page.rendered_image_path for page in doc.pages] == [str(page1), str(page2)]
+    assert doc.raw_ocr_json["provider"] == "paddle_vl"
+    assert doc.raw_ocr_json["page_ocr_concurrency"] == 4
+    assert [page.page_number for page in doc.pages] == [1, 2, 3, 4, 5, 6]
+    assert [page.rendered_image_path for page in doc.pages] == pages
+
+
+def test_paddlevl_task_budget_scales_with_large_pdf_page_count(db_session: Session, tmp_path: Path) -> None:
+    doc = make_doc(db_session, tmp_path, "%PDF", collection="Eingangsrechnung", sha="t" * 64)
+    doc.mime_type = "application/pdf"
+    doc.page_count = 80
+    doc.ocr_config_json = {"ocr_engine": "paddle_vl", "page_limit": 80, "ocr_concurrency": 4}
+    budget = estimate_ocr_task_budget(doc)
+
+    assert budget["page_count"] == 80
+    assert budget["budget_unit"] == "chunk"
+    assert budget["soft_time_limit"] > 600
+    assert budget["time_limit"] >= budget["soft_time_limit"] + 120
+
+    assert reserve_processing_task(doc, task_id="book-task", stage="ocr", force=True)
+    assert doc.processing_started_at is not None
+    assert doc.processing_lease_until is not None
+    assert (doc.processing_lease_until - doc.processing_started_at).total_seconds() >= budget["lease_seconds"] - 1
+
+
+def test_publish_document_task_applies_dynamic_ocr_limits(db_session: Session, tmp_path: Path, monkeypatch) -> None:
+    from app.workers.tasks import ocr_document_task, publish_document_task
+
+    captured: dict = {}
+
+    def fake_apply_async(*, args, kwargs=None, task_id=None, queue=None, **options):
+        captured.update({"args": args, "kwargs": kwargs, "task_id": task_id, "queue": queue, **options})
+        return "queued"
+
+    monkeypatch.setattr(ocr_document_task, "apply_async", fake_apply_async)
+    doc = make_doc(db_session, tmp_path, "%PDF", collection="Eingangsrechnung", sha="u" * 64)
+    doc.mime_type = "application/pdf"
+    doc.page_count = 40
+    doc.ocr_config_json = {"ocr_engine": "paddle_vl", "page_limit": 40, "ocr_concurrency": 4}
+    reserve_processing_task(doc, task_id="queued-book", stage="ocr", force=True)
+    db_session.commit()
+
+    publish_document_task(db_session, doc.id, ocr_document_task, args=[str(doc.id)], task_id="queued-book", queue="ocr", stage="ocr")
+
+    assert captured["task_id"] == "queued-book"
+    assert captured["queue"] == "ocr"
+    assert captured["soft_time_limit"] > 600
+    assert captured["soft_time_limit"] < 3600
+    assert captured["time_limit"] >= captured["soft_time_limit"] + 120
 
 
 def test_manual_ocr_endpoint_enqueues_without_running_sync(db_session: Session, tmp_path: Path, monkeypatch) -> None:

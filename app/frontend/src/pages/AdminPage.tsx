@@ -44,7 +44,15 @@ const defaultRuntimeSetup: ModelSetup = {
   qwen_enabled: false,
   qwen_base_url: INTERNAL_MODEL_GATEWAY_URL,
   qwen_model: 'qwen',
-  timeout_seconds: 120
+  timeout_seconds: 120,
+  ocr_task_soft_time_limit: 600,
+  ocr_task_time_limit: 660,
+  ocr_task_hard_time_limit_grace_seconds: 120,
+  ocr_task_lease_grace_seconds: 300,
+  ocr_task_base_overhead_seconds: 300,
+  ocr_task_paddle_vl_seconds_per_chunk: 180,
+  ocr_task_glm_seconds_per_page: 180,
+  ocr_task_ppocrv6_seconds_per_page: 30
 }
 
 export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: string) => void }) {
@@ -280,6 +288,36 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
           <label>{t('admin.timeoutSeconds')}
             <input type="number" min="5" value={runtimeSetup.timeout_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, timeout_seconds: Number(event.target.value) || 120 })} />
           </label>
+          <div className="runtime-budget-section">
+            <div>
+              <strong>{t('admin.ocrTimeBudget')}</strong>
+              <p>{t('admin.ocrTimeBudgetCopy')}</p>
+            </div>
+            <label>{t('admin.ocrSoftLimit')}
+              <input type="number" min="60" value={runtimeSetup.ocr_task_soft_time_limit} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_soft_time_limit: Number(event.target.value) || 600 })} />
+            </label>
+            <label>{t('admin.ocrHardLimit')}
+              <input type="number" min="60" value={runtimeSetup.ocr_task_time_limit} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_time_limit: Number(event.target.value) || 660 })} />
+            </label>
+            <label>{t('admin.ocrHardGrace')}
+              <input type="number" min="1" value={runtimeSetup.ocr_task_hard_time_limit_grace_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_hard_time_limit_grace_seconds: Number(event.target.value) || 120 })} />
+            </label>
+            <label>{t('admin.ocrLeaseGrace')}
+              <input type="number" min="1" value={runtimeSetup.ocr_task_lease_grace_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_lease_grace_seconds: Number(event.target.value) || 300 })} />
+            </label>
+            <label>{t('admin.ocrBaseOverhead')}
+              <input type="number" min="1" value={runtimeSetup.ocr_task_base_overhead_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_base_overhead_seconds: Number(event.target.value) || 300 })} />
+            </label>
+            <label>{t('admin.paddleChunkBudget')}
+              <input type="number" min="1" value={runtimeSetup.ocr_task_paddle_vl_seconds_per_chunk} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_paddle_vl_seconds_per_chunk: Number(event.target.value) || 180 })} />
+            </label>
+            <label>{t('admin.glmPageBudget')}
+              <input type="number" min="1" value={runtimeSetup.ocr_task_glm_seconds_per_page} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_glm_seconds_per_page: Number(event.target.value) || 180 })} />
+            </label>
+            <label>{t('admin.ppocrPageBudget')}
+              <input type="number" min="1" value={runtimeSetup.ocr_task_ppocrv6_seconds_per_page} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_ppocrv6_seconds_per_page: Number(event.target.value) || 30 })} />
+            </label>
+          </div>
         </div>
         <p className="form-help">{t('admin.internalGatewayHelp')}</p>
         <div className="button-row form-actions runtime-setup-actions">

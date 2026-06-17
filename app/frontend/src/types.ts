@@ -277,6 +277,14 @@ export interface ModelSetup {
   qwen_base_url: string
   qwen_model: string
   timeout_seconds: number
+  ocr_task_soft_time_limit: number
+  ocr_task_time_limit: number
+  ocr_task_hard_time_limit_grace_seconds: number
+  ocr_task_lease_grace_seconds: number
+  ocr_task_base_overhead_seconds: number
+  ocr_task_paddle_vl_seconds_per_chunk: number
+  ocr_task_glm_seconds_per_page: number
+  ocr_task_ppocrv6_seconds_per_page: number
 }
 
 export interface ModelEndpointTestResult {

@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 from app.config import Settings, get_settings
+from app.services.model_gateway_lock import ModelGatewayLockTimeout, exclusive_model_gateway_lock
 from app.services.ocr_glm import llama_chat_completions_url, llama_health_urls
 from app.services.prompt_loader import PromptLoader, RenderedPrompt
 
@@ -168,38 +169,48 @@ class QwenLlamaCppProvider:
             body["response_format"] = {"type": "json_object"}
         url = llama_chat_completions_url(self.settings.qwen_llamacpp_base_url)
         try:
-            raw = self._post_chat(url, body)
+            with exclusive_model_gateway_lock(
+                "qwen:metadata",
+                settings=self.settings,
+                wait_timeout_seconds=max(self.settings.ocr_task_time_limit, self.settings.llm_request_timeout_seconds),
+                lease_seconds=max(self.settings.llm_request_timeout_seconds + 60, 180),
+            ):
+                raw = self._post_chat(url, body)
+                if json_only and not _chat_content(raw) and body.get("response_format"):
+                    retry_messages = [dict(message) for message in body["messages"]]
+                    retry_messages[-1]["content"] = (
+                        str(retry_messages[-1]["content"]).rstrip()
+                        + "\n\nReturn one valid compact JSON object now. Do not return an empty answer."
+                    )
+                    retry_body = {**body, "messages": retry_messages}
+                    raw = self._post_chat(url, retry_body)
         except httpx.HTTPStatusError as exc:
             if json_only and body.get("response_format") and exc.response.status_code in {400, 422}:
                 fallback_body = {key: value for key, value in body.items() if key != "response_format"}
                 try:
-                    raw = self._post_chat(url, fallback_body)
+                    with exclusive_model_gateway_lock(
+                        "qwen:metadata",
+                        settings=self.settings,
+                        wait_timeout_seconds=max(self.settings.ocr_task_time_limit, self.settings.llm_request_timeout_seconds),
+                        lease_seconds=max(self.settings.llm_request_timeout_seconds + 60, 180),
+                    ):
+                        raw = self._post_chat(url, fallback_body)
                 except httpx.HTTPError as fallback_exc:
                     raise QwenProviderError(f"Qwen request failed after response_format fallback: {fallback_exc}") from fallback_exc
                 except ValueError as fallback_exc:
                     raise QwenProviderError("Qwen fallback returned invalid JSON") from fallback_exc
+                except ModelGatewayLockTimeout as fallback_exc:
+                    raise QwenProviderError(f"Qwen model gateway lock timeout after response_format fallback: {fallback_exc}") from fallback_exc
             else:
                 raise QwenProviderError(f"Qwen request failed: {exc}") from exc
         except httpx.HTTPError as exc:
             raise QwenProviderError(f"Qwen request failed: {exc}") from exc
         except ValueError as exc:
             raise QwenProviderError("Qwen returned invalid JSON") from exc
+        except ModelGatewayLockTimeout as exc:
+            raise QwenProviderError(f"Qwen model gateway lock timeout: {exc}") from exc
 
         text = _chat_content(raw)
-        if json_only and not text:
-            retry_messages = [dict(message) for message in body["messages"]]
-            retry_messages[-1]["content"] = (
-                str(retry_messages[-1]["content"]).rstrip()
-                + "\n\nReturn one valid compact JSON object now. Do not return an empty answer."
-            )
-            retry_body = {**body, "messages": retry_messages}
-            try:
-                raw = self._post_chat(url, retry_body)
-                text = _chat_content(raw)
-            except httpx.HTTPError as exc:
-                raise QwenProviderError(f"Qwen retry failed after empty response: {exc}") from exc
-            except ValueError as exc:
-                raise QwenProviderError("Qwen retry returned invalid JSON") from exc
         logger.info("Qwen %s completed prompt=%s model=%s", role_name, prompt.name, self.settings.qwen_model_name)
         return QwenRefinement(
             raw_text=text,

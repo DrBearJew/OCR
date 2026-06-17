@@ -1,21 +1,22 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 import logging
-from pathlib import Path
 import re
 import unicodedata
 import uuid
 from typing import Any
 
 from sqlalchemy import delete, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from app.config import get_settings
 from app.models import Batch, BatchStatus, Document, DocumentPage, DocumentState, FieldValueSource, HookStage, OCRMode, ReviewState, StageState
 from app.services.events import append_processing_log, record_event
 from app.services.collections import update_record_status, upsert_custom_field_value
-from app.services.document_assets import render_pdf_pages
+from app.services.document_assets import inspect_page_count, render_pdf_pages
 from app.services.extraction import ExtractionInput, apply_shared_title_to_result, extract_metadata, sanitize_shared_title_base
 from app.services.hooks import execute_hooks
 from app.services.folders import auto_folder_path_for_document, ensure_folder_path
@@ -27,6 +28,7 @@ from app.services.llm_enrichment import (
 from app.services.llm_qwen import build_qwen_provider
 from app.services.metadata_resolver import resolve_metadata_fields, review_warnings_for_resolution
 from app.services.model_setup import settings_with_model_setup
+from app.services.model_gateway_lock import exclusive_model_gateway_lock
 from app.services.ocr_glm import OCRProvider, OCRProviderError, build_ocr_provider
 from app.services.ocr_pipeline import resolve_ocr_config, store_effective_ocr_trace
 from app.services.paperless_metadata import apply_paperless_metadata
@@ -105,7 +107,8 @@ def reserve_processing_task(
     document.current_stage = stage
     document.processing_started_at = now
     document.last_processing_heartbeat_at = now
-    document.processing_lease_until = now + timedelta(seconds=lease_seconds or settings.task_lease_seconds)
+    effective_lease_seconds = lease_seconds if lease_seconds is not None else estimate_processing_lease_seconds(document, stage=stage, settings=settings)
+    document.processing_lease_until = now + timedelta(seconds=effective_lease_seconds)
     return True
 
 
@@ -122,6 +125,111 @@ def task_matches_or_expired(document: Document, task_id: str | None) -> bool:
     if task_id and document.processing_task_id == task_id:
         return True
     return not has_active_processing_lease(document)
+
+
+def estimate_processing_lease_seconds(document: Document, *, stage: str, settings: Any | None = None) -> int:
+    runtime_settings = settings or _runtime_settings_for_document(document)
+    if stage in {"ocr", "process"}:
+        return int(estimate_ocr_task_budget(document, settings=runtime_settings)["lease_seconds"])
+    return int(runtime_settings.task_lease_seconds)
+
+
+def estimate_ocr_task_budget(
+    document: Document,
+    *,
+    config: Any | None = None,
+    settings: Any | None = None,
+) -> dict[str, Any]:
+    """Return page-aware Celery/lease limits for CPU OCR work.
+
+    Strict PaddleOCR-VL on CPU scales with rendered PDF pages, not upload size.
+    A static 600 second worker limit is fine for invoices but fails for books.
+    This estimate is intentionally conservative: it gives long documents enough
+    wall-clock room without changing OCR semantics or adding hidden fallbacks.
+    """
+
+    runtime_settings = settings or _runtime_settings_for_document(document)
+    effective_config = config or resolve_ocr_config(document, settings=runtime_settings)
+    page_count = _estimated_ocr_page_count(document, effective_config, runtime_settings)
+    estimated_soft_limit = _estimated_ocr_soft_limit_seconds(page_count, effective_config, runtime_settings)
+    soft_limit = max(int(runtime_settings.ocr_task_soft_time_limit), estimated_soft_limit)
+    hard_limit = max(
+        int(runtime_settings.ocr_task_time_limit),
+        soft_limit + int(runtime_settings.ocr_task_hard_time_limit_grace_seconds),
+    )
+    lease_seconds = max(
+        int(runtime_settings.task_lease_seconds),
+        hard_limit + int(runtime_settings.ocr_task_lease_grace_seconds),
+    )
+    return {
+        "engine": effective_config.ocr_engine,
+        "page_count": page_count,
+        "seconds_per_unit": _ocr_budget_seconds_per_unit(effective_config.ocr_engine, runtime_settings),
+        "budget_unit": _ocr_budget_unit(effective_config.ocr_engine),
+        "soft_time_limit": soft_limit,
+        "time_limit": hard_limit,
+        "lease_seconds": lease_seconds,
+    }
+
+
+def _runtime_settings_for_document(document: Document, settings: Any | None = None) -> Any:
+    if settings is not None:
+        return settings
+    db = object_session(document)
+    if db is not None:
+        try:
+            return settings_with_model_setup(db, get_settings())
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Could not load DB model setup for OCR budget; using environment settings error=%s", exc)
+    return get_settings()
+
+
+def _estimated_ocr_page_count(document: Document, config: Any, settings: Any) -> int:
+    page_count = document.page_count
+    if page_count is None and _is_pdf_document(document):
+        try:
+            page_count = inspect_page_count(document.storage_path, document.mime_type, settings=settings)
+            if page_count is not None:
+                document.page_count = page_count
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Could not inspect PDF page count for OCR budget document_id=%s error=%s", document.id, exc)
+    try:
+        count = int(page_count or 1)
+    except (TypeError, ValueError):
+        count = 1
+    if _is_pdf_document(document):
+        try:
+            count = min(count, max(1, int(getattr(config, "page_limit", count) or count)))
+        except (TypeError, ValueError):
+            pass
+    return max(1, count)
+
+
+def _estimated_ocr_soft_limit_seconds(page_count: int, config: Any, settings: Any) -> int:
+    engine = str(getattr(config, "ocr_engine", "") or "").strip()
+    if engine == "paddle_vl":
+        worker_count = _pdf_page_ocr_worker_count(config, page_count)
+        chunks = max(1, (page_count + worker_count - 1) // worker_count)
+        return int(settings.ocr_task_base_overhead_seconds) + (chunks * _ocr_budget_seconds_per_unit(engine, settings))
+    return int(settings.ocr_task_base_overhead_seconds) + (page_count * _ocr_budget_seconds_per_unit(engine, settings))
+
+
+def _ocr_budget_seconds_per_unit(engine: str, settings: Any) -> int:
+    normalized = str(engine or "").strip()
+    if normalized == "paddle_vl":
+        return int(settings.ocr_task_paddle_vl_seconds_per_chunk)
+    if normalized == "glm":
+        return int(settings.ocr_task_glm_seconds_per_page)
+    if normalized == "ppocrv6":
+        return int(settings.ocr_task_ppocrv6_seconds_per_page)
+    return int(settings.ocr_task_fake_seconds_per_page)
+
+
+def _ocr_budget_unit(engine: str) -> str:
+    normalized = str(engine or "").strip()
+    if normalized == "paddle_vl":
+        return "chunk"
+    return "page"
 
 
 def update_batch_status(db: Session, batch_id: uuid.UUID) -> BatchStatus:
@@ -779,6 +887,7 @@ def run_ocr_for_document(
         config.ocr_mode = OCRMode.force
         document.ocr_mode = OCRMode.force
     store_effective_ocr_trace(document, config)
+    task_budget = estimate_ocr_task_budget(document, config=config, settings=runtime_settings)
     if config.ocr_mode == OCRMode.skip:
         reason = "OCR skipped because text already exists" if document.ocr_text else "OCR explicitly skipped without existing text"
         record_event(db, document, "ocr_skipped", reason, metadata=config.as_dict())
@@ -806,37 +915,26 @@ def run_ocr_for_document(
         document.processing_attempt = (document.processing_attempt or 0) + 1
         document.last_processing_heartbeat_at = datetime.now(timezone.utc)
         document.current_stage = "ocr"
-        record_event(db, document, "ocr_started", "OCR started", metadata={"attempt": document.processing_attempt, "ocr_config": config.as_dict()})
+        record_event(db, document, "ocr_started", "OCR started", metadata={"attempt": document.processing_attempt, "ocr_config": config.as_dict(), "task_budget": task_budget})
         update_batch_status(db, document.batch_id)
         db.commit()
 
         logger.info("OCR started document_id=%s path=%s", document.id, document.storage_path)
-        try:
+        gateway_lock = (
+            exclusive_model_gateway_lock(
+                f"ocr:{config.ocr_engine}",
+                settings=runtime_settings,
+                wait_timeout_seconds=task_budget["time_limit"],
+                lease_seconds=task_budget["lease_seconds"],
+            )
+            if _ocr_uses_shared_model_gateway(config)
+            else nullcontext()
+        )
+        with gateway_lock:
             if _is_pdf_document(document):
                 result = _extract_pdf_pages(provider, document, config)
             else:
                 result = provider.extract_text(document.storage_path)
-        except OCRProviderError as exc:
-            empty_paddle_vl = config.ocr_engine == "paddle_vl" and "empty text" in str(exc).lower()
-            can_fallback = empty_paddle_vl and not _is_pdf_document(document)
-            if not can_fallback:
-                raise
-            record_event(
-                db,
-                document,
-                "ocr_fallback_ppocrv6",
-                "PaddleOCR-VL returned empty text; falling back to local PP-OCRv6",
-                metadata={"error": str(exc), "from_engine": config.ocr_engine, "fallback_engine": "ppocrv6"},
-            )
-            db.commit()
-            logger.warning("PaddleOCR-VL returned empty text for document_id=%s; falling back to PP-OCRv6", document.id)
-            fallback_provider = build_ocr_provider(runtime_settings, provider_name="ppocrv6")
-            result = fallback_provider.extract_text(document.storage_path)
-            result.raw_response = {
-                **(result.raw_response or {}),
-                "fallback_from": config.ocr_engine,
-                "fallback_reason": str(exc),
-            }
         document.ocr_text = result.text
         document.raw_ocr_json = result.raw_response
         _write_page_fragments(db, document, result.text, result.raw_response)
@@ -894,125 +992,12 @@ def _is_pdf_document(document: Document) -> bool:
     return (document.mime_type or "").lower() == "application/pdf" or document.storage_path.lower().endswith(".pdf")
 
 
-def _extract_pdf_text_layer(document: Document, config: Any):
-    """Use embedded PDF text before expensive page-image OCR when it is usable.
-
-    Born-digital PDFs already contain selectable text. Sending every rendered page
-    to a VLM wastes minutes, can hit Celery task limits, and can hallucinate.
-    Scanned PDFs normally have no meaningful text layer, so they fall back to the
-    existing rendered-page OCR path.
-    """
-    from app.services.ocr_glm import OCRResult
-
-    try:
-        import pypdfium2 as pdfium
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("PDF text-layer extraction unavailable document_id=%s error=%s", document.id, exc)
-        return None
-
-    page_payloads: list[dict[str, Any]] = []
-    try:
-        pdf = pdfium.PdfDocument(document.storage_path)
-        try:
-            total_pages = len(pdf)
-            count = min(total_pages, max(1, int(getattr(config, "page_limit", total_pages) or total_pages)))
-            for index in range(count):
-                text = _extract_pdf_page_text(pdf[index])
-                page_payloads.append(
-                    {
-                        "page_number": index + 1,
-                        "text": text,
-                        "raw_response": {
-                            "provider": "pdf_text_layer",
-                            "char_count": len(text),
-                        },
-                        "rendered_image_path": _existing_rendered_pdf_page_path(document, index + 1),
-                    }
-                )
-        finally:
-            close = getattr(pdf, "close", None)
-            if callable(close):
-                close()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Could not extract PDF text layer document_id=%s path=%s error=%s", document.id, document.storage_path, exc)
-        return None
-
-    if not _pdf_text_layer_is_usable(page_payloads):
-        return None
-
-    texts = [str(page.get("text") or "") for page in page_payloads]
-    logger.info("Using embedded PDF text layer document_id=%s pages=%s chars=%s", document.id, len(texts), sum(len(text) for text in texts))
-    return OCRResult(
-        text="\f".join(texts),
-        raw_response={
-            "pages": page_payloads,
-            "source": "pdf_text_layer",
-            "page_count": len(page_payloads),
-        },
-        prompt_name="pdf_text_layer",
-        prompt_version="pypdfium2",
-        model_role="pdf_text_layer",
-        model_endpoint="local",
-        model_name="pypdfium2",
-        model_response_text="\n\n".join(texts),
-    )
-
-
-def _extract_pdf_page_text(page: Any) -> str:
-    text_page = None
-    try:
-        text_page = page.get_textpage()
-        count_chars = getattr(text_page, "count_chars", None)
-        if callable(count_chars):
-            text = text_page.get_text_range(0, count_chars())
-        else:
-            text = text_page.get_text_range()
-        return _normalize_pdf_text(str(text or ""))
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("Could not extract PDF page text error=%s", exc)
-        return ""
-    finally:
-        close_text = getattr(text_page, "close", None)
-        if callable(close_text):
-            close_text()
-        close_page = getattr(page, "close", None)
-        if callable(close_page):
-            close_page()
-
-
-def _normalize_pdf_text(text: str) -> str:
-    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
-    output: list[str] = []
-    blank = False
-    for line in lines:
-        if not line:
-            if not blank and output:
-                output.append("")
-            blank = True
-            continue
-        output.append(line)
-        blank = False
-    return "\n".join(output).strip()
-
-
-def _pdf_text_layer_is_usable(page_payloads: list[dict[str, Any]]) -> bool:
-    text = "\n".join(str(page.get("text") or "") for page in page_payloads).strip()
-    if len(text) < 40:
-        return False
-    return len(re.findall(r"\w+", text, flags=re.UNICODE)) >= 5
-
-
-def _existing_rendered_pdf_page_path(document: Document, page_number: int) -> str | None:
-    target = Path(get_settings().storage_root) / "pages" / str(document.id) / f"page_{page_number:04d}.jpg"
-    return str(target) if target.exists() else None
+def _ocr_uses_shared_model_gateway(config: Any) -> bool:
+    return str(getattr(config, "ocr_engine", "")).strip() in {"paddle_vl", "glm"}
 
 
 def _extract_pdf_pages(provider: OCRProvider, document: Document, config: Any):
     from app.services.ocr_glm import OCRResult
-
-    text_layer_result = _extract_pdf_text_layer(document, config)
-    if text_layer_result is not None:
-        return text_layer_result
 
     rendered_paths = render_pdf_pages(
         document.storage_path,
@@ -1023,11 +1008,11 @@ def _extract_pdf_pages(provider: OCRProvider, document: Document, config: Any):
     if not rendered_paths:
         return provider.extract_text(document.storage_path)
 
+    page_results = _ocr_rendered_pdf_pages(provider, document, config, rendered_paths)
     page_payloads: list[dict[str, Any]] = []
     texts: list[str] = []
     first_result = None
-    for index, page_path in enumerate(rendered_paths, start=1):
-        page_result = provider.extract_text(page_path)
+    for index, page_path, page_result in page_results:
         if first_result is None:
             first_result = page_result
         texts.append(page_result.text)
@@ -1042,7 +1027,12 @@ def _extract_pdf_pages(provider: OCRProvider, document: Document, config: Any):
     assert first_result is not None
     return OCRResult(
         text="\f".join(texts),
-        raw_response={"pages": page_payloads, "source": "pdf_page_rendering"},
+        raw_response={
+            "pages": page_payloads,
+            "source": "pdf_page_rendering",
+            "provider": getattr(config, "ocr_engine", None),
+            "page_ocr_concurrency": _pdf_page_ocr_worker_count(config, len(rendered_paths)),
+        },
         prompt_name=first_result.prompt_name,
         prompt_version=first_result.prompt_version,
         model_role=first_result.model_role,
@@ -1051,6 +1041,59 @@ def _extract_pdf_pages(provider: OCRProvider, document: Document, config: Any):
         model_response_text="\n\n".join(texts),
     )
 
+
+def _ocr_rendered_pdf_pages(provider: OCRProvider, document: Document, config: Any, rendered_paths: list[str]):
+    worker_count = _pdf_page_ocr_worker_count(config, len(rendered_paths))
+    logger.info(
+        "Running rendered PDF page OCR document_id=%s engine=%s pages=%s page_ocr_concurrency=%s",
+        document.id,
+        getattr(config, "ocr_engine", None),
+        len(rendered_paths),
+        worker_count,
+    )
+    batch_extract = getattr(provider, "extract_text_batch", None)
+    if worker_count > 1 and callable(batch_extract):
+        page_results = []
+        for chunk_start in range(0, len(rendered_paths), worker_count):
+            chunk_paths = rendered_paths[chunk_start:chunk_start + worker_count]
+            chunk_results = batch_extract(chunk_paths)
+            if len(chunk_results) != len(chunk_paths):
+                raise OCRProviderError(
+                    f"PaddleVL batch OCR returned {len(chunk_results)} results for {len(chunk_paths)} pages"
+                )
+            for offset, (page_path, page_result) in enumerate(zip(chunk_paths, chunk_results, strict=True), start=1):
+                page_results.append((chunk_start + offset, page_path, page_result))
+        return page_results
+
+    if worker_count <= 1:
+        return [
+            (index, page_path, provider.extract_text(page_path))
+            for index, page_path in enumerate(rendered_paths, start=1)
+        ]
+
+    page_results = []
+    with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="paddlevl-pdf-page") as executor:
+        futures = {
+            executor.submit(provider.extract_text, page_path): (index, page_path)
+            for index, page_path in enumerate(rendered_paths, start=1)
+        }
+        for future in as_completed(futures):
+            index, page_path = futures[future]
+            try:
+                page_results.append((index, page_path, future.result()))
+            except Exception as exc:  # noqa: BLE001
+                raise OCRProviderError(f"PDF page {index} PaddleVL OCR failed: {exc}") from exc
+    return sorted(page_results, key=lambda item: item[0])
+
+
+def _pdf_page_ocr_worker_count(config: Any, page_count: int) -> int:
+    if str(getattr(config, "ocr_engine", "")).strip() != "paddle_vl":
+        return 1
+    try:
+        requested = int(getattr(config, "ocr_concurrency", 1) or 1)
+    except (TypeError, ValueError):
+        requested = 1
+    return max(1, min(4, page_count, requested))
 
 def run_metadata_for_document(
     db: Session,

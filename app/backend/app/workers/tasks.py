@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from celery.app.task import Task
 from sqlalchemy import select
@@ -9,7 +10,7 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Document, DocumentState, StageState
 from app.services.events import record_event
-from app.services.processing import clear_processing_lease, queue_full_process, queue_ocr, reserve_processing_task
+from app.services.processing import clear_processing_lease, estimate_ocr_task_budget, queue_full_process, queue_ocr, reserve_processing_task
 from app.services.processing import run_full_process_for_document, run_metadata_for_document, run_ocr_for_document
 from app.services.reconciliation import reconcile_stuck_documents
 from app.services.ingestion import scan_enabled_sources
@@ -23,17 +24,50 @@ def _retry_delay(retries: int) -> int:
     return min(300, 10 * (2 ** retries))
 
 
-def publish_task(task, *, args: list | tuple, kwargs: dict | None = None, task_id: str | None = None, queue: str | None = None):
+def publish_task(
+    task,
+    *,
+    args: list | tuple,
+    kwargs: dict | None = None,
+    task_id: str | None = None,
+    queue: str | None = None,
+    options: dict | None = None,
+):
     """Publish a Celery task while preserving older tests that monkeypatch .delay.
 
-    Production needs apply_async so we can pin queues and task ids. A few existing
-    tests patch task.delay to avoid a live Redis broker; when that happens, use
-    the patched function instead of touching Redis.
+    Production needs apply_async so we can pin queues, task ids, and dynamic task
+    limits. A few existing tests patch task.delay to avoid a live Redis broker;
+    when that happens, use the patched function instead of touching Redis.
     """
     delay = getattr(task, "delay")
     if getattr(delay, "__func__", None) is not Task.delay:
         return delay(*args, **(kwargs or {}))
-    return task.apply_async(args=list(args), kwargs=kwargs or {}, task_id=task_id, queue=queue)
+    return task.apply_async(args=list(args), kwargs=kwargs or {}, task_id=task_id, queue=queue, **(options or {}))
+
+
+def _document_ocr_task_options(
+    db,
+    document_id: str | uuid.UUID,
+    *,
+    stage: str,
+    task_id: str | None = None,
+    update_lease: bool = False,
+    commit: bool = False,
+) -> dict[str, int]:
+    if stage not in {"ocr", "process"}:
+        return {}
+    document = db.get(Document, uuid.UUID(str(document_id)))
+    if document is None:
+        return {}
+    budget = estimate_ocr_task_budget(document)
+    if update_lease and (task_id is None or document.processing_task_id == task_id):
+        document.processing_lease_until = datetime.now(timezone.utc) + timedelta(seconds=int(budget["lease_seconds"]))
+        if commit:
+            db.commit()
+    return {
+        "soft_time_limit": int(budget["soft_time_limit"]),
+        "time_limit": int(budget["time_limit"]),
+    }
 
 
 def publish_document_task(
@@ -48,7 +82,8 @@ def publish_document_task(
     stage: str,
 ):
     try:
-        return publish_task(task, args=args, kwargs=kwargs, task_id=task_id, queue=queue)
+        options = _document_ocr_task_options(db, document_id, stage=stage, task_id=task_id, update_lease=True, commit=True)
+        return publish_task(task, args=args, kwargs=kwargs, task_id=task_id, queue=queue, options=options)
     except Exception as exc:  # noqa: BLE001
         document = db.get(Document, uuid.UUID(str(document_id)))
         if document is not None:
@@ -90,7 +125,9 @@ def ocr_document_task(self, document_id: str) -> str:
                     metadata={"retry": self.request.retries + 1, "error": str(exc)},
                 )
                 db.commit()
-            raise self.retry(exc=exc, countdown=_retry_delay(self.request.retries))
+            retry_options = _document_ocr_task_options(db, document_id, stage="ocr", task_id=self.request.id, update_lease=True)
+            db.commit()
+            raise self.retry(exc=exc, countdown=_retry_delay(self.request.retries), **retry_options)
         raise
     finally:
         db.close()
@@ -144,7 +181,9 @@ def process_document_task(self, document_id: str, force: bool = False) -> str:
                     metadata={"retry": self.request.retries + 1, "error": str(exc), "force": force},
                 )
                 db.commit()
-            raise self.retry(exc=exc, countdown=_retry_delay(self.request.retries))
+            retry_options = _document_ocr_task_options(db, document_id, stage="process", task_id=self.request.id, update_lease=True)
+            db.commit()
+            raise self.retry(exc=exc, countdown=_retry_delay(self.request.retries), **retry_options)
         raise
     finally:
         db.close()

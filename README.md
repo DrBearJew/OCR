@@ -45,9 +45,10 @@ Each document can keep its original file, preview, OCR text, extracted metadata,
 
 > Turn messy PDFs, scans, screenshots, and receipts into Markdown-friendly OCR text.
 
-- **PaddleOCR-VL path:** smart multimodal parsing through the internal model gateway or any OpenAI-compatible llama.cpp/LM Studio endpoint.
+- **PaddleOCR-VL path:** strict smart multimodal OCR through the OpenVINO CPU gateway, the internal model gateway, or any compatible endpoint.
+- **OpenVINO CPU batch path:** optional PaddleOCR-VL gateway with `/v1/ocr/batch` for up to four rendered PDF pages per request using one loaded model.
 - **PP-OCRv6 local path:** CPU-friendly local OCR for basic deployments without a GPU.
-- **Recovery path:** if smart OCR returns empty text, Dok OCR can fall back to PP-OCRv6 instead of silently failing.
+- **Provider honesty:** when a collection/document selects `paddle_vl`, Dok OCR uses PaddleOCR-VL OCR and surfaces failures instead of silently substituting another OCR engine.
 
 ### 🧠 Metadata and title workflow
 
@@ -93,7 +94,7 @@ The pipeline can run automatically after upload. Manual controls remain availabl
 | --- | --- | --- | --- |
 | **Fake** | UI development and smoke tests | `fake` | No real OCR. Fastest way to test the app shell. |
 | **Local** | Small machines, CPU-only OCR | `ppocrv6` | No GPU required. PP-OCRv6 models are prewarmed during backend build. |
-| **Smart** | Higher quality document parsing | `paddle_vl` | Uses the internal gateway or a direct OpenAI-compatible model endpoint. |
+| **Smart** | Higher quality document parsing | `paddle_vl` | Uses the OpenVINO CPU gateway, internal smart gateway, or a direct compatible model endpoint. |
 | **Fallback** | Legacy multimodal OCR | `glm` | Kept as a secondary OCR path. |
 
 > [!TIP]
@@ -124,34 +125,59 @@ Prerequisites: Docker Compose and outbound network access for container images, 
 
 ## 🚀 One-click smart PaddleOCR-VL stack
 
-For a full smart OCR setup on a host that already has Docker and a llama.cpp `llama-server` binary, run:
+The installer supports two smart PaddleOCR-VL backends.
+
+### Recommended CPU backend: OpenVINO 2025.2
+
+For CPU-only hosts, install the OpenVINO gateway:
 
 ```bash
-sudo scripts/install-smart-paddlevl.sh
+sudo scripts/install-smart-paddlevl.sh --backend openvino-cpu
 ```
 
-The installer is idempotent. It installs a managed smart-stack directory, packages the internal model gateway, installs the PaddleOCR-VL chat template with OpenAI `image_url` support, writes the llama.cpp model preset, starts or reuses the model manager when possible, and prints the Admin values to save.
+This installs a host-level `dokocr-paddlevl-openvino` service, pins OpenVINO `2025.2.0`, downloads the preconverted PaddleOCR-VL OpenVINO model, and serves:
+
+```text
+GET  /health
+GET  /v1/models
+POST /v1/chat/completions
+POST /v1/ocr/batch       # up to 4 page images, one loaded model
+```
+
+The installer prints the **Admin → Model Setup** values to save. Use the Docker network gateway URL it prints, for example `http://172.x.0.1:8091/v1`, when Dok OCR runs in Compose.
+
+OpenVINO `2025.2.0` is pinned intentionally. Newer `2025.3+` / `2026.x` CPU wheels have known SIGFPE regressions on some AMD Zen 4 / KVM hosts.
+
+### Legacy GGUF backend: llama.cpp smart proxy
+
+For a host that already has Docker and a llama.cpp `llama-server` binary, run:
+
+```bash
+sudo scripts/install-smart-paddlevl.sh --backend llamacpp
+```
 
 If the PaddleOCR-VL GGUF files are not already present under `/root/llm-models`, provide download URLs or place the files manually:
 
 ```bash
 sudo DOKOCR_PADDLE_MODEL_URL=https://example/paddleocr-vl-q8_0.gguf \
      DOKOCR_PADDLE_MMPROJ_URL=https://example/paddleocr-vl-mmproj.gguf \
-     scripts/install-smart-paddlevl.sh
+     scripts/install-smart-paddlevl.sh --backend llamacpp
 ```
 
 Safe preview mode:
 
 ```bash
-scripts/install-smart-paddlevl.sh --dry-run --skip-download --no-start
+scripts/install-smart-paddlevl.sh --backend openvino-cpu --dry-run --skip-download --no-start
 ```
 
-After the installer finishes:
+After either installer path finishes:
 
 1. Open **Admin → Model Setup**.
-2. Click **Use internal gateway**.
-3. Click **Test PaddleOCR-VL**.
-4. Save.
+2. Select `paddle_vl` as the default OCR provider.
+3. Paste or confirm the PaddleOCR-VL endpoint.
+4. Click **Test PaddleOCR-VL**.
+5. Adjust **OCR time budget** if processing large books/docs.
+6. Save.
 
 ---
 
@@ -164,6 +190,7 @@ The Admin page includes **Model Setup**, a visual runtime wizard for normal user
 - use the internal gateway preset.
 - test endpoints before saving.
 - change global defaults without editing `.env`.
+- tune OCR time budgets for large CPU-only books/documents, including PaddleOCR-VL per-4-page chunk limits.
 
 There is also a separate **Model Configuration** area for collection-level OCR defaults such as language, OCR mode, page limits, DPI, output format, and image size limits.
 
@@ -195,7 +222,7 @@ QWEN_LLAMACPP_BASE_URL=http://host.docker.internal:1234/v1
 QWEN_MODEL_PATH=qwen
 ```
 
-LM Studio, llama.cpp server, or another OpenAI-compatible service can provide these endpoints. The internal gateway hides routing details, normalizes OCR output, applies deterministic decode settings, and keeps model service details out of the normal user flow.
+LM Studio, llama.cpp server, or another OpenAI-compatible service can provide these endpoints. The OpenVINO gateway also exposes `/v1/ocr/batch`, which Dok OCR uses to process rendered PaddleOCR-VL PDF pages in chunks of up to four without loading multiple model copies. The internal gateway hides routing details, normalizes OCR output, applies deterministic decode settings, and keeps model service details out of the normal user flow.
 
 ---
 

@@ -29,7 +29,7 @@ from app.services.document_assets import generate_thumbnail, inspect_page_count,
 from app.services.events import record_event
 from app.services.hooks import execute_hooks
 from app.models import HookStage
-from app.services.processing import queue_ocr, update_batch_status
+from app.services.processing import queue_ocr, reserve_processing_task, update_batch_status
 from app.services.storage import LocalStorage, safe_filename
 
 
@@ -94,9 +94,14 @@ def scan_source(db: Session, source: IngestionSource) -> dict:
                 db.delete(record)
     db.commit()
     for document_id in queued_document_ids:
-        from app.workers.tasks import ocr_document_task
+        from app.workers.tasks import ocr_document_task, publish_document_task
 
-        ocr_document_task.delay(str(document_id))
+        task_id = str(uuid.uuid4())
+        document = db.get(Document, document_id)
+        if document is not None:
+            reserve_processing_task(document, task_id=task_id, stage="ocr", force=True)
+            db.commit()
+        publish_document_task(db, document_id, ocr_document_task, args=[str(document_id)], task_id=task_id, queue="ocr", stage="ocr")
     return counts
 
 
@@ -117,9 +122,14 @@ def retry_ingestion_job(db: Session, job: IngestionJob) -> IngestionJob:
     queued_document_id = job.document_id if job.status == IngestionJobStatus.imported else None
     db.commit()
     if queued_document_id is not None:
-        from app.workers.tasks import ocr_document_task
+        from app.workers.tasks import ocr_document_task, publish_document_task
 
-        ocr_document_task.delay(str(queued_document_id))
+        task_id = str(uuid.uuid4())
+        document = db.get(Document, queued_document_id)
+        if document is not None:
+            reserve_processing_task(document, task_id=task_id, stage="ocr", force=True)
+            db.commit()
+        publish_document_task(db, queued_document_id, ocr_document_task, args=[str(queued_document_id)], task_id=task_id, queue="ocr", stage="ocr")
     return job
 
 

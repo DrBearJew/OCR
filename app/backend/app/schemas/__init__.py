@@ -530,6 +530,14 @@ class ModelSetupRead(BaseModel):
     qwen_base_url: str = ""
     qwen_model: str = "qwen"
     timeout_seconds: float = 120.0
+    ocr_task_soft_time_limit: int = Field(default=600, ge=1)
+    ocr_task_time_limit: int = Field(default=660, ge=1)
+    ocr_task_hard_time_limit_grace_seconds: int = Field(default=120, ge=1)
+    ocr_task_lease_grace_seconds: int = Field(default=300, ge=1)
+    ocr_task_base_overhead_seconds: int = Field(default=300, ge=1)
+    ocr_task_paddle_vl_seconds_per_chunk: int = Field(default=180, ge=1)
+    ocr_task_glm_seconds_per_page: int = Field(default=180, ge=1)
+    ocr_task_ppocrv6_seconds_per_page: int = Field(default=30, ge=1)
 
 
 class ModelSetupWrite(ModelSetupRead):
