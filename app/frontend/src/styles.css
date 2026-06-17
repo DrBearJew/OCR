@@ -10957,3 +10957,54 @@ a.icon-button:not(.danger-button):hover {
   border-color: rgba(59, 130, 246, 0.45);
   background: rgba(59, 130, 246, 0.13);
 }
+
+
+/* Upload preview fit repair: 100% fits the selected document inside the panel. */
+.document-preview-layout .upload-zoomable-preview.fit-preview.document-preview-surface {
+  overflow: auto !important;
+  padding: 0 !important;
+}
+
+.document-preview-layout .upload-zoomable-preview.fit-preview .document-preview-stage {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  min-height: 100% !important;
+  display: flex !important;
+  align-items: flex-start !important;
+  justify-content: center !important;
+  padding: 1rem !important;
+  box-sizing: border-box !important;
+}
+
+.document-preview-layout .upload-zoomable-preview.fit-preview .document-preview-object {
+  display: block !important;
+  max-width: calc(100% - 0.5rem) !important;
+  min-width: 0 !important;
+  margin: 0 auto !important;
+  transform-origin: center center !important;
+}
+
+.document-preview-layout .upload-zoomable-preview.fit-preview iframe.upload-zoomable-preview-media,
+.document-preview-layout .upload-zoomable-preview.fit-preview img.upload-zoomable-preview-media {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  margin: 0 auto !important;
+  object-fit: contain !important;
+}
+
+.document-preview-layout .upload-zoomable-preview.fit-preview iframe.upload-zoomable-preview-media {
+  min-height: 560px !important;
+  height: min(72vh, 760px) !important;
+}
+
+@media (max-width: 900px) {
+  .document-preview-layout .upload-zoomable-preview.fit-preview .document-preview-stage {
+    padding: 0.65rem !important;
+  }
+  .document-preview-layout .upload-zoomable-preview.fit-preview .document-preview-object {
+    max-width: 100% !important;
+  }
+}

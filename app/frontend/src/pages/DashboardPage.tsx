@@ -628,14 +628,14 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
   const [rotation, setRotation] = useState(0)
   const [showOcr, setShowOcr] = useState(true)
   const previewSurfaceRef = useRef<HTMLDivElement | null>(null)
-  const [basePreviewWidth, setBasePreviewWidth] = useState(760)
+  const [basePreviewWidth, setBasePreviewWidth] = useState(820)
   const isPdf = selected?.kind === 'pdf'
   const zoomedPreviewWidth = Math.round(basePreviewWidth * zoom / 100)
   const previewObjectStyle = {
     width: `${zoomedPreviewWidth}px`,
     transform: `rotate(${rotation}deg)`
   }
-  const pdfMediaStyle = { height: `${Math.round(620 * zoom / 100)}px` }
+  const pdfMediaStyle = { height: `${Math.round(Math.max(560, basePreviewWidth * 1.22) * zoom / 100)}px` }
 
   useEffect(() => {
     setZoom(100)
@@ -647,7 +647,7 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
     const updateBaseWidth = () => {
       const surface = previewSurfaceRef.current
       if (!surface) return
-      setBasePreviewWidth(Math.max(360, Math.min(920, surface.clientWidth - 180)))
+      setBasePreviewWidth(Math.max(320, Math.min(1100, surface.clientWidth - 48)))
     }
     frame = requestAnimationFrame(updateBaseWidth)
     window.addEventListener('resize', updateBaseWidth)
@@ -702,8 +702,13 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
     setZoomAround(zoom >= 220 ? 100 : Math.max(220, zoom + 80), { x, y })
   }
 
+  function pdfPreviewSrc(url: string) {
+    if (!url || url.includes('#')) return url
+    return `${url}#zoom=page-fit&pagemode=none`
+  }
+
   const preview = selected?.serverPreviewUrl && selected.kind === 'pdf' ? (
-    <iframe className="upload-zoomable-preview-media" style={pdfMediaStyle} src={selected.serverPreviewUrl} title={selected.filename} />
+    <iframe className="upload-zoomable-preview-media" style={pdfMediaStyle} src={pdfPreviewSrc(selected.serverPreviewUrl)} title={selected.filename} />
   ) : selected?.serverPreviewUrl && selected.kind === 'image' ? (
     <img className="upload-zoomable-preview-media" src={selected.serverPreviewUrl} alt={selected.filename} />
   ) : selected?.previewUrl ? (
