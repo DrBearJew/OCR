@@ -67,7 +67,7 @@ def apply_paperless_metadata(db: Session, document: Document) -> None:
             assignments["document_type"] = {"id": str(document_type.id), "name": document_type.name, "source": "collection_or_qwen_type"}
 
     tag_matches = _profile_matches(db, collection, Tag, document, "tag")
-    if tag_matches and not (locked or _manual_source(sources, "tag_ids") or _manual_source(sources, "tags")):
+    if not (locked or _manual_source(sources, "tag_ids") or _manual_source(sources, "tags")):
         existing_ids = {tag.id for tag in document.tags}
         added = []
         for match in tag_matches:
@@ -76,6 +76,13 @@ def apply_paperless_metadata(db: Session, document: Document) -> None:
             document.tags.append(match.row)
             existing_ids.add(match.row.id)
             added.append(_match_payload(match))
+        for tag_name in _suggested_tag_names(document):
+            tag = _ensure_tag(db, collection, tag_name)
+            if tag.id in existing_ids:
+                continue
+            document.tags.append(tag)
+            existing_ids.add(tag.id)
+            added.append({"id": str(tag.id), "name": tag.name, "source": "qwen_bootstrap"})
         if added:
             assignments["tags"] = added
 
@@ -85,9 +92,15 @@ def apply_paperless_metadata(db: Session, document: Document) -> None:
             document.storage_path_id = storage_match.row.id
             assignments["storage_path"] = _match_payload(storage_match)
         else:
-            storage_rule = _ensure_storage_path(db, collection, "Default", "{collection}/{year}")
-            document.storage_path_id = storage_rule.id
-            assignments["storage_path"] = {"id": str(storage_rule.id), "name": storage_rule.name, "source": "default"}
+            suggested_path = _suggested_storage_path(document)
+            if suggested_path:
+                storage_rule = _ensure_storage_path(db, collection, suggested_path, suggested_path)
+                document.storage_path_id = storage_rule.id
+                assignments["storage_path"] = {"id": str(storage_rule.id), "name": storage_rule.name, "path_template": storage_rule.path_template, "source": "qwen_bootstrap"}
+            else:
+                storage_rule = _ensure_storage_path(db, collection, "Default", "{collection}/{year}")
+                document.storage_path_id = storage_rule.id
+                assignments["storage_path"] = {"id": str(storage_rule.id), "name": storage_rule.name, "source": "default"}
 
     metadata = dict(document.metadata_json or {})
     metadata["paperless_assignments"] = assignments
@@ -344,6 +357,90 @@ def _match_payload(match: MetadataProfileMatch) -> dict[str, Any]:
     }
 
 
+def _suggested_tag_names(document: Document) -> list[str]:
+    names = _candidate_values(document, "tag")
+    safe: list[str] = []
+    seen: set[str] = set()
+    for name in names:
+        cleaned = _safe_tag_name(name)
+        if not cleaned:
+            continue
+        key = slugify(cleaned)
+        if key in seen:
+            continue
+        seen.add(key)
+        safe.append(cleaned)
+        if len(safe) >= 8:
+            break
+    return safe
+
+
+def _safe_tag_name(value: Any) -> str | None:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    if not text or len(text) > 80:
+        return None
+    low = text.lower()
+    if low in {"na", "n/a", "unknown", "unbekannt", "none", "null"}:
+        return None
+    if re.fullmatch(r"\d{2,}", text):
+        return None
+    if re.fullmatch(r"\d{4}", text):
+        return None
+    if re.fullmatch(r"[A-Z0-9][A-Z0-9./-]{5,}", text, flags=re.I) and any(ch.isdigit() for ch in text):
+        return None
+    if any(token in low for token in ["iban", "bic", "hrb", "hra", "ust-id", "ust.-id"]):
+        return None
+    return text
+
+
+def _suggested_storage_path(document: Document) -> str | None:
+    for value in _candidate_values(document, "storage_path"):
+        safe = _safe_storage_path(value)
+        if safe:
+            return safe
+    return None
+
+
+def _safe_storage_path(value: Any) -> str | None:
+    text = str(value or "").strip().replace("\\", "/")
+    text = re.sub(r"/+", "/", text).strip("/")
+    if not text or len(text) > 240:
+        return None
+    if text.startswith(("/", "~")) or ".." in text.split("/"):
+        return None
+    cleaned_segments: list[str] = []
+    for segment in text.split("/"):
+        segment = re.sub(r"\s+", " ", segment.strip())
+        segment = re.sub(r"[^A-Za-z0-9ÄÖÜäöüß _.,()\-]", "", segment).strip(" .")
+        if not segment:
+            return None
+        cleaned_segments.append(segment[:80])
+    return "/".join(cleaned_segments[:6])
+
+
+def _ensure_tag(db: Session, collection: Collection, name: str) -> Tag:
+    slug = slugify(name)
+    row = db.scalars(
+        select(Tag)
+        .where(Tag.collection_id == collection.id)
+        .where(Tag.slug == slug)
+    ).first()
+    if row:
+        return row
+    row = Tag(collection_id=collection.id, name=name, slug=slug, match_rules={"matching_algorithm": "automatic", "aliases": [name]})
+    try:
+        with db.begin_nested():
+            db.add(row)
+            db.flush()
+            return row
+    except IntegrityError:
+        return db.scalars(
+            select(Tag)
+            .where(Tag.collection_id == collection.id)
+            .where(Tag.slug == slug)
+        ).one()
+
+
 def _ensure_correspondent(db: Session, collection: Collection, name: str) -> Correspondent:
     slug = slugify(name)
     row = db.scalars(
@@ -353,7 +450,7 @@ def _ensure_correspondent(db: Session, collection: Collection, name: str) -> Cor
     ).first()
     if row:
         return row
-    row = Correspondent(collection_id=collection.id, name=name, slug=slug, match_rules={"auto": True})
+    row = Correspondent(collection_id=collection.id, name=name, slug=slug, match_rules={"matching_algorithm": "automatic", "aliases": [name]})
     try:
         with db.begin_nested():
             db.add(row)
@@ -381,7 +478,7 @@ def _ensure_document_type(db: Session, collection: Collection, name: str) -> Doc
     ).first()
     if row:
         return row
-    row = DocumentType(collection_id=collection.id, name=name, slug=slug, match_rules={"collection": name})
+    row = DocumentType(collection_id=collection.id, name=name, slug=slug, match_rules={"matching_algorithm": "automatic", "aliases": [name]})
     try:
         with db.begin_nested():
             db.add(row)
@@ -404,7 +501,7 @@ def _ensure_storage_path(db: Session, collection: Collection, name: str, templat
     ).first()
     if row:
         return row
-    row = StoragePathRule(collection_id=collection.id, name=name, slug=slug, path_template=template)
+    row = StoragePathRule(collection_id=collection.id, name=name, slug=slug, path_template=template, match_rules={"matching_algorithm": "automatic", "aliases": [name, template]})
     try:
         with db.begin_nested():
             db.add(row)

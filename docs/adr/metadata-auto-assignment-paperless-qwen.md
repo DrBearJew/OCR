@@ -100,3 +100,14 @@ Supported rule shapes:
 ```
 
 The matcher evaluates OCR text, canonical fields, Qwen candidates, suggested tags/folders, and metadata JSON. It assigns correspondent, document type, tags, and storage path unless the corresponding assignment is manually sourced or metadata is locked. Admin endpoints can now create, update, list, and delete these metadata profiles.
+
+
+## Automatic Profile Bootstrap Slice
+Profile rules are tuning, not a prerequisite for automatic metadata assignment. When Qwen/canonical metadata provides safe values, Dok OCR automatically creates or reuses Paperless-style profiles:
+
+- canonical sender/recipient -> correspondent profile
+- Qwen/canonical document type -> document type profile
+- safe Qwen suggested tags -> tag profiles
+- safe Qwen suggested folder -> storage path profile
+
+Safety filters reject empty values, `NA`, numeric-only years, invoice-like IDs, legal identifiers, and unsafe folder paths. Manually sourced assignments and metadata locks still take precedence.

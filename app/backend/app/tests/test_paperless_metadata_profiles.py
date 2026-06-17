@@ -87,7 +87,7 @@ def test_paperless_profiles_assign_correspondent_type_tags_and_storage(db_sessio
     assert doc.correspondent_id == correspondent.id
     assert doc.document_type_id == document_type.id
     assert doc.storage_path_id == storage.id
-    assert [item.slug for item in doc.tags] == ["mobilfunk"]
+    assert sorted(item.slug for item in doc.tags) == ["mobilfunk", "steuer"]
     assignments = doc.metadata_json["paperless_assignments"]
     assert assignments["correspondent"]["source"] == "paperless_profile"
     assert assignments["document_type"]["reason"] == "all_rule"
@@ -141,3 +141,35 @@ def test_admin_metadata_profiles_can_be_updated_and_deleted(db_session: Session)
     deleted = delete_paperless_metadata("tags", created.id, db_session)
     assert deleted.id == created.id
     assert db_session.get(Tag, created.id) is None
+
+
+def test_qwen_suggestions_bootstrap_tags_and_storage_without_preexisting_profiles(db_session: Session, tmp_path: Path) -> None:
+    doc = make_doc(db_session, tmp_path)
+    doc.llm_suggested_tags = ["Mobilfunk", "NA", "2025", "1318249263/08", "Steuer"]
+    doc.llm_suggested_folder = "Telefonica/Rechnungen/2025"
+    db_session.commit()
+
+    apply_paperless_metadata(db_session, doc)
+    db_session.commit()
+    db_session.refresh(doc)
+
+    tag_names = sorted(tag.name for tag in doc.tags)
+    assert tag_names == ["Mobilfunk", "Steuer"]
+    assert doc.storage_path_rule is not None
+    assert doc.storage_path_rule.path_template == "Telefonica/Rechnungen/2025"
+    assignments = doc.metadata_json["paperless_assignments"]
+    assert assignments["tags"][0]["source"] == "qwen_bootstrap"
+    assert assignments["storage_path"]["source"] == "qwen_bootstrap"
+
+
+def test_qwen_storage_bootstrap_rejects_unsafe_paths(db_session: Session, tmp_path: Path) -> None:
+    doc = make_doc(db_session, tmp_path)
+    doc.llm_suggested_folder = "../../etc/passwd"
+    doc.metadata_json = {"qwen_candidates": {"suggested_folder": "../../also-bad"}}
+    db_session.commit()
+
+    apply_paperless_metadata(db_session, doc)
+
+    assert doc.storage_path_rule is not None
+    assert doc.storage_path_rule.name == "Default"
+    assert doc.metadata_json["paperless_assignments"]["storage_path"]["source"] == "default"
