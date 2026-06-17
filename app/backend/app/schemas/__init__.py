@@ -356,6 +356,15 @@ class PaperlessMetadataWrite(BaseModel):
     match_rules: dict[str, Any] = Field(default_factory=dict)
 
 
+class PaperlessMetadataPatch(BaseModel):
+    collection_id: uuid.UUID | None = None
+    name: str | None = None
+    slug: str | None = None
+    color: str | None = None
+    path_template: str | None = None
+    match_rules: dict[str, Any] | None = None
+
+
 class IngestionSourceRead(BaseModel):
     id: uuid.UUID
     name: str

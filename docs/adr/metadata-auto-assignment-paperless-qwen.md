@@ -78,3 +78,25 @@ Tradeoffs:
 
 ## Rollback
 Revert the resolver import/delegation in `processing.py` and remove `metadata_resolution` storage. Since no DB migration is introduced in this phase, rollback is code-only.
+
+
+## Implemented Profile Matcher Slice
+The next backend slice implements DB-backed Paperless-style profile matching using the existing metadata tables:
+
+- `correspondents.match_rules`
+- `document_types.match_rules`
+- `tags.match_rules`
+- `storage_path_rules.match_rules`
+
+Supported rule shapes:
+
+```json
+{"matching_algorithm": "any", "match": ["Telefonica", "O2"]}
+{"matching_algorithm": "all", "match": ["invoice", "mobile"]}
+{"matching_algorithm": "literal", "match": "Rechnungsbetrag"}
+{"matching_algorithm": "regex", "match": "Rechnungsnummer\s+[A-Z0-9/-]+"}
+{"matching_algorithm": "fuzzy", "match": "Telefónica Germany"}
+{"matching_algorithm": "automatic", "aliases": ["Mobilfunk", "Invoices/Mobile"]}
+```
+
+The matcher evaluates OCR text, canonical fields, Qwen candidates, suggested tags/folders, and metadata JSON. It assigns correspondent, document type, tags, and storage path unless the corresponding assignment is manually sourced or metadata is locked. Admin endpoints can now create, update, list, and delete these metadata profiles.

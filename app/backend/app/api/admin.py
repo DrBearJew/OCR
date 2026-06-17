@@ -27,6 +27,7 @@ from app.schemas import (
     IngestionSourceRead,
     IngestionSourceWrite,
     JobInfo,
+    PaperlessMetadataPatch,
     PaperlessMetadataRead,
     PaperlessMetadataWrite,
     ProcessingHookRead,
@@ -246,6 +247,48 @@ def create_paperless_metadata(kind: str, payload: PaperlessMetadataWrite, db: Se
     db.commit()
     db.refresh(row)
     return PaperlessMetadataRead.model_validate(row)
+
+
+@router.patch("/metadata/{kind}/{metadata_id}", response_model=PaperlessMetadataRead)
+def update_paperless_metadata(kind: str, metadata_id: uuid.UUID, payload: PaperlessMetadataPatch, db: Session = Depends(get_db)) -> PaperlessMetadataRead:
+    model = _metadata_model(kind)
+    row = db.get(model, metadata_id)
+    if row is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Metadata profile not found")
+    values = payload.model_dump(exclude_unset=True)
+    if "name" in values and values["name"] is not None:
+        row.name = values["name"]
+        if "slug" not in values or values.get("slug") is None:
+            row.slug = slugify(row.name)
+    if "slug" in values and values["slug"] is not None:
+        row.slug = values["slug"]
+    if model is Tag and "color" in values:
+        row.color = values.get("color")
+    if model is StoragePathRule and "path_template" in values and values.get("path_template") is not None:
+        row.path_template = values["path_template"]
+    if "collection_id" in values:
+        row.collection_id = values.get("collection_id")
+    if "match_rules" in values and values.get("match_rules") is not None:
+        row.match_rules = values["match_rules"]
+    db.commit()
+    db.refresh(row)
+    return PaperlessMetadataRead.model_validate(row)
+
+
+@router.delete("/metadata/{kind}/{metadata_id}", response_model=PaperlessMetadataRead)
+def delete_paperless_metadata(kind: str, metadata_id: uuid.UUID, db: Session = Depends(get_db)) -> PaperlessMetadataRead:
+    model = _metadata_model(kind)
+    row = db.get(model, metadata_id)
+    if row is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Metadata profile not found")
+    result = PaperlessMetadataRead.model_validate(row)
+    db.delete(row)
+    db.commit()
+    return result
 
 
 @router.get("/{kind}", response_model=list[PaperlessMetadataRead])
