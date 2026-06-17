@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import base64
+import json
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin
@@ -92,6 +94,140 @@ def list_documents(
     if tag_id:
         stmt = stmt.join(Document.tags).where(Tag.id == tag_id)
     return [_document_summary(row) for row in db.scalars(stmt.limit(min(limit, 500))).all()]
+
+
+@router.get("/page")
+def list_documents_page(
+    batch_id: uuid.UUID | None = None,
+    record_id: uuid.UUID | None = None,
+    collection_name: str | None = None,
+    state: DocumentState | None = None,
+    review_state: ReviewState | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    filename: str | None = None,
+    title: str | None = None,
+    correspondent_id: uuid.UUID | None = None,
+    document_type_id: uuid.UUID | None = None,
+    tag_id: uuid.UUID | None = None,
+    storage_path_id: uuid.UUID | None = None,
+    folder_id: uuid.UUID | None = None,
+    ocr_mode: OCRMode | None = None,
+    include_deleted: bool = False,
+    limit: int = 50,
+    cursor: str | None = None,
+    db: Session = Depends(get_db),
+    _admin: str = Depends(require_admin),
+) -> dict:
+    normalized_limit = max(1, min(limit, 200))
+    stmt = _document_list_stmt(
+        batch_id=batch_id,
+        record_id=record_id,
+        collection_name=collection_name,
+        state=state,
+        review_state=review_state,
+        date_from=date_from,
+        date_to=date_to,
+        filename=filename,
+        title=title,
+        correspondent_id=correspondent_id,
+        document_type_id=document_type_id,
+        tag_id=tag_id,
+        storage_path_id=storage_path_id,
+        folder_id=folder_id,
+        ocr_mode=ocr_mode,
+        include_deleted=include_deleted,
+    )
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    stmt = _apply_document_cursor(stmt, cursor)
+    rows = db.scalars(stmt.order_by(Document.created_at.desc(), Document.id.desc()).limit(normalized_limit + 1)).all()
+    page_rows = rows[:normalized_limit]
+    return {
+        "items": [_document_summary(row) for row in page_rows],
+        "limit": normalized_limit,
+        "next_cursor": _encode_document_cursor(page_rows[-1]) if len(rows) > normalized_limit and page_rows else None,
+        "total_estimate": int(total),
+    }
+
+
+def _document_list_stmt(
+    *,
+    batch_id: uuid.UUID | None,
+    record_id: uuid.UUID | None,
+    collection_name: str | None,
+    state: DocumentState | None,
+    review_state: ReviewState | None,
+    date_from: str | None,
+    date_to: str | None,
+    filename: str | None,
+    title: str | None,
+    correspondent_id: uuid.UUID | None,
+    document_type_id: uuid.UUID | None,
+    tag_id: uuid.UUID | None,
+    storage_path_id: uuid.UUID | None,
+    folder_id: uuid.UUID | None,
+    ocr_mode: OCRMode | None,
+    include_deleted: bool,
+):
+    stmt = select(Document)
+    if not include_deleted:
+        stmt = stmt.where(Document.deleted_at.is_(None))
+    if batch_id:
+        stmt = stmt.where(Document.batch_id == batch_id)
+    if record_id:
+        stmt = stmt.where(Document.record_id == record_id)
+    if collection_name:
+        stmt = stmt.where(Document.collection_name == collection_name)
+    if state:
+        stmt = stmt.where(Document.processing_state == state)
+    if review_state:
+        stmt = stmt.where(Document.review_state == review_state)
+    if date_from:
+        stmt = stmt.where(func.date(Document.created_at) >= date_from)
+    if date_to:
+        stmt = stmt.where(func.date(Document.created_at) <= date_to)
+    if filename:
+        stmt = stmt.where(func.lower(Document.original_filename).like(f"%{filename.lower()}%"))
+    if title:
+        stmt = stmt.where(func.lower(func.coalesce(Document.manual_title_override, Document.extracted_title, "")).like(f"%{title.lower()}%"))
+    if correspondent_id:
+        stmt = stmt.where(Document.correspondent_id == correspondent_id)
+    if document_type_id:
+        stmt = stmt.where(Document.document_type_id == document_type_id)
+    if storage_path_id:
+        stmt = stmt.where(Document.storage_path_id == storage_path_id)
+    if folder_id:
+        stmt = stmt.where(Document.folder_id == folder_id)
+    if ocr_mode:
+        stmt = stmt.where(Document.ocr_mode == ocr_mode)
+    if tag_id:
+        stmt = stmt.join(Document.tags).where(Tag.id == tag_id)
+    return stmt
+
+
+def _apply_document_cursor(stmt, cursor: str | None):
+    decoded = _decode_cursor(cursor)
+    if decoded is None:
+        return stmt
+    created_at, row_id = decoded
+    return stmt.where(or_(Document.created_at < created_at, and_(Document.created_at == created_at, Document.id < row_id)))
+
+
+def _encode_document_cursor(document: Document) -> str:
+    payload = {"created_at": document.created_at.isoformat(), "id": str(document.id)}
+    return base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("ascii")
+
+
+def _decode_cursor(cursor: str | None) -> tuple[datetime, uuid.UUID] | None:
+    if not cursor:
+        return None
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8"))
+        created_at = datetime.fromisoformat(str(payload["created_at"]))
+        row_id = uuid.UUID(str(payload["id"]))
+        return created_at, row_id
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid cursor") from exc
 
 
 @router.get("/duplicates")

@@ -1,4 +1,4 @@
-import type { ActivityItem, AdminActionResult, Batch, BatchDetail, Collection, CollectionPageData, CollectionSummary, CustomFieldDefinition, DashboardSummary, Document, DocumentCustomFieldValue, DocumentEvent, DocumentPage, FailedReviewSummary, Folder, FolderContentsPage, IngestionJob, IngestionSource, IntegrationSummary, ModelEndpointTestResult, ModelSetup, JobInfo, PaperlessMetadata, ProcessingHook, ProcessingSummary, RecordRow, SavedView, SearchResult } from '../types'
+import type { ActivityItem, AdminActionResult, Batch, BatchDetail, Collection, CollectionPageData, CollectionSummary, CustomFieldDefinition, DashboardSummary, Document, DocumentListPage, DocumentCustomFieldValue, DocumentEvent, DocumentPage, FailedReviewSummary, Folder, FolderContentsPage, IngestionJob, IngestionSource, IntegrationSummary, ModelEndpointTestResult, ModelSetup, JobInfo, PaperlessMetadata, ProcessingHook, ProcessingSummary, RecordListPage, RecordRow, SavedView, SearchResult } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 const TOKEN_KEY = 'dokocr_token'
@@ -112,6 +112,10 @@ export const api = {
   createCustomField: (collectionId: string, payload: Partial<CustomFieldDefinition>) =>
     request<CustomFieldDefinition>(`/api/collections/${collectionId}/fields`, { method: 'POST', body: JSON.stringify(payload) }),
   records: () => request<RecordRow[]>('/api/records'),
+  recordsPage: (params: Record<string, string> = {}) => {
+    const query = new URLSearchParams(params)
+    return request<RecordListPage>(`/api/records/page${query.toString() ? `?${query.toString()}` : ''}`)
+  },
   record: (id: string) => request<RecordRow>(`/api/records/${id}`),
   patchRecord: (id: string, payload: Partial<RecordRow>) =>
     request<RecordRow>(`/api/records/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
@@ -131,6 +135,10 @@ export const api = {
   documents: (params: Record<string, string> = {}) => {
     const query = new URLSearchParams(params)
     return request<Document[]>(`/api/documents${query.toString() ? `?${query.toString()}` : ''}`)
+  },
+  documentsPage: (params: Record<string, string> = {}) => {
+    const query = new URLSearchParams(params)
+    return request<DocumentListPage>(`/api/documents/page${query.toString() ? `?${query.toString()}` : ''}`)
   },
   duplicates: () => request<Document[]>('/api/documents/duplicates'),
   document: (id: string) => request<Document>(`/api/documents/${id}`),

@@ -7,6 +7,8 @@ import StatusBadge from '../components/StatusBadge'
 import type { Document, DocumentEvent, DocumentPage } from '../types'
 import { useI18n } from '../i18n'
 
+const DOCUMENT_PAGE_LIMIT = 50
+
 export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpenDocument: (id: string) => void; onOpenRecord: (id: string) => void }) {
   const { t } = useI18n()
   const [documents, setDocuments] = useState<Document[]>([])
@@ -20,17 +22,36 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
   const [selectedEvents, setSelectedEvents] = useState<DocumentEvent[]>([])
   const [selectedPages, setSelectedPages] = useState<DocumentPage[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [totalEstimate, setTotalEstimate] = useState(0)
+  const [loadingMore, setLoadingMore] = useState(false)
 
-  async function load(nextFilters = filters) {
+  async function load(nextFilters = filters, append = false, cursor: string | null = null) {
     setError('')
     try {
-      const rows = await api.documents(nextFilters)
-      setDocuments(rows.length ? rows : demoDocuments)
-      setSelectedId((current) => current || rows[0]?.id || demoDocuments[0].id)
+      const params: Record<string, string> = { ...nextFilters, limit: String(DOCUMENT_PAGE_LIMIT) }
+      if (cursor) params.cursor = cursor
+      const page = await api.documentsPage(params)
+      setDocuments((current) => append ? [...current, ...page.items] : page.items)
+      setNextCursor(page.next_cursor)
+      setTotalEstimate(page.total_estimate)
+      if (!append) setSelectedId((current) => page.items.some((doc) => doc.id === current) ? current : page.items[0]?.id || '')
     } catch {
       setError(t('documents.demoWarning'))
       setDocuments(demoDocuments)
+      setNextCursor(null)
+      setTotalEstimate(demoDocuments.length)
       setSelectedId((current) => current || demoDocuments[0].id)
+    }
+  }
+
+  async function loadMoreDocuments() {
+    if (!nextCursor || loadingMore) return
+    setLoadingMore(true)
+    try {
+      await load(filters, true, nextCursor)
+    } finally {
+      setLoadingMore(false)
     }
   }
 
@@ -67,7 +88,7 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
     () => selectedDetail?.id === selectedListItem?.id ? selectedDetail : selectedListItem,
     [selectedDetail, selectedListItem]
   )
-  const stats = useMemo(() => buildStats(documents), [documents])
+  const stats = useMemo(() => ({ ...buildStats(documents), total: totalEstimate || documents.length }), [documents, totalEstimate])
 
   useEffect(() => {
     if (!selectedListItem) {
@@ -110,7 +131,7 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
     const next = { ...filters, [key]: value }
     if (!value) delete next[key]
     setFilters(next)
-    void load(next)
+    void load(next, false, null)
   }
 
   function selectedDocumentIdsForActions() {
@@ -254,7 +275,7 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
               <option value="failed">{t('common.failed')}</option>
               <option value="ocr_processing">{t('common.processing')}</option>
             </select>
-            <SavedViewsBar section="documents" filters={filters} onApply={(next) => { setFilters(next); void load(next) }} />
+            <SavedViewsBar section="documents" filters={filters} onApply={(next) => { setFilters(next); void load(next, false, null) }} />
           </div>
           <div className="bulk-bar console-bulk">
             <span>{bulkTargetLabel()}</span>
@@ -298,6 +319,10 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
                 <span className={document.processing_state === 'failed' ? 'ocr-low' : 'ocr-good'}>{document.processing_state === 'failed' ? '-' : `${document.id.startsWith('demo-') ? '98' : '95'}%`}</span>
               </div>
             ))}
+          </div>
+          <div className="pagination-footer">
+            <span>{documents.length} / {totalEstimate || documents.length} {t('common.documents')}</span>
+            {nextCursor && <button type="button" className="primary" disabled={loadingMore} onClick={() => void loadMoreDocuments()}>{t('common.loadMore', 'Load more')}</button>}
           </div>
         </section>
         {selected && <DocumentPreviewPanel document={selected} pages={selectedPages} loading={detailLoading} onOpenDocument={onOpenDocument} />}

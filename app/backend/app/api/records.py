@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import base64
+import json
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload, with_loader_criteria
 
 from app.auth import require_admin
@@ -25,6 +28,7 @@ router = APIRouter(prefix="/api/records", tags=["records"], dependencies=[Depend
 def list_records(
     collection_id: uuid.UUID | None = None,
     collection_slug: str | None = None,
+    collection: str | None = None,
     folder_id: uuid.UUID | None = None,
     status_filter: str | None = None,
     include_deleted: bool = False,
@@ -42,12 +46,115 @@ def list_records(
         stmt = stmt.where(Record.collection_id == collection_id)
     if collection_slug:
         stmt = stmt.join(Collection).where(Collection.slug == collection_slug)
+    if collection:
+        needle_collection = collection.strip().lower()
+        stmt = stmt.where(Record.collection.has(or_(
+            func.lower(Collection.name).like(f"%{needle_collection}%"),
+            func.lower(Collection.slug).like(f"%{needle_collection}%"),
+        )))
     if folder_id:
         stmt = stmt.where(Record.folder_id == folder_id)
     if status_filter:
         stmt = stmt.where(Record.status == status_filter)
     rows = db.scalars(stmt).all()
     return [RecordRead.model_validate(row) for row in rows]
+
+
+@router.get("/page")
+def list_records_page(
+    collection_id: uuid.UUID | None = None,
+    collection_slug: str | None = None,
+    collection: str | None = None,
+    folder_id: uuid.UUID | None = None,
+    status_filter: str | None = None,
+    q: str | None = None,
+    include_deleted: bool = False,
+    limit: int = 50,
+    cursor: str | None = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    seed_default_collections(db)
+    normalized_limit = max(1, min(limit, 200))
+    base_stmt = _record_list_stmt(collection_id, collection_slug, collection, folder_id, status_filter, q, include_deleted)
+    total = db.scalar(select(func.count()).select_from(base_stmt.subquery())) or 0
+    stmt = _apply_record_cursor(base_stmt, cursor)
+    stmt = stmt.options(selectinload(Record.collection), selectinload(Record.documents), with_loader_criteria(Document, Document.deleted_at.is_(None)))
+    rows = db.scalars(stmt.order_by(Record.updated_at.desc(), Record.id.desc()).limit(normalized_limit + 1)).all()
+    page_rows = rows[:normalized_limit]
+    return {
+        "items": [RecordRead.model_validate(row).model_dump(mode="json") for row in page_rows],
+        "limit": normalized_limit,
+        "next_cursor": _encode_record_cursor(page_rows[-1]) if len(rows) > normalized_limit and page_rows else None,
+        "total_estimate": int(total),
+    }
+
+
+def _record_list_stmt(
+    collection_id: uuid.UUID | None,
+    collection_slug: str | None,
+    collection: str | None,
+    folder_id: uuid.UUID | None,
+    status_filter: str | None,
+    q: str | None,
+    include_deleted: bool,
+):
+    stmt = select(Record)
+    if not include_deleted:
+        stmt = stmt.where(Record.deleted_at.is_(None))
+    if collection_id:
+        stmt = stmt.where(Record.collection_id == collection_id)
+    if collection_slug:
+        stmt = stmt.join(Collection).where(Collection.slug == collection_slug)
+    if collection:
+        needle_collection = collection.strip().lower()
+        stmt = stmt.where(Record.collection.has(or_(
+            func.lower(Collection.name).like(f"%{needle_collection}%"),
+            func.lower(Collection.slug).like(f"%{needle_collection}%"),
+        )))
+    if folder_id:
+        stmt = stmt.where(Record.folder_id == folder_id)
+    if status_filter:
+        stmt = stmt.where(Record.status == status_filter)
+    needle = (q or "").strip().lower()
+    if needle:
+        like = f"%{needle}%"
+        stmt = stmt.where(or_(
+            func.lower(func.coalesce(Record.title, "")).like(like),
+            Record.collection.has(func.lower(Collection.name).like(like)),
+            Record.documents.any(and_(
+                Document.deleted_at.is_(None),
+                or_(
+                    func.lower(Document.original_filename).like(like),
+                    func.lower(func.coalesce(Document.manual_title_override, Document.extracted_title, "")).like(like),
+                ),
+            )),
+        ))
+    return stmt
+
+
+def _apply_record_cursor(stmt, cursor: str | None):
+    decoded = _decode_record_cursor(cursor)
+    if decoded is None:
+        return stmt
+    updated_at, row_id = decoded
+    return stmt.where(or_(Record.updated_at < updated_at, and_(Record.updated_at == updated_at, Record.id < row_id)))
+
+
+def _encode_record_cursor(record: Record) -> str:
+    payload = {"updated_at": record.updated_at.isoformat(), "id": str(record.id)}
+    return base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("ascii")
+
+
+def _decode_record_cursor(cursor: str | None) -> tuple[datetime, uuid.UUID] | None:
+    if not cursor:
+        return None
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8"))
+        updated_at = datetime.fromisoformat(str(payload["updated_at"]))
+        row_id = uuid.UUID(str(payload["id"]))
+        return updated_at, row_id
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid cursor") from exc
 
 
 @router.get("/{record_id}", response_model=RecordRead)

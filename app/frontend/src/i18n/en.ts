@@ -82,6 +82,7 @@ export const en: Record<string, string> = {
   'login.heroSearchTitle': 'Blazing fast search',
   'login.heroSearchCopy': 'Find what you need in a fraction of a second.'
 ,
+  'common.loadMore': 'Load more',
   'common.refresh': 'Refresh',
   'common.document': 'Document',
   'common.record': 'Record',

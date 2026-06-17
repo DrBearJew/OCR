@@ -10908,3 +10908,29 @@ a.icon-button:not(.danger-button):hover {
   background: rgba(185, 28, 28, 0.88);
   color: #fff;
 }
+
+.pagination-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  background: rgba(8, 17, 29, 0.55);
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.pagination-footer button {
+  min-width: 9rem;
+  justify-content: center;
+}
+
+@media (max-width: 640px) {
+  .pagination-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

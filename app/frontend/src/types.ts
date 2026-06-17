@@ -150,6 +150,21 @@ export interface RecordRow {
   documents: Document[]
 }
 
+export interface DocumentListPage {
+  items: Document[]
+  limit: number
+  next_cursor: string | null
+  total_estimate: number
+}
+
+export interface RecordListPage {
+  items: RecordRow[]
+  limit: number
+  next_cursor: string | null
+  total_estimate: number
+}
+
+
 export interface Folder {
   id: string
   parent_id: string | null

@@ -7,9 +7,9 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.collections import create_collection, delete_collection, update_collection
-from app.api.documents import patch_document
+from app.api.documents import list_documents_page, patch_document
 from app.api.folders import delete_folder, folder_contents, update_folder
-from app.api.records import patch_record
+from app.api.records import list_records_page, patch_record
 from app.config import Settings
 from app.models import Batch, Collection, CustomFieldDefinition, CustomFieldType, Document, DocumentState, DocumentType, Folder, OCRMode, Record, ReviewState, StageState, StoragePathRule, Tag
 from app.schemas import CollectionCreate, CollectionUpdate, DocumentPatch, FolderWrite, RecordPatch
@@ -225,6 +225,36 @@ def test_delete_folder_can_soft_delete_contained_documents(db_session: Session, 
     db_session.refresh(child)
     assert document.deleted_at is not None
     assert child.deleted_at is not None
+
+
+
+def test_documents_and_records_page_endpoints_are_keyset_paginated(db_session: Session, tmp_path: Path) -> None:
+    base_time = datetime(2026, 2, 1, tzinfo=timezone.utc)
+    docs: list[Document] = []
+    for index in range(4):
+        doc = make_doc(db_session, tmp_path, f"PageNeedle {index}", collection_name="Page Schema")
+        doc.extracted_title = f"PageNeedle {index}"
+        doc.created_at = base_time + timedelta(minutes=index)
+        doc.updated_at = base_time + timedelta(minutes=index)
+        doc.record.updated_at = base_time + timedelta(minutes=index)
+        docs.append(doc)
+    db_session.commit()
+
+    first_docs = list_documents_page(title="PageNeedle", limit=2, db=db_session)
+    assert first_docs["total_estimate"] == 4
+    assert len(first_docs["items"]) == 2
+    assert first_docs["next_cursor"]
+    second_docs = list_documents_page(title="PageNeedle", limit=2, cursor=first_docs["next_cursor"], db=db_session)
+    assert len(second_docs["items"]) == 2
+    assert {row["id"] for row in first_docs["items"]}.isdisjoint({row["id"] for row in second_docs["items"]})
+
+    first_records = list_records_page(q="Record", collection_slug="page-schema", limit=2, db=db_session)
+    assert first_records["total_estimate"] == 4
+    assert len(first_records["items"]) == 2
+    assert first_records["next_cursor"]
+    second_records = list_records_page(q="Record", collection_slug="page-schema", limit=2, cursor=first_records["next_cursor"], db=db_session)
+    assert len(second_records["items"]) == 2
+    assert {row["id"] for row in first_records["items"]}.isdisjoint({row["id"] for row in second_records["items"]})
 
 
 
