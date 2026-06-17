@@ -218,7 +218,7 @@ export default function DashboardPage({ onOpenRecord, onOpenDocument }: Dashboar
         file,
         filename: file.name,
         sizeLabel: formatBytes(file.size),
-        previewUrl: kind === 'image' ? URL.createObjectURL(file) : null,
+        previewUrl: kind === 'image' || kind === 'pdf' ? URL.createObjectURL(file) : null,
         thumbnailUrl: null,
         serverPreviewUrl: null,
         mimeType: file.type || null,
@@ -705,11 +705,13 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
 
   const preview = pdfPreviewImageUrl ? (
     <img className="upload-zoomable-preview-media upload-pdf-page-preview" src={pdfPreviewImageUrl} alt={selected?.filename || 'PDF preview'} />
+  ) : selected?.previewUrl && selected.kind === 'pdf' ? (
+    <iframe className="upload-zoomable-preview-media upload-local-pdf-preview" style={pdfMediaStyle} src={selected.previewUrl} title={selected.filename} />
   ) : selected?.serverPreviewUrl && selected.kind === 'pdf' ? (
     <iframe className="upload-zoomable-preview-media" style={pdfMediaStyle} src={selected.serverPreviewUrl} title={selected.filename} />
   ) : selected?.serverPreviewUrl && selected.kind === 'image' ? (
     <img className="upload-zoomable-preview-media" src={selected.serverPreviewUrl} alt={selected?.filename || 'PDF preview'} />
-  ) : selected?.previewUrl ? (
+  ) : selected?.previewUrl && selected.kind === 'image' ? (
     <img className="upload-zoomable-preview-media" src={selected.previewUrl} alt={selected?.filename || 'PDF preview'} />
   ) : selected?.kind === 'pdf' ? (
     <PdfMockup />
@@ -883,7 +885,7 @@ function FileKindIcon({ kind }: { kind: UploadDraftFile['kind'] }) {
 }
 
 function DocumentThumb({ file }: { file: UploadDraftFile }) {
-  const image = file.thumbnailUrl || file.previewUrl
+  const image = file.kind === 'image' ? file.thumbnailUrl || file.previewUrl : file.thumbnailUrl
   if (image) return <img src={image} alt="" />
   if (file.kind === 'pdf') return <PdfMockup tiny />
   if (file.kind === 'image') return <FileImage size={26} />
