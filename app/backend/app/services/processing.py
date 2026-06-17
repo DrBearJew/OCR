@@ -24,6 +24,7 @@ from app.services.llm_enrichment import (
     qwen_generate_metadata_candidates,
 )
 from app.services.llm_qwen import build_qwen_provider
+from app.services.metadata_resolver import resolve_metadata_fields, review_warnings_for_resolution
 from app.services.model_setup import settings_with_model_setup
 from app.services.ocr_glm import OCRProvider, OCRProviderError, build_ocr_provider
 from app.services.ocr_pipeline import resolve_ocr_config, store_effective_ocr_trace
@@ -203,58 +204,19 @@ def merge_extracted_metadata_with_manual_values(
     overwrite_manual_values: bool = False,
     force: bool = False,
 ) -> tuple[dict[str, str | None], dict[str, dict[str, Any]]]:
-    existing_sources = document.metadata_sources_json or {}
-    locks = document.field_locks_json or {}
-    merged: dict[str, str | None] = {}
-    sources: dict[str, dict[str, Any]] = {}
+    """Resolve canonical metadata fields through the Paperless-style authority layer.
 
-    for field_name, attr in CORE_FIELD_ATTRS.items():
-        current = getattr(document, attr, None)
-        source_info = existing_sources.get(field_name) if isinstance(existing_sources.get(field_name), dict) else {}
-        current_source = source_info.get("source")
-        locked = bool(locks.get(field_name)) or (document.metadata_locked and not force)
-        candidate = deterministic.get(field_name)
-
-        if locked or (current_source == "manual" and current and not force and not overwrite_manual_values):
-            merged[field_name] = current
-            sources[field_name] = {"source": current_source or "manual", "confidence": source_info.get("confidence")}
-        elif not _is_empty_value(candidate):
-            merged[field_name] = candidate
-            sources[field_name] = {"source": "deterministic", "confidence": 90}
-        elif force:
-            merged[field_name] = None
-            sources[field_name] = {"source": "deterministic", "confidence": None}
-        else:
-            merged[field_name] = current
-            sources[field_name] = {"source": current_source or "deterministic", "confidence": source_info.get("confidence")}
-
-    normalized_qwen = _normalize_qwen_suggestion(qwen_suggestion or {})
-    for field_name, candidate in normalized_qwen.items():
-        if field_name not in CORE_FIELD_ATTRS or _is_empty_value(candidate):
-            continue
-        source_info = sources.get(field_name, {})
-        locked = bool((document.field_locks_json or {}).get(field_name)) or (document.metadata_locked and not force)
-        qwen_confidence = _qwen_confidence(qwen_suggestion or {}, field_name)
-        qwen_evidence = _qwen_evidence(qwen_suggestion or {}, field_name)
-        if should_qwen_overwrite_field(
-            field_name,
-            merged.get(field_name),
-            source_info.get("source"),
-            locked,
-            overwrite_manual_values,
-            qwen_value=str(candidate),
-            qwen_confidence=qwen_confidence,
-            qwen_evidence=qwen_evidence,
-        ):
-            merged[field_name] = str(candidate)
-            sources[field_name] = {
-                "source": "qwen",
-                "confidence": qwen_confidence,
-                "evidence": qwen_evidence,
-            }
-
-    return merged, sources
-
+    Kept as a compatibility wrapper for existing callers/tests. New code should use
+    metadata_resolver.resolve_metadata_fields when it needs the candidate ledger.
+    """
+    resolution = resolve_metadata_fields(
+        document,
+        deterministic,
+        qwen_suggestion,
+        overwrite_manual_values=overwrite_manual_values,
+        force=force,
+    )
+    return resolution.merged, resolution.sources
 
 def determine_next_processing_state(document: Document, missing_required_fields: list[str] | None = None) -> DocumentState:
     if document.ocr_state == StageState.failed or document.metadata_state == StageState.failed:
@@ -582,36 +544,12 @@ def review_warnings(
     qwen_suggestion: dict[str, Any] | None,
     deterministic: dict[str, str | None],
 ) -> list[str]:
-    warnings: list[str] = []
-    for field_name, source in sources.items():
-        confidence = source.get("confidence")
-        try:
-            if confidence is not None and int(confidence) < 70:
-                warnings.append(f"Low confidence for {field_name}")
-        except (TypeError, ValueError):
-            pass
-    title = merged.get("title") or document.extracted_title or ""
-    if title.startswith("Dok_") or "_NA" in title or title in {"Dok", "NA"}:
-        warnings.append("Fallback title or missing title segment used")
-    amount = merged.get("amount") or ""
-    digits = "".join(ch for ch in amount if ch.isdigit())
-    if amount == "42424242,00" or len(digits) > 9:
-        warnings.append("Suspicious amount detected")
-    date = merged.get("date") or ""
-    if date in {"00/00", "00/00/0000"}:
-        warnings.append("Suspicious or fallback date detected")
-    normalized_qwen = _normalize_qwen_suggestion(qwen_suggestion or {})
-    for field in ["sender", "recipient", "invoice_number", "date", "amount"]:
-        qwen_value = normalized_qwen.get(field)
-        deterministic_value = deterministic.get(field)
-        if sources.get(field, {}).get("source") == "qwen":
-            continue
-        if qwen_value and deterministic_value and str(qwen_value).strip() != str(deterministic_value).strip():
-            warnings.append(f"Qwen disagrees with deterministic {field}")
-    if document.ocr_state == StageState.failed or (document.raw_ocr_json or {}).get("partial_failure"):
-        warnings.append("OCR failed partially")
-    return sorted(set(warnings))
+    """Return review blockers after canonical field resolution.
 
+    Qwen/deterministic disagreement is not itself a blocker when the resolver chose
+    Qwen as the winning source for that field.
+    """
+    return review_warnings_for_resolution(document, merged, sources, qwen_suggestion, deterministic)
 
 def queue_ocr(db: Session, document: Document, *, force: bool = False) -> bool:
     if not force and (
@@ -1217,13 +1155,14 @@ def run_metadata_for_document(
             qwen_debug = {"disabled": True}
             record_event(db, document, "qwen_metadata_brain_skipped", "Qwen metadata brain disabled by processing options")
 
-        merged, sources = merge_extracted_metadata_with_manual_values(
+        resolution = resolve_metadata_fields(
             document,
             deterministic,
             qwen_suggestion,
             overwrite_manual_values=bool(options.get("overwrite_manual_values")),
             force=force,
         )
+        merged, sources = resolution.merged, resolution.sources
         if result.metadata.get("shared_title_applied"):
             sources["title_base"] = {
                 "source": "shared_record",
@@ -1246,6 +1185,7 @@ def run_metadata_for_document(
             "qwen_refinement": qwen_debug,
             "qwen_candidates": (qwen_debug or {}).get("candidate", {}),
             "merged_sources": sources,
+            "metadata_resolution": resolution.as_metadata(),
             "search_indexed": True,
         }
         record_event(db, document, "search_indexed", "Full OCR and metadata are searchable in the app database")

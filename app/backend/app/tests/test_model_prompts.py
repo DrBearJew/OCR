@@ -249,7 +249,7 @@ def test_qwen_metadata_brain_prompt_requires_structured_candidates() -> None:
     assert "strict JSON" in rendered.text or "valid compact JSON only" in rendered.text
     assert '"correspondent"' in rendered.text
     assert '"custom_fields"' in rendered.text
-    assert "Deterministic extraction remains authoritative" in rendered.text
+    assert "Deterministic extraction is a candidate source, not automatic truth" in rendered.text
 
 
 def test_metadata_extraction_still_succeeds_when_qwen_disabled(db_session: Session, tmp_path: Path) -> None:

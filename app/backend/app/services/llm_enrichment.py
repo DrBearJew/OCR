@@ -31,6 +31,7 @@ QWEN_PROMPT_OMIT_METADATA_KEYS = {
     "merged_sources",
     "review_warnings",
     "missing_required_fields",
+    "metadata_resolution",
 }
 
 
@@ -115,7 +116,7 @@ def build_qwen_metadata_payload(
         ]
     return {
         "collection_name": document.collection_name,
-        "title": document.manual_title_override or document.extracted_title or document.original_filename,
+        "title": _qwen_prompt_title(document),
         "ocr_text": document.ocr_text or "",
         "collection_schema": {
             "name": collection.name if collection else document.collection_name,
@@ -440,6 +441,18 @@ def _custom_field_candidates(value: Any) -> dict[str, dict[str, Any]]:
             if slug:
                 fields[str(slug)] = _field_candidate(item, item.get("confidence"), str(slug))
     return {slug: candidate for slug, candidate in fields.items() if candidate.get("value")}
+
+
+def _qwen_prompt_title(document: Document) -> str:
+    """Return non-stale title context for Qwen.
+
+    Generated titles are derived outputs and may contain stale fallback segments.
+    Only manual overrides are authoritative title input; otherwise use the original
+    filename as weak context while deterministic_metadata carries fresh parser candidates.
+    """
+    if document.manual_title_override:
+        return document.manual_title_override
+    return document.original_filename or ""
 
 
 def _similar_doc_payload(document: Document) -> dict[str, Any]:
