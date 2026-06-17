@@ -248,16 +248,43 @@ def parse_json_suggestion(raw_text: str) -> Any:
     fenced = re.search(r"```(?:json)?\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
     if fenced:
         text = fenced.group(1).strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        candidate = _extract_json_region(text)
-        if candidate:
+    for candidate_text in (text, _repair_extra_string_literals_after_evidence(text)):
+        try:
+            return json.loads(candidate_text)
+        except json.JSONDecodeError:
+            candidate = _extract_json_region(candidate_text)
+            if candidate:
+                try:
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    repaired = _repair_extra_string_literals_after_evidence(candidate)
+                    if repaired != candidate:
+                        try:
+                            return json.loads(repaired)
+                        except json.JSONDecodeError:
+                            pass
+    return {"text": raw_text}
+
+
+def _repair_extra_string_literals_after_evidence(text: str) -> str:
+    """Repair Qwen objects like: "evidence": "A", "B", "C".
+
+    This is intentionally narrow. It only folds anonymous string literals that
+    immediately follow an evidence property into that evidence string.
+    """
+    pattern = re.compile(r'"evidence"\s*:\s*"((?:[^"\\]|\\.)*)"((?:\s*,\s*"(?:[^"\\]|\\.)*")+)')
+
+    def repl(match: re.Match[str]) -> str:
+        values = [match.group(1), *re.findall(r'\s*,\s*"((?:[^"\\]|\\.)*)"', match.group(2))]
+        decoded: list[str] = []
+        for value in values:
             try:
-                return json.loads(candidate)
+                decoded.append(json.loads(f'"{value}"'))
             except json.JSONDecodeError:
-                pass
-        return {"text": raw_text}
+                decoded.append(value)
+        return '"evidence": ' + json.dumps("; ".join(item for item in decoded if item), ensure_ascii=False)
+
+    return pattern.sub(repl, text)
 
 
 def _chat_content(raw: dict[str, Any]) -> str:

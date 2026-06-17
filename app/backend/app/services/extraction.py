@@ -177,7 +177,8 @@ def strip_accents(value: str) -> str:
 
 def compact_party(value: str, max_len: int = 40) -> str:
     value = strip_accents(value)
-    value = re.sub(r"\b(ges\.?\s*mbh|gesmbh|gmbh|mbh|ag|kg|ug|inc|ltd|llc|sarl|e\.?k\.?)\b", " ", value, flags=re.I)
+    value = re.sub(r"\bco\.?\s*ohg\b", " ", value, flags=re.I)
+    value = re.sub(r"\b(ges\.?\s*mbh|gesmbh|gmbh|mbh|ag|kg|ug|ohg|re|inc|ltd|llc|sarl|e\.?k\.?)\b", " ", value, flags=re.I)
     value = re.sub(r"[^A-Za-z0-9 ]+", " ", value)
     value = re.sub(r"\s+", " ", value).strip()
     parts = [part for part in value.split() if part]
@@ -375,36 +376,55 @@ def extract_invoice_number(text: str) -> str:
         r"(?i)\bInvoice\s*Number\s*[:#.]?\s*([A-Z0-9][A-Z0-9./-]{1,})\b",
         r"(?i)\bBeleg(?:nr|nummer)\.?\s*[:#.]?\s*([A-Z0-9][A-Z0-9./-]{1,})\b",
     ]
-    for raw in text.splitlines():
-        line = re.sub(r"\s+", " ", raw.strip())
+    lines = [re.sub(r"\s+", " ", raw.strip()) for raw in text.splitlines() if raw.strip()]
+    for index, line in enumerate(lines):
         low = line.lower()
-        if any(
-            bad in low
-            for bad in (
-                "kundennummer",
-                "kunden-nr",
-                "kunden nr",
-                "customer",
-                "auftrags",
-                "bestell",
-                "lieferant nr",
-                "lieferant-nr",
-                "vat id",
-                "ust-id",
-                "ustid",
-                "iban",
-                "telefon",
-                "phone",
-            )
-        ):
+        if _bad_identifier_context(low):
             continue
         for pattern in patterns:
             match = re.search(pattern, line)
             if match:
                 value = re.sub(r"[^A-Za-z0-9./-]+", "", match.group(1))
-                if value and not _is_rejected_identifier(value):
+                if _valid_invoice_identifier(value):
+                    return value[:40]
+        if re.fullmatch(r"(?i)(rechnungs\s*nummer|rechnungs\s*nr\.?|rechnung\s*nr\.?|invoice\s*(no\.?|number))", line):
+            for next_line in lines[index + 1 : index + 4]:
+                if _bad_identifier_context(next_line.lower()):
+                    break
+                value = re.sub(r"[^A-Za-z0-9./-]+", "", next_line)
+                if _valid_invoice_identifier(value):
                     return value[:40]
     return "NA"
+
+
+def _bad_identifier_context(low: str) -> bool:
+    return any(
+        bad in low
+        for bad in (
+            "kundennummer",
+            "kunden-nr",
+            "kunden nr",
+            "customer",
+            "auftrags",
+            "bestell",
+            "lieferant nr",
+            "lieferant-nr",
+            "vat id",
+            "ust-id",
+            "ustid",
+            "iban",
+            "telefon",
+            "phone",
+        )
+    )
+
+
+def _valid_invoice_identifier(value: str) -> bool:
+    if not value:
+        return False
+    if re.search(r"\d+[/.-]\d+", value):
+        return True
+    return not _is_rejected_identifier(value)
 
 
 def _is_rejected_identifier(value: str) -> bool:
@@ -421,12 +441,16 @@ def _is_rejected_identifier(value: str) -> bool:
 
 def extract_invoice_date(text: str, created_at: datetime | None = None) -> str:
     lines = [re.sub(r"\s+", " ", raw.strip()) for raw in text.splitlines() if raw.strip()]
-    for line in lines:
+    for index, line in enumerate(lines):
         low = line.lower()
         if "rechnungsdatum" in low or "invoice date" in low:
             date = normalize_date(line)
             if date:
                 return date
+            for next_line in lines[index + 1 : index + 3]:
+                date = normalize_date(next_line)
+                if date:
+                    return date
     for line in lines:
         low = line.lower()
         if "lieferdatum" in low or "leistungsdatum" in low or "valutadatum" in low:
@@ -442,19 +466,18 @@ def extract_invoice_date(text: str, created_at: datetime | None = None) -> str:
 
 def extract_invoice_amount(text: str) -> str:
     num_re = re.compile(r"(?<!\d)(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+[.,]\d{2}|\d+)(?!\d)")
-    strong = ("endsumme", "gesamtsumme", "gesamtbetrag", "zu zahlen", "balance due", "invoice total", "grand total", "brutto")
+    strong = ("endsumme", "gesamtsumme", "gesamtbetrag", "zu zahlen", "zu zahlender betrag", "balance due", "invoice total", "grand total", "brutto")
     medium = ("summe", "gesamt", "total", "rechnungsbetrag")
     bad = ("netto", "mwst", "ust", "steuer", "skonto", "rabatt")
+    identifier_context = ("iban", "bic", "hrb", "hra", "weee", "ust.-id", "ust-id", "amtsgericht", "gläubiger", "glaeubiger", "kundennummer", "mobilfunknummer", "telefon", "mandats-id")
     candidates: list[tuple[int, float, str]] = []
+    pending_score = 0
 
     for raw in text.splitlines():
         line = re.sub(r"\s+", " ", raw.strip())
         if not line:
             continue
         low = line.lower()
-        numbers = num_re.findall(line)
-        if not numbers:
-            continue
         score = 0
         if any(cue in low for cue in strong):
             score += 4
@@ -462,6 +485,18 @@ def extract_invoice_amount(text: str) -> str:
             score += 2
         if any(cue in low for cue in bad) and not any(cue in low for cue in strong):
             score -= 3
+        numbers = num_re.findall(line)
+        if not numbers:
+            pending_score = max(pending_score, score)
+            continue
+        if any(cue in low for cue in identifier_context):
+            pending_score = 0
+            continue
+        if pending_score and score <= 0:
+            score += pending_score
+        pending_score = 0
+        if "€" in line or " eur" in low or low.endswith("eur") or "$" in line:
+            score += 1
         amount = normalize_amount(numbers[-1])
         if amount == "NA":
             continue
@@ -580,7 +615,7 @@ def extract_belege_amount(text: str) -> str:
 
 
 def extract_eingangsrechnung_sender(text: str, original_filename: str = "", existing_title: str | None = None) -> str:
-    if existing_title:
+    if existing_title and "_NA" not in existing_title:
         match = re.match(r"^([^_]+)_[^_]+_\d{2}/\d{2}/\d{4}_[^_]+$", existing_title.strip())
         if match and match.group(1).lower() != "dok":
             return match.group(1)
@@ -624,7 +659,7 @@ def extract_eingangsrechnung_sender(text: str, original_filename: str = "", exis
         postal = re.search(r"\b\d{4,5}\b", candidate)
         if postal:
             candidate = candidate[: postal.start()].strip()
-        words = re.findall(r"[A-Za-zÄÖÜäöüß.\-]+", candidate)
+        words = re.findall(r"[^\W\d_][^\W\d_.\-]*", candidate)
         if not words:
             continue
         sender = compact_party(" ".join(words))
@@ -663,7 +698,7 @@ def extract_ausgangsrechnung_recipient(text: str) -> str:
             return False
         if re.search(r"\d{4,}", line):
             return False
-        words = re.findall(r"[A-Za-zÄÖÜäöüß.\-&]+", line)
+        words = re.findall(r"[^\W\d_][^\W\d_.&\-]*", line)
         if not words or len(words) > 6:
             return False
         candidate = compact_party(line)

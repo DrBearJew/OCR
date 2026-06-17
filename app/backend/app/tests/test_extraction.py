@@ -40,6 +40,49 @@ def test_eingangsrechnung_golden_titles() -> None:
     ).title == "Muster_M1675_29/10/2020_222,51"
 
 
+def test_eingangsrechnung_multiline_o2_invoice_fields() -> None:
+    text = """O2
+Ihre Rechnung
+Telefónica Germany GmbH & Co. OHG RE 90345 Nürnberg
+Rechnungsnummer
+1318249263/08
+Ihre Kundennummer
+6078977192
+Rechnungsdatum
+28.07.2025
+Leistungszeitraum
+23.06.2025 - 22.07.2025
+Igor Serbul
+Fällig am
+04.08.2025
+Grundgebühren
+42,99 €
+Vergünstigungen / Guthaben
+-16,50 €
+Rechnungsbetrag
+26,49 €
+(davon enthaltene MwSt. 4,23 €)
+Zu zahlender Betrag
+26,49 €
+Telefónica Deutschland Holding AG, Sitz in München, Amtsgericht München HRB 201055.
+"""
+    result = extract_eingangsrechnung_title(ExtractionInput("Eingangsrechnung", text, original_filename="2025-7-28-RG-1.pdf"))
+    recovered = extract_eingangsrechnung_title(
+        ExtractionInput(
+            "Eingangsrechnung",
+            text,
+            original_filename="2025-7-28-RG-1.pdf",
+            existing_title="TelefnicaGermany_NA_17/06/2026_201055,00",
+        )
+    )
+
+    assert result.invoice_number == "1318249263/08"
+    assert result.date == "28/07/2025"
+    assert result.amount == "26,49"
+    assert result.title == "TelefonicaGermany_1318249263/08_28/07/2025_26,49"
+    assert recovered.title == result.title
+
+
 def test_ausgangsrechnung_golden_titles() -> None:
     habermann = "\n".join(
         [

@@ -9,7 +9,7 @@ from app.models import Batch, BatchStatus, Document, DocumentState, OCRMode, Rev
 from app.services.llm_qwen import QwenRefinement
 from app.services.prompt_loader import PromptLoader
 from app.services.ocr_glm import OCRProviderError, OCRResult
-from app.services.processing import determine_next_processing_state, queue_ocr, run_metadata_for_document, run_ocr_for_document, update_batch_status
+from app.services.processing import determine_next_processing_state, merge_extracted_metadata_with_manual_values, queue_ocr, review_warnings, run_metadata_for_document, run_ocr_for_document, update_batch_status
 
 
 class StaticProvider:
@@ -44,6 +44,38 @@ def make_doc(db: Session, tmp_path: Path, text: str, collection: str = "Eingangs
     db.commit()
     db.refresh(doc)
     return doc
+
+
+def test_high_confidence_qwen_replaces_weak_deterministic_sender(db_session: Session, tmp_path: Path) -> None:
+    doc = make_doc(db_session, tmp_path, "Telefónica Germany GmbH & Co. OHG")
+    deterministic = {
+        "title": "TelefnicaGermany_1318249263/08_28/07/2025_26,49",
+        "sender": "TelefnicaGermany",
+        "recipient": None,
+        "invoice_number": "1318249263/08",
+        "date": "28/07/2025",
+        "amount": "26,49",
+        "payment_method": None,
+    }
+    qwen = {
+        "metadata": {"sender": "Telefónica Germany GmbH & Co. OHG"},
+        "confidence": {"sender": 95},
+        "evidence": {"sender": "Telefónica Germany GmbH & Co. OHG RE 90345 Nürnberg"},
+    }
+
+    merged, sources = merge_extracted_metadata_with_manual_values(doc, deterministic, qwen)
+    warnings = review_warnings(doc, merged, sources, qwen, deterministic)
+
+    assert merged["sender"] == "Telefónica Germany GmbH & Co. OHG"
+    assert sources["sender"]["source"] == "qwen"
+    assert "Qwen disagrees with deterministic sender" not in warnings
+
+    doc.metadata_sources_json = {"sender": {"source": "manual", "confidence": 100}}
+    doc.extracted_sender = "Manual Sender"
+    db_session.commit()
+    merged, sources = merge_extracted_metadata_with_manual_values(doc, deterministic, qwen)
+    assert merged["sender"] == "Manual Sender"
+    assert sources["sender"]["source"] == "manual"
 
 
 def test_complete_only_after_ocr_and_metadata(db_session: Session, tmp_path: Path) -> None:

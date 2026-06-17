@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import logging
+import re
+import unicodedata
 import uuid
 from typing import Any
 
@@ -175,8 +177,11 @@ def should_qwen_overwrite_field(
     current_source: str | None,
     locked: bool,
     overwrite_manual_values: bool,
+    *,
+    qwen_value: str | None = None,
+    qwen_confidence: int | None = None,
+    qwen_evidence: str | None = None,
 ) -> bool:
-    del field_name
     if locked:
         return False
     if _is_empty_value(current_value):
@@ -185,6 +190,8 @@ def should_qwen_overwrite_field(
         return True
     if current_source == "manual":
         return False
+    if current_source == "deterministic" and _qwen_candidate_is_stronger(field_name, current_value, qwen_value, qwen_confidence, qwen_evidence):
+        return True
     return False
 
 
@@ -227,12 +234,23 @@ def merge_extracted_metadata_with_manual_values(
             continue
         source_info = sources.get(field_name, {})
         locked = bool((document.field_locks_json or {}).get(field_name)) or (document.metadata_locked and not force)
-        if should_qwen_overwrite_field(field_name, merged.get(field_name), source_info.get("source"), locked, overwrite_manual_values):
+        qwen_confidence = _qwen_confidence(qwen_suggestion or {}, field_name)
+        qwen_evidence = _qwen_evidence(qwen_suggestion or {}, field_name)
+        if should_qwen_overwrite_field(
+            field_name,
+            merged.get(field_name),
+            source_info.get("source"),
+            locked,
+            overwrite_manual_values,
+            qwen_value=str(candidate),
+            qwen_confidence=qwen_confidence,
+            qwen_evidence=qwen_evidence,
+        ):
             merged[field_name] = str(candidate)
             sources[field_name] = {
                 "source": "qwen",
-                "confidence": _qwen_confidence(qwen_suggestion or {}, field_name),
-                "evidence": _qwen_evidence(qwen_suggestion or {}, field_name),
+                "confidence": qwen_confidence,
+                "evidence": qwen_evidence,
             }
 
     return merged, sources
@@ -384,6 +402,69 @@ def _qwen_evidence(suggestion: dict[str, Any], field_name: str) -> str | None:
     return text or None
 
 
+def _qwen_candidate_is_stronger(
+    field_name: str,
+    current_value: str | None,
+    qwen_value: str | None,
+    qwen_confidence: int | None,
+    qwen_evidence: str | None,
+) -> bool:
+    if _is_empty_value(qwen_value) or (qwen_confidence is not None and qwen_confidence < 90):
+        return False
+    if not qwen_evidence:
+        return False
+    if field_name == "sender":
+        current_key = _compact_compare_text(current_value)
+        qwen_key = _compact_compare_text(qwen_value)
+        if current_key and qwen_key and current_key in qwen_key and len(qwen_key) > len(current_key) + 3:
+            return True
+        return _looks_like_compacted_or_damaged_party(current_value) and len(str(qwen_value or "")) > len(str(current_value or ""))
+    if field_name == "date":
+        return bool(re.search(r"rechnung|invoice", qwen_evidence, flags=re.I))
+    if field_name == "amount":
+        current_amount = _amount_number(current_value)
+        qwen_amount = _amount_number(qwen_value)
+        if current_amount is None or qwen_amount is None:
+            return False
+        return current_amount >= 10000 and qwen_amount < current_amount / 10
+    return False
+
+
+def _compact_compare_text(value: str | None) -> str:
+    text = str(value or "").replace("ß", "ss")
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+
+def _looks_like_compacted_or_damaged_party(value: str | None) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if " " not in text and len(text) >= 8:
+        return True
+    compact = _compact_compare_text(text)
+    return len(compact) >= 8 and len(compact) <= len(text.replace(" ", "")) - 1
+
+
+def _amount_number(value: str | None) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    text = re.sub(r"[^0-9,.-]", "", text)
+    if "," in text and "." in text:
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif "," in text:
+        text = text.replace(".", "").replace(",", ".")
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
 def _normalize_qwen_date(value: str) -> str:
     text = value.strip()
     if len(text) == 10 and text[4] == "-" and text[7] == "-":
@@ -523,6 +604,8 @@ def review_warnings(
     for field in ["sender", "recipient", "invoice_number", "date", "amount"]:
         qwen_value = normalized_qwen.get(field)
         deterministic_value = deterministic.get(field)
+        if sources.get(field, {}).get("source") == "qwen":
+            continue
         if qwen_value and deterministic_value and str(qwen_value).strip() != str(deterministic_value).strip():
             warnings.append(f"Qwen disagrees with deterministic {field}")
     if document.ocr_state == StageState.failed or (document.raw_ocr_json or {}).get("partial_failure"):

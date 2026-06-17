@@ -7,9 +7,17 @@ from sqlalchemy.orm import Session
 
 from app.models import Batch, CustomFieldDefinition, CustomFieldType, Document, DocumentState, FieldValueSource, StageState
 from app.services.collections import create_record_for_upload, ensure_collection
-from app.services.llm_qwen import QwenRefinement
+from app.services.llm_qwen import QwenRefinement, parse_json_suggestion
 from app.services.processing import run_metadata_for_document
 from app.services.prompt_loader import PromptLoader
+
+
+def test_qwen_json_parser_repairs_extra_evidence_strings() -> None:
+    parsed = parse_json_suggestion(
+        '{"entities":{"organizations":[{"value":"O2","confidence":0.99,"evidence":"O2 Team", "O2 Mobile Unlimited Smart", "O2"}]}}'
+    )
+
+    assert parsed["entities"]["organizations"][0]["evidence"] == "O2 Team; O2 Mobile Unlimited Smart; O2"
 
 
 class CandidateQwen:
