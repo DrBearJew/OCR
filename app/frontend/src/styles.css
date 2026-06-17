@@ -11134,3 +11134,21 @@ a.icon-button:not(.danger-button):hover {
     justify-self: start;
   }
 }
+
+
+.diagnostics-summary ul {
+  margin: 0 0 0.75rem;
+  padding-left: 1.2rem;
+  color: #cbd5e1;
+}
+.diagnostics-summary li {
+  margin: 0.25rem 0;
+}
+.diagnostics-summary li.ok {
+  color: #86efac;
+}
+.diagnostics-raw summary {
+  cursor: pointer;
+  color: #93c5fd;
+  font-weight: 800;
+}

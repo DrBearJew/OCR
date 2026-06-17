@@ -20,6 +20,7 @@ IMPORTANT_FIELDS = {
 
 def document_completion_diagnostics(document: Document) -> dict[str, Any]:
     qwen_info = _qwen_status(document)
+    task_active = document.processing_state in {DocumentState.queued_for_ocr, DocumentState.ocr_processing, DocumentState.metadata_processing} and bool(document.processing_task_id)
     merged = {field: getattr(document, attr, None) for field, attr in IMPORTANT_FIELDS.items()}
     missing_required = missing_required_core_fields(document, merged)
     indexed = bool((document.metadata_json or {}).get("search_indexed")) or _search_index_is_implicit(document)
@@ -62,13 +63,16 @@ def document_completion_diagnostics(document: Document) -> dict[str, Any]:
         "missing_required_fields": missing_required,
         "last_error": document.error_message,
         "task": {
-            "task_id": document.processing_task_id,
-            "current_stage": document.current_stage,
-            "started_at": document.processing_started_at,
-            "lease_until": document.processing_lease_until,
-            "last_heartbeat_at": document.last_processing_heartbeat_at,
-            "retry_after_at": document.retry_after_at,
-            "attempt": document.processing_attempt,
+            "active": task_active,
+            "task_id": document.processing_task_id if task_active else None,
+            "current_stage": document.current_stage if task_active else None,
+            "started_at": document.processing_started_at if task_active else None,
+            "lease_until": document.processing_lease_until if task_active else None,
+            "last_heartbeat_at": document.last_processing_heartbeat_at if task_active else None,
+            "retry_after_at": document.retry_after_at if task_active else None,
+            "attempt": document.processing_attempt if task_active else None,
+            "total_attempts": document.processing_attempt or 0,
+            "last_heartbeat_recorded_at": document.last_processing_heartbeat_at,
         },
         "blockers": blockers,
         "field_provenance": field_provenance(document),

@@ -284,7 +284,7 @@ export default function DocumentDetailPage({ id }: { id: string }) {
 
       <section className="text-section">
         <h2>{t('documentDetail.whyIncomplete')}</h2>
-        <pre>{JSON.stringify(diagnostics, null, 2)}</pre>
+        <DiagnosticsSummary diagnostics={diagnostics} t={t} />
       </section>
       {preview && (
         <section className="text-section">
@@ -382,4 +382,33 @@ const DOCUMENT_EVENT_MESSAGE_KEYS: Record<string, string> = {
   'Document uploaded': 'activity.message.uploaded',
   'Original file stored on local filesystem': 'activity.message.stored',
   'Full document processing started': 'activity.message.processStarted'
+}
+
+function DiagnosticsSummary({ diagnostics, t }: { diagnostics: Record<string, unknown> | null; t: (key: string, fallback?: string) => string }) {
+  if (!diagnostics) return <p className="muted">{t('documentDetail.diagnosticsLoading')}</p>
+  const blockers = Array.isArray(diagnostics.blockers) ? diagnostics.blockers.map(String) : []
+  const task = isRecord(diagnostics.task) ? diagnostics.task : null
+  const taskActive = Boolean(task?.active)
+  const totalAttempts = typeof task?.total_attempts === 'number' ? task.total_attempts : typeof task?.attempt === 'number' ? task.attempt : null
+  const qwen = isRecord(diagnostics.qwen) ? diagnostics.qwen : null
+  const qwenStatus = typeof qwen?.status === 'string' ? qwen.status : null
+  const complete = Boolean(diagnostics.complete)
+  return (
+    <div className="diagnostics-summary">
+      <ul>
+        {blockers.length ? blockers.map((blocker) => <li key={blocker}>{blocker}</li>) : <li className="ok">{complete ? t('documentDetail.noCompletionBlockers') : t('documentDetail.noDiagnosticBlockers')}</li>}
+        {qwenStatus && <li>{t('documentDetail.qwenStatus')}: {qwenStatus}</li>}
+        {taskActive && <li>{t('documentDetail.activeTask')}: {String(task?.current_stage || 'processing')}</li>}
+        {!taskActive && totalAttempts !== null && totalAttempts > 0 && <li>{t('documentDetail.totalAttempts')}: {totalAttempts}</li>}
+      </ul>
+      <details className="diagnostics-raw">
+        <summary>{t('documentDetail.rawDiagnostics')}</summary>
+        <pre>{JSON.stringify(diagnostics, null, 2)}</pre>
+      </details>
+    </div>
+  )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }

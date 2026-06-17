@@ -364,6 +364,28 @@ def test_document_diagnostics_extraction_preview_and_reindex(db_session: Session
     assert reindexed.metadata_json["search_indexed"] is True
 
 
+def test_completed_document_diagnostics_hide_inactive_task_internals(db_session: Session, tmp_path: Path) -> None:
+    doc = make_doc(db_session, tmp_path, "Done")
+    doc.processing_state = DocumentState.complete
+    doc.ocr_state = StageState.done
+    doc.metadata_state = StageState.done
+    doc.extracted_title = "Done"
+    doc.metadata_json = {"search_indexed": True}
+    doc.processing_attempt = 4
+    doc.last_processing_heartbeat_at = datetime.now(timezone.utc)
+    db_session.commit()
+
+    diagnostics = document_diagnostics(doc.id, db=db_session, _admin="admin")
+
+    assert diagnostics["complete"] is True
+    assert diagnostics["task"]["active"] is False
+    assert diagnostics["task"]["task_id"] is None
+    assert diagnostics["task"]["attempt"] is None
+    assert diagnostics["task"]["last_heartbeat_at"] is None
+    assert diagnostics["task"]["total_attempts"] == 4
+    assert diagnostics["task"]["last_heartbeat_recorded_at"] is not None
+
+
 def test_reconcile_repairs_old_stack_incomplete_shapes(db_session: Session, tmp_path: Path, monkeypatch) -> None:
     queued: list[tuple[str, str]] = []
     monkeypatch.setattr("app.services.reconciliation._enqueue_ocr", lambda doc_id: queued.append(("ocr", str(doc_id))))
