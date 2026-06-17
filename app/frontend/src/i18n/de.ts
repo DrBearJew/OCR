@@ -200,6 +200,8 @@ export const de: Record<string, string> = {
   'folders.allItems': 'Alle Elemente',
   'folders.noChildFoldersInSelection': 'Hier gibt es noch keine Unterordner.',
   'folders.moveToFolder': 'In Ordner verschieben',
+  'folders.noFolderCurrent': 'Kein Ordner (bereits nicht abgelegt)',
+  'folders.removeFromFolder': 'Aus Ordner entfernen / Nicht abgelegt',
   'folders.noRecords': 'Keine passenden Dokumente in diesem Ordner/Filter.',
   'folders.noDocuments': 'Keine passenden Dokumente in diesem Ordner/Filter.',
   'folders.showingFirst': 'Die ersten 50 werden angezeigt. Suche nutzen, um die Liste einzugrenzen.',

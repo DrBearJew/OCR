@@ -200,6 +200,8 @@ export const en: Record<string, string> = {
   'folders.allItems': 'All items',
   'folders.noChildFoldersInSelection': 'No child folders here yet.',
   'folders.moveToFolder': 'Move to folder',
+  'folders.noFolderCurrent': 'No folder (already unfiled)',
+  'folders.removeFromFolder': 'Remove from folder / Unfiled',
   'folders.noRecords': 'No documents match this folder/filter.',
   'folders.noDocuments': 'No documents match this folder/filter.',
   'folders.showingFirst': 'Showing first 50. Use search to narrow the list.',

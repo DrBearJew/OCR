@@ -268,12 +268,15 @@ export default function FoldersPage({ onOpenDocument }: Props) {
   }
 
   function renderDestinationSelect(item: FolderContentsItem, onChange: (folderId: string | null) => void) {
+    const destinations = destinationFoldersForItem(item)
+    const alreadyUnfiled = !item.folder_id
+    const noMoveTargets = alreadyUnfiled && !destinations.length
     return (
       <label className="folder-move-select">
         <span>{t('folders.moveToFolder', 'Move to folder')}</span>
-        <select value={item.folder_id || ''} disabled={busy === `document:${item.id}`} onChange={(event) => onChange(event.target.value || null)}>
-          <option value="">{t('folders.home')}</option>
-          {destinationFoldersForItem(item).map((folder) => <option key={folder.id} value={folder.id}>{folder.path}</option>)}
+        <select value={item.folder_id || ''} disabled={busy === `document:${item.id}` || noMoveTargets} onChange={(event) => onChange(event.target.value || null)}>
+          <option value="">{alreadyUnfiled ? t('folders.noFolderCurrent', 'No folder (already unfiled)') : t('folders.removeFromFolder', 'Remove from folder / Unfiled')}</option>
+          {destinations.map((folder) => <option key={folder.id} value={folder.id}>{folder.path}</option>)}
         </select>
       </label>
     )
