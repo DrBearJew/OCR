@@ -3,13 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import httpx
 from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.models import Batch, Document, DocumentState, StageState
 from app.services.extraction import ExtractionInput, extract_belege_title
 from app.services.integrations import collect_integrations
-from app.services.llm_qwen import QwenLlamaCppProvider, QwenRefinement
+from app.services.llm_qwen import QwenLlamaCppProvider, QwenProviderError, QwenRefinement
 from app.services.ocr_glm import GLMLlamaCppOCRProvider, OCRProviderError, PaddleVLLlamaCppOCRProvider, PPOCRv6Provider, _compact_repeated_ocr_lines, _format_diagram_ocr_markdown_if_needed, build_ocr_provider
 from app.services.processing import run_metadata_for_document
 from app.services.prompt_loader import PromptLoader
@@ -228,6 +229,36 @@ def test_qwen_metadata_candidate_adapter_requests_json_mode(monkeypatch) -> None
 
     assert result.raw_text == '{"summary":"ok"}'
     assert captured["json"]["response_format"] == {"type": "json_object"}
+
+
+def test_qwen_json_mode_fallback_failure_is_provider_error() -> None:
+    settings = Settings(
+        qwen_llamacpp_base_url="http://qwen-llama:8080",
+        qwen_model_path="/llm-models/qwen.gguf",
+        llm_request_timeout_seconds=9,
+        llm_metadata_refinement_enabled=True,
+    )
+    provider = QwenLlamaCppProvider(settings)
+    calls: list[dict[str, Any]] = []
+
+    def fake_post_chat(url: str, body: dict[str, Any]) -> dict[str, Any]:
+        calls.append(body)
+        request = httpx.Request("POST", url)
+        response = httpx.Response(400, request=request, text="bad request")
+        raise httpx.HTTPStatusError("bad request", request=request, response=response)
+
+    provider._post_chat = fake_post_chat  # type: ignore[method-assign]
+
+    try:
+        provider.generate_metadata_candidates({"collection_name": "Dokumente", "ocr_text": "Demo", "title": "Demo"})
+    except QwenProviderError as exc:
+        assert "response_format fallback" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("fallback HTTP error escaped without becoming QwenProviderError")
+
+    assert len(calls) == 2
+    assert calls[0]["response_format"] == {"type": "json_object"}
+    assert "response_format" not in calls[1]
 
 
 def test_qwen_metadata_brain_prompt_requires_structured_candidates() -> None:

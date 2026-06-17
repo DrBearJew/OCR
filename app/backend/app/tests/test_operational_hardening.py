@@ -652,16 +652,102 @@ def test_pdf_upload_records_page_count_without_requiring_metadata(db_session: Se
     assert doc.thumbnail_path.endswith("pdf-thumb.jpg")
 
 
-def test_pdf_ocr_combines_page_fragments(db_session: Session, tmp_path: Path, monkeypatch) -> None:
+def test_pdf_ocr_uses_embedded_text_layer_before_page_image_ocr(db_session: Session, tmp_path: Path, monkeypatch) -> None:
     doc = make_doc(db_session, tmp_path, "%PDF", collection="Eingangsrechnung", sha="p" * 64)
+    doc.mime_type = "application/pdf"
+    doc.ocr_config_json = {"page_limit": 3}
+    queue_ocr(db_session, doc)
+    db_session.commit()
+
+    class FakeTextPage:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+        def get_text_range(self) -> str:
+            return self.text
+
+        def close(self) -> None:
+            return None
+
+    class FakePage:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+        def get_textpage(self) -> FakeTextPage:
+            return FakeTextPage(self.text)
+
+        def close(self) -> None:
+            return None
+
+    class FakePdf:
+        pages = [
+            "Invoice ACME GmbH\r\nAmount 42,00 EUR",
+            "Second page with payment terms and delivery notes",
+        ]
+
+        def __init__(self, path: str) -> None:
+            self.path = path
+
+        def __len__(self) -> int:
+            return len(self.pages)
+
+        def __getitem__(self, index: int) -> FakePage:
+            return FakePage(self.pages[index])
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setitem(sys.modules, "pypdfium2", SimpleNamespace(PdfDocument=FakePdf))
+    monkeypatch.setattr("app.services.processing.render_pdf_pages", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("rendering should not run")))
+
+    run_ocr_for_document(db_session, doc.id, FailingProvider(), enqueue_metadata=False)
+    db_session.refresh(doc)
+    assert doc.ocr_text == "Invoice ACME GmbH\nAmount 42,00 EUR\fSecond page with payment terms and delivery notes"
+    assert doc.raw_ocr_json["source"] == "pdf_text_layer"
+    assert doc.model_trace_json["ocr"]["role"] == "pdf_text_layer"
+    assert doc.page_count == 2
+    assert [page.ocr_text for page in doc.pages] == ["Invoice ACME GmbH\nAmount 42,00 EUR", "Second page with payment terms and delivery notes"]
+
+
+def test_pdf_ocr_combines_page_fragments_when_text_layer_is_empty(db_session: Session, tmp_path: Path, monkeypatch) -> None:
+    doc = make_doc(db_session, tmp_path, "%PDF", collection="Eingangsrechnung", sha="s" * 64)
     doc.mime_type = "application/pdf"
     doc.ocr_config_json = {"page_limit": 2}
     queue_ocr(db_session, doc)
     db_session.commit()
+
+    class EmptyTextPage:
+        def get_text_range(self) -> str:
+            return ""
+
+        def close(self) -> None:
+            return None
+
+    class EmptyPage:
+        def get_textpage(self) -> EmptyTextPage:
+            return EmptyTextPage()
+
+        def close(self) -> None:
+            return None
+
+    class EmptyPdf:
+        def __init__(self, path: str) -> None:
+            self.path = path
+
+        def __len__(self) -> int:
+            return 2
+
+        def __getitem__(self, index: int) -> EmptyPage:
+            return EmptyPage()
+
+        def close(self) -> None:
+            return None
+
     page1 = tmp_path / "page1.jpg"
     page2 = tmp_path / "page2.jpg"
     page1.write_text("one", encoding="utf-8")
     page2.write_text("two", encoding="utf-8")
+    monkeypatch.setitem(sys.modules, "pypdfium2", SimpleNamespace(PdfDocument=EmptyPdf))
     monkeypatch.setattr("app.services.processing.render_pdf_pages", lambda *args, **kwargs: [str(page1), str(page2)])
 
     class PageProvider:
@@ -671,6 +757,7 @@ def test_pdf_ocr_combines_page_fragments(db_session: Session, tmp_path: Path, mo
     run_ocr_for_document(db_session, doc.id, PageProvider(), enqueue_metadata=False)
     db_session.refresh(doc)
     assert doc.ocr_text == "page1\fpage2"
+    assert doc.raw_ocr_json["source"] == "pdf_page_rendering"
     assert doc.page_count == 2
     assert [page.rendered_image_path for page in doc.pages] == [str(page1), str(page2)]
 

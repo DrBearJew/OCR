@@ -25,6 +25,9 @@ CORE_CANDIDATE_FIELDS = (
     "suggested_title_base",
 )
 
+QWEN_OCR_TEXT_MAX_CHARS = 12000
+
+
 QWEN_PROMPT_OMIT_METADATA_KEYS = {
     "qwen_refinement",
     "qwen_candidates",
@@ -117,7 +120,7 @@ def build_qwen_metadata_payload(
     return {
         "collection_name": document.collection_name,
         "title": _qwen_prompt_title(document),
-        "ocr_text": document.ocr_text or "",
+        "ocr_text": _qwen_prompt_ocr_text(document.ocr_text or ""),
         "collection_schema": {
             "name": collection.name if collection else document.collection_name,
             "slug": collection.slug if collection else "",
@@ -136,6 +139,19 @@ def build_qwen_metadata_payload(
         "similar_documents": find_similar_documents(db, document, deterministic_metadata),
         "processing_options": processing_options,
     }
+
+
+def _qwen_prompt_ocr_text(text: str, *, max_chars: int = QWEN_OCR_TEXT_MAX_CHARS) -> str:
+    normalized = str(text or "").strip()
+    if len(normalized) <= max_chars:
+        return normalized
+    head_chars = int(max_chars * 0.7)
+    tail_chars = max_chars - head_chars
+    return (
+        normalized[:head_chars].rstrip()
+        + "\n\n[... OCR text truncated for Qwen metadata prompt; middle omitted ...]\n\n"
+        + normalized[-tail_chars:].lstrip()
+    )
 
 
 def qwen_debug_from_raw_metadata(

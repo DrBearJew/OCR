@@ -150,6 +150,21 @@ def test_qwen_fills_real_metadata_fields_sources_evidence_and_custom_fields(db_s
     assert qwen.last_payload["custom_fields"][0]["slug"] == "project"
 
 
+def test_qwen_payload_truncates_long_ocr_text_before_prompt(db_session: Session, tmp_path: Path) -> None:
+    long_text = "Header important sender\n" + ("middle filler " * 2000) + "\nTail important amount 42,00"
+    doc = make_record_document(db_session, tmp_path, long_text, "Eingangsrechnung")
+    qwen = CandidateQwen("{}")
+
+    run_metadata_for_document(db_session, doc.id, qwen_provider=qwen, qwen_enabled=True)
+
+    assert qwen.last_payload is not None
+    prompt_text = qwen.last_payload["ocr_text"]
+    assert len(prompt_text) < len(long_text)
+    assert "OCR text truncated for Qwen metadata prompt" in prompt_text
+    assert prompt_text.startswith("Header important sender")
+    assert prompt_text.endswith("Tail important amount 42,00")
+
+
 def test_qwen_preserves_manual_locked_values_and_records_invalid_json(db_session: Session, tmp_path: Path) -> None:
     doc = make_record_document(db_session, tmp_path, "Demo GmbH\nRechnungsnummer PR400000005\nEndsumme 205,25", "Eingangsrechnung")
     doc.extracted_sender = "Manual Sender"

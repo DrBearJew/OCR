@@ -172,7 +172,12 @@ class QwenLlamaCppProvider:
         except httpx.HTTPStatusError as exc:
             if json_only and body.get("response_format") and exc.response.status_code in {400, 422}:
                 fallback_body = {key: value for key, value in body.items() if key != "response_format"}
-                raw = self._post_chat(url, fallback_body)
+                try:
+                    raw = self._post_chat(url, fallback_body)
+                except httpx.HTTPError as fallback_exc:
+                    raise QwenProviderError(f"Qwen request failed after response_format fallback: {fallback_exc}") from fallback_exc
+                except ValueError as fallback_exc:
+                    raise QwenProviderError("Qwen fallback returned invalid JSON") from fallback_exc
             else:
                 raise QwenProviderError(f"Qwen request failed: {exc}") from exc
         except httpx.HTTPError as exc:

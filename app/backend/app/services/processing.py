@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import logging
+from pathlib import Path
 import re
 import unicodedata
 import uuid
@@ -893,8 +894,125 @@ def _is_pdf_document(document: Document) -> bool:
     return (document.mime_type or "").lower() == "application/pdf" or document.storage_path.lower().endswith(".pdf")
 
 
+def _extract_pdf_text_layer(document: Document, config: Any):
+    """Use embedded PDF text before expensive page-image OCR when it is usable.
+
+    Born-digital PDFs already contain selectable text. Sending every rendered page
+    to a VLM wastes minutes, can hit Celery task limits, and can hallucinate.
+    Scanned PDFs normally have no meaningful text layer, so they fall back to the
+    existing rendered-page OCR path.
+    """
+    from app.services.ocr_glm import OCRResult
+
+    try:
+        import pypdfium2 as pdfium
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("PDF text-layer extraction unavailable document_id=%s error=%s", document.id, exc)
+        return None
+
+    page_payloads: list[dict[str, Any]] = []
+    try:
+        pdf = pdfium.PdfDocument(document.storage_path)
+        try:
+            total_pages = len(pdf)
+            count = min(total_pages, max(1, int(getattr(config, "page_limit", total_pages) or total_pages)))
+            for index in range(count):
+                text = _extract_pdf_page_text(pdf[index])
+                page_payloads.append(
+                    {
+                        "page_number": index + 1,
+                        "text": text,
+                        "raw_response": {
+                            "provider": "pdf_text_layer",
+                            "char_count": len(text),
+                        },
+                        "rendered_image_path": _existing_rendered_pdf_page_path(document, index + 1),
+                    }
+                )
+        finally:
+            close = getattr(pdf, "close", None)
+            if callable(close):
+                close()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not extract PDF text layer document_id=%s path=%s error=%s", document.id, document.storage_path, exc)
+        return None
+
+    if not _pdf_text_layer_is_usable(page_payloads):
+        return None
+
+    texts = [str(page.get("text") or "") for page in page_payloads]
+    logger.info("Using embedded PDF text layer document_id=%s pages=%s chars=%s", document.id, len(texts), sum(len(text) for text in texts))
+    return OCRResult(
+        text="\f".join(texts),
+        raw_response={
+            "pages": page_payloads,
+            "source": "pdf_text_layer",
+            "page_count": len(page_payloads),
+        },
+        prompt_name="pdf_text_layer",
+        prompt_version="pypdfium2",
+        model_role="pdf_text_layer",
+        model_endpoint="local",
+        model_name="pypdfium2",
+        model_response_text="\n\n".join(texts),
+    )
+
+
+def _extract_pdf_page_text(page: Any) -> str:
+    text_page = None
+    try:
+        text_page = page.get_textpage()
+        count_chars = getattr(text_page, "count_chars", None)
+        if callable(count_chars):
+            text = text_page.get_text_range(0, count_chars())
+        else:
+            text = text_page.get_text_range()
+        return _normalize_pdf_text(str(text or ""))
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not extract PDF page text error=%s", exc)
+        return ""
+    finally:
+        close_text = getattr(text_page, "close", None)
+        if callable(close_text):
+            close_text()
+        close_page = getattr(page, "close", None)
+        if callable(close_page):
+            close_page()
+
+
+def _normalize_pdf_text(text: str) -> str:
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    output: list[str] = []
+    blank = False
+    for line in lines:
+        if not line:
+            if not blank and output:
+                output.append("")
+            blank = True
+            continue
+        output.append(line)
+        blank = False
+    return "\n".join(output).strip()
+
+
+def _pdf_text_layer_is_usable(page_payloads: list[dict[str, Any]]) -> bool:
+    text = "\n".join(str(page.get("text") or "") for page in page_payloads).strip()
+    if len(text) < 40:
+        return False
+    return len(re.findall(r"\w+", text, flags=re.UNICODE)) >= 5
+
+
+def _existing_rendered_pdf_page_path(document: Document, page_number: int) -> str | None:
+    target = Path(get_settings().storage_root) / "pages" / str(document.id) / f"page_{page_number:04d}.jpg"
+    return str(target) if target.exists() else None
+
+
 def _extract_pdf_pages(provider: OCRProvider, document: Document, config: Any):
     from app.services.ocr_glm import OCRResult
+
+    text_layer_result = _extract_pdf_text_layer(document, config)
+    if text_layer_result is not None:
+        return text_layer_result
 
     rendered_paths = render_pdf_pages(
         document.storage_path,
