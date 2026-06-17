@@ -117,6 +117,20 @@ export default function SchemaPage() {
     setMetadataRows(await api.paperlessMetadata(metadataKind))
   }
 
+  async function deleteMetadata(row: PaperlessMetadata) {
+    if (!confirm(t('schemas.deleteMetadataConfirm', 'Delete metadata "{name}"? Existing documents keep their text and metadata values, but this registry entry is removed.').replace('{name}', row.name))) return
+    setError('')
+    setBusyDelete(`metadata:${row.id}`)
+    try {
+      await api.deletePaperlessMetadata(metadataKind, row.id)
+      setMetadataRows(await api.paperlessMetadata(metadataKind))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('schemas.deleteMetadataError', 'Could not delete metadata.'))
+    } finally {
+      setBusyDelete('')
+    }
+  }
+
   return (
     <main className="schema-page">
       <header className="page-header">
@@ -180,7 +194,7 @@ export default function SchemaPage() {
             </div>
           </section>
           <section className="workflow-card schema-panel">
-            <h2>{t('schemas.paperlessMetadata')}</h2>
+            <h2>{t('schemas.metadataRegistry')}</h2>
             <form className="schema-form metadata-schema-form" onSubmit={addMetadata}>
               <select value={metadataKind} onChange={(event) => setMetadataKind(event.target.value as typeof metadataKind)}>
                 <option value="correspondents">{t('schemas.correspondents')}</option>
@@ -194,7 +208,7 @@ export default function SchemaPage() {
             </form>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>{t('schemas.name')}</th><th>{t('schemas.slug')}</th><th>{t('dashboard.collection')}</th><th>{t('schemas.template')}</th></tr></thead>
+                <thead><tr><th>{t('schemas.name')}</th><th>{t('schemas.slug')}</th><th>{t('dashboard.collection')}</th><th>{t('schemas.template')}</th><th>{t('common.actions')}</th></tr></thead>
                 <tbody>
                   {metadataRows.map((row) => (
                     <tr key={row.id}>
@@ -202,6 +216,9 @@ export default function SchemaPage() {
                       <td>{row.slug}</td>
                       <td>{row.collection_id ? collectionNameById.get(row.collection_id) || row.collection_id : t('schemas.global')}</td>
                       <td>{row.path_template || ''}</td>
+                      <td>
+                        <button type="button" className="schema-delete-button metadata-delete-button" title={t('schemas.deleteMetadata', 'Delete metadata')} disabled={busyDelete === `metadata:${row.id}`} onClick={() => void deleteMetadata(row)}><Trash2 size={14} /></button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

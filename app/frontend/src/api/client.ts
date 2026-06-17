@@ -262,6 +262,8 @@ export const api = {
     request<PaperlessMetadata[]>(`/api/admin/metadata/${kind}`),
   createPaperlessMetadata: (kind: 'correspondents' | 'document-types' | 'tags' | 'storage-paths', payload: Partial<PaperlessMetadata>) =>
     request<PaperlessMetadata>(`/api/admin/metadata/${kind}`, { method: 'POST', body: JSON.stringify(payload) }),
+  deletePaperlessMetadata: (kind: 'correspondents' | 'document-types' | 'tags' | 'storage-paths', id: string) =>
+    request<PaperlessMetadata>(`/api/admin/metadata/${kind}/${id}`, { method: 'DELETE' }),
   folders: (params: Record<string, string> = {}) => {
     const query = new URLSearchParams(params)
     return request<Folder[]>(`/api/folders${query.toString() ? `?${query.toString()}` : ''}`)

@@ -10928,6 +10928,16 @@ a.icon-button:not(.danger-button):hover {
   color: #fff;
 }
 
+.schema-page .metadata-delete-button {
+  width: 2.1rem;
+  min-width: 2.1rem;
+  min-height: 2.1rem;
+  margin: 0;
+}
+.schema-page td .metadata-delete-button {
+  display: inline-grid;
+}
+
 .pagination-footer {
   display: flex;
   align-items: center;
