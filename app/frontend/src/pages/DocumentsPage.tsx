@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Download, FileText, Maximize2, Minus, Plus, RefreshCw, Search, Trash2, UploadCloud } from 'lucide-react'
 import type { KeyboardEvent, MouseEvent, ReactNode } from 'react'
-import { api, downloadUrl, previewUrl, thumbnailUrl } from '../api/client'
+import { api, downloadUrl, previewPageUrl, previewUrl, thumbnailUrl } from '../api/client'
 import SavedViewsBar from '../components/SavedViewsBar'
 import StatusBadge from '../components/StatusBadge'
 import type { Document, DocumentEvent, DocumentPage } from '../types'
@@ -367,9 +367,7 @@ function DocumentPreviewPanel({ document, pages, loading, onOpenDocument }: { do
   const previewSurfaceRef = useRef<HTMLDivElement | null>(null)
   const canPreview = document.mime_type?.startsWith('image/') || document.mime_type === 'application/pdf'
   const isPdf = document.mime_type === 'application/pdf'
-  const mediaStyle = isPdf
-    ? { width: `${zoom}%`, maxWidth: zoom <= 100 ? '100%' : 'none', height: `${Math.round(420 * zoom / 100)}px` }
-    : { width: `${zoom}%`, maxWidth: zoom <= 100 ? '100%' : 'none' }
+  const mediaStyle = { width: `${zoom}%`, maxWidth: zoom <= 100 ? '100%' : 'none' }
 
   useEffect(() => {
     setActiveTab('ocr')
@@ -409,7 +407,6 @@ function DocumentPreviewPanel({ document, pages, loading, onOpenDocument }: { do
   }
 
   function handlePreviewClick(event: MouseEvent<HTMLDivElement>) {
-    if (isPdf) return
     const media = event.currentTarget.querySelector('.zoomable-preview-media') as HTMLElement | null
     if (!media) return
     const rect = media.getBoundingClientRect()
@@ -433,9 +430,7 @@ function DocumentPreviewPanel({ document, pages, loading, onOpenDocument }: { do
       </div>
       <div ref={previewSurfaceRef} className="document-preview-surface console-preview zoomable-preview" onClick={handlePreviewClick} title={isPdf ? 'Use zoom controls above the PDF preview' : 'Click image to zoom around that point'}>
         {canPreview && !document.id.startsWith('demo-') ? (
-          isPdf
-            ? <iframe className="zoomable-preview-media" style={mediaStyle} src={previewUrl(document.id)} title="Document preview" />
-            : <img className="zoomable-preview-media" style={mediaStyle} src={previewUrl(document.id)} alt={document.original_filename} />
+          <img className="zoomable-preview-media" style={mediaStyle} src={isPdf ? previewPageUrl(document.id, 1) : previewUrl(document.id)} alt={document.original_filename} />
         ) : document.thumbnail_path && !document.id.startsWith('demo-') ? <img className="zoomable-preview-media" style={mediaStyle} src={thumbnailUrl(document.id)} alt={document.original_filename} /> : <InvoiceMockup />}
       </div>
       <div className="ocr-tabs">
@@ -457,8 +452,8 @@ function LargePreviewModal({ document, onClose }: { document: Document; onClose:
   const [zoom, setZoom] = useState(100)
   const isPdf = document.mime_type === 'application/pdf'
   const canPreview = document.mime_type?.startsWith('image/') || isPdf
-  const source = document.id.startsWith('demo-') ? '' : canPreview ? previewUrl(document.id) : document.thumbnail_path ? thumbnailUrl(document.id) : ''
-  const mediaStyle = isPdf ? { width: `${zoom}%`, height: `${Math.round(74 * zoom / 100)}vh` } : { width: `${zoom}%` }
+  const source = document.id.startsWith('demo-') ? '' : isPdf ? previewPageUrl(document.id, 1) : canPreview ? previewUrl(document.id) : document.thumbnail_path ? thumbnailUrl(document.id) : ''
+  const mediaStyle = { width: `${zoom}%`, maxWidth: zoom <= 100 ? '100%' : 'none' }
   return (
     <div className="large-preview-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
       <section className="large-preview-dialog" onClick={(event) => event.stopPropagation()}>
@@ -472,7 +467,7 @@ function LargePreviewModal({ document, onClose }: { document: Document; onClose:
           </div>
         </header>
         <div className="large-preview-surface">
-          {source ? (isPdf ? <iframe style={mediaStyle} src={source} title="Large document preview" /> : <img style={mediaStyle} src={source} alt={document.original_filename} />) : <InvoiceMockup />}
+          {source ? <img style={mediaStyle} src={source} alt={document.original_filename} /> : <InvoiceMockup />}
         </div>
       </section>
     </div>

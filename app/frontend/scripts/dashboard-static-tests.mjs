@@ -55,6 +55,8 @@ const checks = [
   ['Documents inspector does not fake sender fallback', documentsPage, "document.extracted_sender || 'Demo Ges.mbh'", true],
   ['Documents inspector does not fake invoice fallback', documentsPage, "document.extracted_invoice_number || 'PR400000005'", true],
   ['Documents inspector does not fake demo tags', documentsPage, 'supplier:demo</button>', true],
+  ['Documents PDF preview uses rendered page image', documentsPage, 'isPdf ? previewPageUrl(document.id, 1) : previewUrl(document.id)'],
+  ['Documents large PDF preview does not use iframe', documentsPage, 'Large document preview', true],
   ['Documents page uses cursor-paginated API', documentsPage, 'api.documentsPage'],
   ['Documents page exposes Load more pagination', documentsPage, 'loadMoreDocuments'],
   ["Documents page exposes all-matching filter bulk scope", documentsPage, "selection_mode: 'filters'"],
