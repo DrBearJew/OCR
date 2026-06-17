@@ -630,12 +630,15 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
   const previewSurfaceRef = useRef<HTMLDivElement | null>(null)
   const [basePreviewWidth, setBasePreviewWidth] = useState(820)
   const isPdf = selected?.kind === 'pdf'
-  const zoomedPreviewWidth = Math.round(basePreviewWidth * zoom / 100)
+  const nativePdfPreviewUrl = selected?.kind === 'pdf' ? selected.previewUrl || selected.serverPreviewUrl : null
+  const usesNativePdfViewer = Boolean(nativePdfPreviewUrl)
+  const effectiveZoom = usesNativePdfViewer ? 100 : zoom
+  const zoomedPreviewWidth = Math.round(basePreviewWidth * effectiveZoom / 100)
   const previewObjectStyle = {
-    width: `${zoomedPreviewWidth}px`,
-    transform: `rotate(${rotation}deg)`
+    width: usesNativePdfViewer ? 'min(100%, 1100px)' : `${zoomedPreviewWidth}px`,
+    transform: usesNativePdfViewer ? 'none' : `rotate(${rotation}deg)`
   }
-  const pdfMediaStyle = { height: `${Math.round(Math.max(560, basePreviewWidth * 1.22) * zoom / 100)}px` }
+  const pdfMediaStyle = { height: usesNativePdfViewer ? 'min(720px, 66vh)' : `${Math.round(Math.max(560, basePreviewWidth * 1.22) * effectiveZoom / 100)}px` }
 
   useEffect(() => {
     setZoom(100)
@@ -693,6 +696,7 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
   }
 
   function handlePreviewClick(event: MouseEvent<HTMLDivElement>) {
+    if (usesNativePdfViewer) return
     const media = event.currentTarget.querySelector('.upload-zoomable-preview-media') as HTMLElement | null
     if (!media) return
     const rect = media.getBoundingClientRect()
@@ -700,8 +704,6 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
     const y = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height))
     setZoomAround(zoom >= 220 ? 100 : Math.max(220, zoom + 80), { x, y })
   }
-
-  const nativePdfPreviewUrl = selected?.kind === 'pdf' ? selected.previewUrl || selected.serverPreviewUrl : null
 
   const preview = nativePdfPreviewUrl ? (
     <iframe className="upload-zoomable-preview-media upload-native-pdf-preview" style={pdfMediaStyle} src={nativePdfPreviewUrl} title={selected?.filename || 'PDF preview'} />
@@ -722,18 +724,28 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
         <span>{selected?.filename || t('dashboard.noFileSelected')}</span>
       </div>
       <div className="document-preview-toolbar upload-preview-toolbar">
-        <span><Maximize2 size={16} /> Zoom</span>
-        <button type="button" onClick={() => setZoomAround(zoom - 25)} aria-label={t('common.zoomOut')}><Minus size={15} /></button>
-        <button type="button" className="zoom-value" onClick={() => setZoomAround(100, { x: 0.5, y: 0.5 })} aria-label={t('common.resetZoom')}>{zoom}%</button>
-        <button type="button" onClick={() => setZoomAround(zoom + 25)} aria-label={t('common.zoomIn')}><Plus size={15} /></button>
-        <i />
-        <button type="button" onClick={() => setRotation((value) => (value + 90) % 360)}><RefreshCw size={16} /> {t('dashboard.rotate')}</button>
-        <i />
+        {usesNativePdfViewer ? (
+          <>
+            <span><Maximize2 size={16} /> PDF viewer</span>
+            <small className="native-pdf-toolbar-note">Use the PDF toolbar for pages and zoom.</small>
+            <i />
+          </>
+        ) : (
+          <>
+            <span><Maximize2 size={16} /> Zoom</span>
+            <button type="button" onClick={() => setZoomAround(zoom - 25)} aria-label={t('common.zoomOut')}><Minus size={15} /></button>
+            <button type="button" className="zoom-value" onClick={() => setZoomAround(100, { x: 0.5, y: 0.5 })} aria-label={t('common.resetZoom')}>{zoom}%</button>
+            <button type="button" onClick={() => setZoomAround(zoom + 25)} aria-label={t('common.zoomIn')}><Plus size={15} /></button>
+            <i />
+            <button type="button" onClick={() => setRotation((value) => (value + 90) % 360)}><RefreshCw size={16} /> {t('dashboard.rotate')}</button>
+            <i />
+          </>
+        )}
         <label>{t('dashboard.showOcr')}<input type="checkbox" checked={showOcr} onChange={(event) => setShowOcr(event.target.checked)} /></label>
       </div>
       <div className="document-preview-layout">
         <AttachmentStrip files={files} selectedId={selectedId} onSelect={setSelectedId} onAddMore={onAddMore} />
-        <div ref={previewSurfaceRef} className={`document-preview-surface upload-zoomable-preview ${zoom <= 100 ? 'fit-preview' : 'zoomed-preview'} ${showOcr ? 'show-ocr-overlay' : ''}`} onClick={handlePreviewClick}>
+        <div ref={previewSurfaceRef} className={`document-preview-surface upload-zoomable-preview ${effectiveZoom <= 100 ? 'fit-preview' : 'zoomed-preview'} ${showOcr ? 'show-ocr-overlay' : ''}`} onClick={handlePreviewClick}>
           <div className="document-preview-stage">
             <div className="document-preview-object" style={previewObjectStyle}>
               {preview}
