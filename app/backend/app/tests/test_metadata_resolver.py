@@ -73,6 +73,32 @@ def test_qwen_grounded_candidates_win_over_weak_deterministic_and_regenerate_tit
     assert "Fallback title or missing title segment used" not in warnings
 
 
+def test_qwen_sender_legal_suffix_does_not_override_clean_deterministic(db_session: Session, tmp_path: Path) -> None:
+    doc = make_doc(db_session, tmp_path, "Muster invoice")
+    deterministic = {
+        "title": "Muster_M1675_29/10/2020_222,51",
+        "sender": "Muster",
+        "recipient": None,
+        "invoice_number": "M1675",
+        "date": "29/10/2020",
+        "amount": "222,51",
+        "payment_method": None,
+    }
+    qwen = {
+        "metadata": {"sender": "Muster GmbH", "date": "29.10.2020"},
+        "confidence": {"sender": 95, "date": 95},
+        "evidence": {"sender": "Muster GmbH", "date": "Rechnungsdatum 29.10.2020"},
+    }
+
+    resolution = resolve_metadata_fields(doc, deterministic, qwen)
+    warnings = review_warnings_for_resolution(doc, resolution.merged, resolution.sources, qwen, deterministic)
+
+    assert resolution.merged["sender"] == "Muster"
+    assert resolution.merged["date"] == "29/10/2020"
+    assert resolution.merged["title"] == "Muster_M1675_29/10/2020_222,51"
+    assert "Qwen disagrees with deterministic sender" not in warnings
+
+
 def test_manual_source_still_wins_over_qwen(db_session: Session, tmp_path: Path) -> None:
     doc = make_doc(db_session, tmp_path, "Manual sender invoice")
     doc.extracted_sender = "Manual Sender"

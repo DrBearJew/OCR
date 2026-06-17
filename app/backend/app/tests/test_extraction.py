@@ -83,6 +83,57 @@ Telefónica Deutschland Holding AG, Sitz in München, Amtsgericht München HRB 2
     assert recovered.title == result.title
 
 
+def test_eingangsrechnung_o2_invoice_ignores_stale_title_and_year_amounts() -> None:
+    text = """Ihre Rechnung
+O₂
+Telefonica Germany GmbH & Co. OHG RF 90345 Nurnberg
+Rechnungsnummer
+1318249263/08
+Ihre Kundennummer
+6078977192
+Rechnungsdatum
+28.07.2025
+Leistungszeitraum
+23.06.2025 - 22.07.2025
+Igor Serbul
+Fällig am
+04.08.2025
+10365 Berlin
+Grundgebühren
+42,99 €
+Vergünstigungen / Guthaben
+-16,50 €
+Rechnungsbetrag
+26,49 €
+(davon enthaltene MwSt. 4,23 €)
+Ihre Rechnungsdetails
+Mobilfunknummer 017630322126/Festnetznummer 03040558824
+Vertragslaufzeit: 27.12.2023 - 26.12.2025
+Netto in €
+MwSt.-Satz
+Brutto in €
+(Zahlungseingänge bis zum 23.07.2025 sind berücksichtigt)
+Gesamtbetrag aus vorheriger Rechnung
+26,49
+Zahlung Lastschrift - 03.07.2025
+-26,49
+Gesamt
+0,00
+"""
+    result = extract_eingangsrechnung_title(
+        ExtractionInput(
+            "Eingangsrechnung",
+            text,
+            original_filename="2025-7-28-RG-1.pdf",
+            existing_title="Leistungszeitraum_1318249263/08_28/07/2025_2025,00",
+        )
+    )
+
+    assert result.sender == "TelefonicaGermany"
+    assert result.amount == "26,49"
+    assert result.title == "TelefonicaGermany_1318249263/08_28/07/2025_26,49"
+
+
 def test_ausgangsrechnung_golden_titles() -> None:
     habermann = "\n".join(
         [

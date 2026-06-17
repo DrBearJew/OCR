@@ -194,21 +194,21 @@ def _apply_derived_title(
 def derive_title_from_canonical_fields(collection_name: str, merged: dict[str, str | None]) -> str | None:
     collection = collection_name.strip().lower()
     if collection == "eingangsrechnung":
-        sender = _title_token(merged.get("sender"))
+        sender = _title_token(merged.get("sender"), strip_party=True)
         invoice_number = _title_token(merged.get("invoice_number"), keep_slash=True)
         date = _title_token(merged.get("date"), keep_slash=True)
         amount = _title_token(merged.get("amount"), keep_comma=True)
         if all(not is_empty_value(value) for value in [sender, invoice_number, date, amount]):
             return f"{sender}_{invoice_number}_{date}_{amount}"
     if collection == "ausgangsrechnung":
-        recipient = _title_token(merged.get("recipient"))
+        recipient = _title_token(merged.get("recipient"), strip_party=True)
         invoice_number = _title_token(merged.get("invoice_number"), keep_slash=True)
         date = _title_token(merged.get("date"), keep_slash=True)
         amount = _title_token(merged.get("amount"), keep_comma=True)
         if all(not is_empty_value(value) for value in [recipient, invoice_number, date, amount]):
             return f"{recipient}_{invoice_number}_{date}_{amount}"
     if collection == "belege":
-        sender = _title_token(merged.get("sender"))
+        sender = _title_token(merged.get("sender"), strip_party=True)
         date = _title_token(merged.get("date"), keep_slash=True)
         amount = _title_token(merged.get("amount"), keep_comma=True)
         payment = _title_token(merged.get("payment_method"))
@@ -228,13 +228,16 @@ def _title_dependency_fields(collection_name: str) -> list[str]:
     return []
 
 
-def _title_token(value: str | None, *, keep_slash: bool = False, keep_comma: bool = False) -> str:
+def _title_token(value: str | None, *, keep_slash: bool = False, keep_comma: bool = False, strip_party: bool = False) -> str:
     if is_empty_value(value):
         return "NA"
     text = str(value or "").strip()
     text = text.replace("ß", "ss")
     text = unicodedata.normalize("NFKD", text)
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    if strip_party:
+        text = re.sub(r"\bco\.?\s*ohg\b", " ", text, flags=re.I)
+        text = re.sub(r"\b(ges\.?\s*mbh|gesmbh|gmbh|mbh|ag|kg|ug|ohg|re|inc|ltd|llc|sarl|e\.?k\.?)\b", " ", text, flags=re.I)
     allowed = "A-Za-z0-9"
     if keep_slash:
         allowed += r"/.-"
@@ -305,6 +308,8 @@ def review_warnings_for_resolution(
         if sources.get(field_name, {}).get("source") == "qwen":
             continue
         if qwen_value and deterministic_value and str(qwen_value).strip() != str(deterministic_value).strip():
+            if field_name == "sender" and strip_legal_suffix_key(compact_compare_text(qwen_value)) == compact_compare_text(deterministic_value):
+                continue
             warnings.append(f"Qwen disagrees with deterministic {field_name}")
     ocr_state = getattr(document.ocr_state, "value", document.ocr_state)
     if ocr_state == "failed" or (document.raw_ocr_json or {}).get("partial_failure"):
@@ -385,8 +390,11 @@ def qwen_candidate_is_stronger(
     if field_name == "sender":
         current_key = compact_compare_text(current_value)
         qwen_key = compact_compare_text(qwen_value)
-        if current_key and qwen_key and current_key in qwen_key and len(qwen_key) > len(current_key) + 3:
-            return True
+        if current_key and qwen_key:
+            if strip_legal_suffix_key(qwen_key) == current_key:
+                return False
+            if current_key in qwen_key and len(qwen_key) > len(current_key) + 3:
+                return True
         return looks_like_compacted_or_damaged_party(current_value) and len(str(qwen_value or "")) > len(str(current_value or ""))
     if field_name == "date":
         return bool(re.search(r"rechnung|invoice", qwen_evidence, flags=re.I))
@@ -406,6 +414,14 @@ def normalize_qwen_date(value: str) -> str:
     match = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", text)
     if match:
         return f"{match.group(3)}/{match.group(2)}/{match.group(1)}"
+    try:
+        from app.services.extraction import normalize_date
+
+        normalized = normalize_date(text)
+        if normalized:
+            return normalized
+    except Exception:  # pragma: no cover - defensive normalization only
+        pass
     return text
 
 
@@ -414,6 +430,20 @@ def compact_compare_text(value: str | None) -> str:
     text = unicodedata.normalize("NFKD", text)
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
     return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+
+def strip_legal_suffix_key(value: str) -> str:
+    text = value
+    suffixes = ("gmbh", "mbh", "ag", "kg", "ug", "ohg", "inc", "ltd", "llc", "sarl", "ek", "co")
+    changed = True
+    while changed:
+        changed = False
+        for suffix in suffixes:
+            if text.endswith(suffix) and len(text) > len(suffix) + 2:
+                text = text[: -len(suffix)]
+                changed = True
+                break
+    return text
 
 
 def looks_like_compacted_or_damaged_party(value: str | None) -> bool:

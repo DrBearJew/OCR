@@ -129,8 +129,8 @@ def test_invalid_qwen_enrichment_preserves_deterministic_metadata(db_session: Se
 
     assert document.extracted_invoice_number == "PR400000005"
     assert document.extracted_title == "Demo_PR400000005_12/10/2020_205,25"
-    assert document.review_state == ReviewState.needs_review
-    assert document.processing_state == DocumentState.needs_review
+    assert document.review_state == ReviewState.unreviewed
+    assert document.processing_state == DocumentState.complete
     assert document.llm_raw_response["metadata_brain"]["invalid"] is True
 
 

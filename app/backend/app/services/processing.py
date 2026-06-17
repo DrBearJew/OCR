@@ -1141,9 +1141,6 @@ def run_metadata_for_document(
                         "similar_documents": qwen_debug.get("similar_documents", []),
                     },
                 }
-                if qwen_debug.get("raw_text") and not qwen_debug.get("empty_response"):
-                    document.review_state = ReviewState.needs_review
-                    document.review_reason = document.review_reason or "Qwen metadata brain returned invalid JSON"
                 record_event(
                     db,
                     document,
@@ -1210,14 +1207,15 @@ def run_metadata_for_document(
         document.metadata_state = StageState.done
         missing_required = missing_required_core_fields(document, merged)
         warnings = review_warnings(document, merged, sources, qwen_suggestion, deterministic)
-        if (
-            not missing_required
-            and not warnings
-            and document.review_state == ReviewState.needs_review
-            and not str(document.review_reason or "").startswith("Qwen metadata brain")
-        ):
-            document.review_state = ReviewState.unreviewed
-            document.review_reason = None
+        if not missing_required and not warnings and document.review_state == ReviewState.needs_review:
+            auto_review_prefixes = (
+                "Qwen metadata brain",
+                "Fallback title",
+                "Missing required fields",
+            )
+            if not document.review_reason or str(document.review_reason).startswith(auto_review_prefixes):
+                document.review_state = ReviewState.unreviewed
+                document.review_reason = None
         document.processing_state = determine_next_processing_state(document, missing_required)
         if warnings and document.processing_state == DocumentState.complete:
             document.processing_state = DocumentState.needs_review

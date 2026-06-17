@@ -240,9 +240,6 @@ def run_qwen_secondbrain_enrichment(
             "metadata_brain_error": result.get("error"),
             "similar_documents": result.get("similar_documents", []),
         }
-        if result.get("raw_text") and not result.get("empty_response"):
-            document.review_state = ReviewState.needs_review
-            document.review_reason = document.review_reason or "Qwen metadata brain returned invalid JSON"
         record_event(db, document, "qwen_enrichment_unavailable", "Qwen search metadata unavailable", metadata={"reason": result.get("error")})
         return False
 

@@ -115,6 +115,12 @@ BAD_EXACT = {
     "hr",
     "kt",
     "mld",
+    "leistungszeitraum",
+    "vertragslaufzeit",
+    "falligam",
+    "faelligam",
+    "rechnungsbetrag",
+    "zahlenderbetrag",
 }
 
 
@@ -466,10 +472,11 @@ def extract_invoice_date(text: str, created_at: datetime | None = None) -> str:
 
 def extract_invoice_amount(text: str) -> str:
     num_re = re.compile(r"(?<!\d)(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+[.,]\d{2}|\d+)(?!\d)")
-    strong = ("endsumme", "gesamtsumme", "gesamtbetrag", "zu zahlen", "zu zahlender betrag", "balance due", "invoice total", "grand total", "brutto")
-    medium = ("summe", "gesamt", "total", "rechnungsbetrag")
+    strong = ("endsumme", "gesamtsumme", "gesamtbetrag", "rechnungsbetrag", "zu zahlen", "zu zahlender betrag", "balance due", "invoice total", "grand total")
+    medium = ("summe", "gesamt", "total", "bruttorechnungsbetrag")
     bad = ("netto", "mwst", "ust", "steuer", "skonto", "rabatt")
     identifier_context = ("iban", "bic", "hrb", "hra", "weee", "ust.-id", "ust-id", "amtsgericht", "gläubiger", "glaeubiger", "kundennummer", "mobilfunknummer", "telefon", "mandats-id")
+    date_context = ("leistungszeitraum", "vertragslaufzeit", "kündigungsfrist", "kuendigungsfrist", "zahlungseingänge", "zahlungseingaenge", "stand ", "fällig am", "faellig am", "rechnungsdatum")
     candidates: list[tuple[int, float, str]] = []
     pending_score = 0
 
@@ -486,18 +493,28 @@ def extract_invoice_amount(text: str) -> str:
         if any(cue in low for cue in bad) and not any(cue in low for cue in strong):
             score -= 3
         numbers = num_re.findall(line)
+        has_currency = "€" in line or " eur" in low or low.endswith("eur") or "$" in line
+        date_like = bool(re.search(r"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b", line))
+        header_only = not numbers and has_currency and any(cue in low for cue in ("netto", "brutto", "mwst", "satz"))
         if not numbers:
-            pending_score = max(pending_score, score)
+            pending_score = 0 if header_only else max(pending_score, score)
             continue
-        if any(cue in low for cue in identifier_context):
+        if any(cue in low for cue in identifier_context) or (date_like and not has_currency):
             pending_score = 0
             continue
+        if any(cue in low for cue in date_context) and not has_currency and not any(cue in low for cue in strong):
+            pending_score = 0
+            continue
+        raw_number = numbers[-1]
         if pending_score and score <= 0:
+            if date_like or (1900 <= int(re.sub(r"\D", "", raw_number) or "0") <= 2100 and not has_currency):
+                pending_score = 0
+                continue
             score += pending_score
         pending_score = 0
-        if "€" in line or " eur" in low or low.endswith("eur") or "$" in line:
+        if has_currency:
             score += 1
-        amount = normalize_amount(numbers[-1])
+        amount = normalize_amount(raw_number)
         if amount == "NA":
             continue
         try:
@@ -617,8 +634,10 @@ def extract_belege_amount(text: str) -> str:
 def extract_eingangsrechnung_sender(text: str, original_filename: str = "", existing_title: str | None = None) -> str:
     if existing_title and "_NA" not in existing_title:
         match = re.match(r"^([^_]+)_[^_]+_\d{2}/\d{2}/\d{4}_[^_]+$", existing_title.strip())
-        if match and match.group(1).lower() != "dok":
-            return match.group(1)
+        if match:
+            candidate = match.group(1)
+            if candidate.lower() != "dok" and looks_like_sender(candidate, strong=True):
+                return compact_party(candidate)
 
     bad_fragments = (
         "firma",
@@ -645,12 +664,25 @@ def extract_eingangsrechnung_sender(text: str, original_filename: str = "", exis
         "kommission",
         "bestell",
         "lieferdatum",
+        "leistungszeitraum",
+        "vertragslaufzeit",
+        "fällig",
+        "faellig",
+        "rechnungsbetrag",
+        "zu zahlender betrag",
+        "grundgebühren",
+        "grundgebuehren",
+        "vergünstigungen",
+        "verguenstigungen",
+        "guthaben",
+        "lastschrift",
     )
     street_re = re.compile(r"\b(strasse|straße|str\.?|weg|gasse|allee|platz|ufer|ring)\b", re.I)
     lines = [re.sub(r"\s+", " ", raw.strip()) for raw in text.splitlines() if raw.strip()][:18]
     for line in lines:
         low = line.lower()
-        if any(fragment in low for fragment in bad_fragments):
+        bad_low = low.replace("telefonica", "").replace("telefónica", "")
+        if any(fragment in bad_low for fragment in bad_fragments):
             continue
         candidate = re.split(r"\b(phone|telefon|fax|mail|www)\b", line, maxsplit=1, flags=re.I)[0].strip()
         street = street_re.search(candidate)
@@ -659,6 +691,7 @@ def extract_eingangsrechnung_sender(text: str, original_filename: str = "", exis
         postal = re.search(r"\b\d{4,5}\b", candidate)
         if postal:
             candidate = candidate[: postal.start()].strip()
+        candidate = re.sub(r"\b(?:RF|RE|PF)\s*$", "", candidate, flags=re.I).strip()
         words = re.findall(r"[^\W\d_][^\W\d_.\-]*", candidate)
         if not words:
             continue

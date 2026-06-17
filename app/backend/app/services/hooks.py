@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import ipaddress
 import shlex
 import socket
@@ -90,6 +91,14 @@ def execute_hook(
     return {"kind": "command", "returncode": completed.returncode, "stdout": completed.stdout[-500:]}
 
 
+def _normalized_executable_name(executable: str) -> str:
+    if re.fullmatch(r"python3(?:\.\d+)?", executable):
+        return "python3"
+    if re.fullmatch(r"python(?:\.\d+)?", executable):
+        return "python"
+    return executable
+
+
 def _command_argv(command: str, allowed_commands: set[str]) -> list[str]:
     if not allowed_commands:
         raise ValueError("Command hooks require COMMAND_HOOKS_ALLOWED_COMMANDS to be non-empty")
@@ -101,9 +110,10 @@ def _command_argv(command: str, allowed_commands: set[str]) -> list[str]:
     executable = os.path.basename(argv[0]).lower()
     if executable.endswith(".exe"):
         executable = executable[:-4]
-    if executable not in allowed_commands:
+    allowlist_name = _normalized_executable_name(executable)
+    if executable not in allowed_commands and allowlist_name not in allowed_commands:
         raise ValueError(f"Command hook executable is not allowlisted: {executable}")
-    if executable.startswith("python") and any(arg in {"-c", "-m"} for arg in argv[1:]):
+    if allowlist_name.startswith("python") and any(arg in {"-c", "-m"} for arg in argv[1:]):
         raise ValueError("Python command hooks may not use -c or -m")
     return argv
 

@@ -252,18 +252,44 @@ def parse_json_suggestion(raw_text: str) -> Any:
         try:
             return json.loads(candidate_text)
         except json.JSONDecodeError:
+            first_value = _decode_first_json_value(candidate_text)
+            if first_value is not None:
+                return first_value
             candidate = _extract_json_region(candidate_text)
             if candidate:
                 try:
                     return json.loads(candidate)
                 except json.JSONDecodeError:
+                    first_value = _decode_first_json_value(candidate)
+                    if first_value is not None:
+                        return first_value
                     repaired = _repair_extra_string_literals_after_evidence(candidate)
                     if repaired != candidate:
                         try:
                             return json.loads(repaired)
                         except json.JSONDecodeError:
-                            pass
+                            first_value = _decode_first_json_value(repaired)
+                            if first_value is not None:
+                                return first_value
     return {"text": raw_text}
+
+
+def _decode_first_json_value(text: str) -> Any | None:
+    """Return the first complete JSON value when a model appends extra data.
+
+    Qwen sometimes emits one extra closing brace before continuing with more
+    top-level keys. The core metadata fields are often already inside the first
+    complete object, so keeping that object is safer than discarding the whole
+    response as invalid.
+    """
+    stripped = text.lstrip()
+    if not stripped or stripped[0] not in "[{":
+        return None
+    try:
+        value, _end = json.JSONDecoder().raw_decode(stripped)
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, (dict, list)) else None
 
 
 def _repair_extra_string_literals_after_evidence(text: str) -> str:

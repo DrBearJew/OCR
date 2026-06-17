@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models import Batch, CustomFieldDefinition, CustomFieldType, Document, DocumentState, FieldValueSource, StageState
+from app.models import Batch, CustomFieldDefinition, CustomFieldType, Document, DocumentState, FieldValueSource, ReviewState, StageState
 from app.services.collections import create_record_for_upload, ensure_collection
 from app.services.llm_qwen import QwenRefinement, parse_json_suggestion
 from app.services.processing import run_metadata_for_document
@@ -18,6 +18,23 @@ def test_qwen_json_parser_repairs_extra_evidence_strings() -> None:
     )
 
     assert parsed["entities"]["organizations"][0]["evidence"] == "O2 Team; O2 Mobile Unlimited Smart; O2"
+
+
+def test_qwen_json_parser_keeps_first_object_with_extra_closing_brace() -> None:
+    parsed = parse_json_suggestion(
+        """{
+          "sender": {"value": "Telefonica Germany GmbH & Co. OHG", "confidence": 0.95, "evidence": "Sender address"},
+          "created_date": {"value": "2025-07-28", "confidence": 0.99, "evidence": "Rechnungsdatum"},
+          "invoice_number": {"value": "1318249263/08", "confidence": 0.99, "evidence": "Rechnungsnummer"},
+          "amount": {"value": "26,49", "confidence": 0.99, "evidence": "Rechnungsbetrag"},
+          "entities": {"amounts": [{"value": "26,49", "confidence": 0.99}]}
+        },
+        "document_purpose": "extra data after an accidental root close"
+        }"""
+    )
+
+    assert parsed["sender"]["value"] == "Telefonica Germany GmbH & Co. OHG"
+    assert parsed["amount"]["value"] == "26,49"
 
 
 class CandidateQwen:
@@ -153,6 +170,22 @@ def test_qwen_preserves_manual_locked_values_and_records_invalid_json(db_session
     db_session.refresh(doc)
     assert doc.extracted_invoice_number == "PR400000005"
     assert doc.metadata_json["qwen_candidates"] == {}
+
+
+def test_invalid_qwen_json_does_not_force_review_when_metadata_is_valid(db_session: Session, tmp_path: Path) -> None:
+    text = """Demo GmbH
+Rechnungsnummer PR400000005
+Rechnungsdatum 12.10.2020
+Endsumme 205,25"""
+    doc = make_record_document(db_session, tmp_path, text, "Eingangsrechnung")
+
+    run_metadata_for_document(db_session, doc.id, qwen_provider=CandidateQwen("not json"), qwen_enabled=True)
+    db_session.refresh(doc)
+
+    assert doc.processing_state == DocumentState.complete
+    assert doc.review_state != ReviewState.needs_review
+    assert doc.metadata_json["qwen_candidates"] == {}
+    assert doc.metadata_json["qwen_refinement"]["error"] == "Qwen returned invalid metadata candidate JSON"
 
 
 def test_qwen_suggested_title_base_only_replaces_weak_base(db_session: Session, tmp_path: Path) -> None:
