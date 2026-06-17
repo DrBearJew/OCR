@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.app_shell import activity, dashboard, failed_and_review, processing
@@ -93,6 +94,68 @@ def test_bulk_review_action_and_saved_view_model(db_session: Session, tmp_path: 
     db_session.add(view)
     db_session.commit()
     assert db_session.query(SavedView).filter_by(section="documents").one().filters_json["review_state"] == "needs_review"
+
+
+def test_filter_scope_bulk_actions_match_current_document_filters(db_session: Session, tmp_path: Path) -> None:
+    matching: list[Document] = []
+    for index in range(3):
+        doc = make_shell_document(db_session, tmp_path, state=DocumentState.needs_review)
+        doc.extracted_title = f"FilterBulk {index}"
+        doc.review_state = ReviewState.needs_review
+        doc.review_reason = "Needs review"
+        matching.append(doc)
+    other = make_shell_document(db_session, tmp_path, state=DocumentState.needs_review)
+    other.extracted_title = "Other Bulk"
+    other.review_state = ReviewState.needs_review
+    db_session.commit()
+
+    capped = DocumentBulkAction(
+        selection_mode="filters",
+        filters={"title": "FilterBulk", "state": "needs_review"},
+        max_matches=2,
+        action="set_review_state",
+        review_state=ReviewState.reviewed,
+    )
+    try:
+        bulk_documents(capped, db_session, _admin="admin")
+    except HTTPException as exc:
+        assert exc.status_code == 409
+    else:  # pragma: no cover
+        raise AssertionError("filter-scope bulk action ignored max_matches")
+
+    empty = DocumentBulkAction(
+        selection_mode="filters",
+        filters={},
+        action="set_review_state",
+        review_state=ReviewState.reviewed,
+    )
+    try:
+        bulk_documents(empty, db_session, _admin="admin")
+    except HTTPException as exc:
+        assert exc.status_code == 400
+    else:  # pragma: no cover
+        raise AssertionError("filter-scope bulk action accepted empty filters")
+
+    result = bulk_documents(
+        DocumentBulkAction(
+            selection_mode="filters",
+            filters={"title": "FilterBulk", "state": "needs_review"},
+            action="set_review_state",
+            review_state=ReviewState.reviewed,
+        ),
+        db_session,
+        _admin="admin",
+    )
+    assert result["updated"] == 3
+    assert result["details"]["matched_total"] == 3
+    assert result["details"]["selection_mode"] == "filters"
+
+    for doc in matching:
+        db_session.refresh(doc)
+        assert doc.review_state == ReviewState.reviewed
+        assert doc.processing_state == DocumentState.complete
+    db_session.refresh(other)
+    assert other.review_state == ReviewState.needs_review
 
 
 def test_patch_reviewed_promotes_needs_review_document_to_complete(db_session: Session, tmp_path: Path) -> None:

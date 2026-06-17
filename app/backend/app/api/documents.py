@@ -17,6 +17,7 @@ from app.models import DocumentState, OCRMode, ReviewState, StageState, Tag
 from app.schemas import (
     AdminActionResult,
     DocumentBulkAction,
+    DocumentBulkFilters,
     DocumentCustomFieldValueRead,
     DocumentCustomFieldValueWrite,
     DocumentEventRead,
@@ -36,6 +37,8 @@ from app.workers.tasks import extract_metadata_task, ocr_document_task, process_
 
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
+
+BULK_FILTER_MATCH_LIMIT = 1000
 
 
 @router.get("")
@@ -251,9 +254,10 @@ def bulk_documents(
     db: Session = Depends(get_db),
     _admin: str = Depends(require_admin),
 ) -> dict:
-    documents = db.scalars(select(Document).where(Document.id.in_(payload.document_ids))).all()
+    documents, matched_total = _documents_for_bulk_action(db, payload)
     if not documents:
-        return {"ok": True, "updated": 0, "queued": 0, "skipped": len(payload.document_ids), "details": {}}
+        skipped = 0 if payload.selection_mode == "filters" else len(payload.document_ids)
+        return {"ok": True, "updated": 0, "queued": 0, "skipped": skipped, "details": {"matched_total": matched_total, "selection_mode": payload.selection_mode}}
     updated = 0
     queued = 0
     skipped = 0
@@ -349,7 +353,60 @@ def bulk_documents(
         publish_document_task(db, document_id, ocr_document_task, args=[document_id], task_id=task_id, queue="ocr", stage="ocr")
     for document_id, force, task_id in enqueue_metadata_after_commit:
         publish_document_task(db, document_id, extract_metadata_task, args=[document_id], kwargs={"force": force}, task_id=task_id, queue="metadata", stage="metadata")
-    return AdminActionResult(ok=True, updated=updated, queued=queued, skipped=skipped).model_dump()
+    result = AdminActionResult(ok=True, updated=updated, queued=queued, skipped=skipped).model_dump()
+    result["details"] = {"matched_total": matched_total, "selection_mode": payload.selection_mode, "selected_count": len(documents)}
+    return result
+
+
+def _documents_for_bulk_action(db: Session, payload: DocumentBulkAction) -> tuple[list[Document], int]:
+    if payload.selection_mode == "filters":
+        return _documents_for_bulk_filters(db, payload)
+    if payload.selection_mode != "ids":
+        raise HTTPException(status_code=400, detail="selection_mode must be 'ids' or 'filters'")
+    if not payload.document_ids:
+        return [], 0
+    rows = db.scalars(select(Document).where(Document.id.in_(payload.document_ids))).all()
+    return rows, len(payload.document_ids)
+
+
+def _documents_for_bulk_filters(db: Session, payload: DocumentBulkAction) -> tuple[list[Document], int]:
+    if payload.action == "export":
+        raise HTTPException(status_code=400, detail="Filter-scope export is not supported")
+    filters = payload.filters or DocumentBulkFilters()
+    raw_filter_values = filters.model_dump(exclude_none=True)
+    include_deleted = bool(raw_filter_values.pop("include_deleted", False))
+    filter_values = {key: value for key, value in raw_filter_values.items() if not isinstance(value, str) or value.strip()}
+    if include_deleted:
+        raise HTTPException(status_code=400, detail="Filter-scope bulk actions cannot target deleted documents")
+    if not filter_values:
+        raise HTTPException(status_code=400, detail="Filter-scope bulk actions require at least one active filter")
+    list_filters = {
+        "batch_id": None,
+        "record_id": None,
+        "collection_name": None,
+        "state": None,
+        "review_state": None,
+        "date_from": None,
+        "date_to": None,
+        "filename": None,
+        "title": None,
+        "correspondent_id": None,
+        "document_type_id": None,
+        "tag_id": None,
+        "storage_path_id": None,
+        "folder_id": None,
+        "ocr_mode": None,
+        "include_deleted": False,
+    }
+    list_filters.update(filter_values)
+    stmt = _document_list_stmt(**list_filters)
+    total = int(db.scalar(select(func.count()).select_from(stmt.subquery())) or 0)
+    if total > payload.max_matches:
+        raise HTTPException(status_code=409, detail=f"Bulk action matches {total} documents; narrow the filters or use at most {payload.max_matches} matches")
+    if total > BULK_FILTER_MATCH_LIMIT:
+        raise HTTPException(status_code=409, detail=f"Bulk action matches {total} documents; current safe limit is {BULK_FILTER_MATCH_LIMIT}")
+    rows = db.scalars(stmt.order_by(Document.created_at.desc(), Document.id.desc()).limit(BULK_FILTER_MATCH_LIMIT)).all()
+    return rows, total
 
 
 @router.get("/{document_id}", response_model=DocumentRead)

@@ -8,6 +8,7 @@ import type { Document, DocumentEvent, DocumentPage } from '../types'
 import { useI18n } from '../i18n'
 
 const DOCUMENT_PAGE_LIMIT = 50
+const DOCUMENT_BULK_FILTER_LIMIT = 1000
 
 export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpenDocument: (id: string) => void; onOpenRecord: (id: string) => void }) {
   const { t } = useI18n()
@@ -25,6 +26,7 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [totalEstimate, setTotalEstimate] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [bulkAllMatching, setBulkAllMatching] = useState(false)
 
   async function load(nextFilters = filters, append = false, cursor: string | null = null) {
     setError('')
@@ -140,26 +142,44 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
     return selected?.id && !selected.id.startsWith('demo-') ? [selected.id] : []
   }
 
+  function hasActiveFilters() {
+    return Object.values(filters).some((value) => String(value || '').trim())
+  }
+
+  function shouldUseBulkFilterScope() {
+    return bulkAllMatching && hasActiveFilters() && totalEstimate > 0
+  }
+
+  function bulkActionDisabled() {
+    return Boolean(busyAction) || (!shouldUseBulkFilterScope() && !selectedDocumentIdsForActions().length)
+  }
+
   function bulkTargetLabel() {
+    if (shouldUseBulkFilterScope()) return `${totalEstimate} ${t('documents.matchingTarget')}`
     const checkedIds = Array.from(selectedIds).filter((id) => !id.startsWith('demo-'))
     if (checkedIds.length) return `${checkedIds.length} ${t('documents.selected')}`
     return selected?.id && !selected.id.startsWith('demo-') ? t('documents.activeTarget') : `0 ${t('documents.selected')}`
   }
 
   async function bulk(action: string, extra: Record<string, unknown> = {}) {
+    const filterScope = shouldUseBulkFilterScope()
     const ids = selectedDocumentIdsForActions()
-    if (!ids.length) {
+    if (!filterScope && !ids.length) {
       setError(t('documents.selectDocumentForAction'))
       return
     }
+    if (filterScope && !confirm(`${t('documents.bulkFilterConfirm')} ${totalEstimate} ${t('common.documents')}?`)) return
     setError('')
     setMessage('')
     setBusyAction(action)
     try {
-      await api.bulkDocuments({ action, document_ids: ids, ...extra })
+      await api.bulkDocuments(filterScope
+        ? { action, selection_mode: 'filters', filters, max_matches: DOCUMENT_BULK_FILTER_LIMIT, ...extra }
+        : { action, document_ids: ids, ...extra })
       setSelectedIds(new Set())
-      await load()
-      if (selectedId && ids.includes(selectedId)) await loadDetail(selectedId)
+      await load(filters, false, null)
+      if (!filterScope && selectedId && ids.includes(selectedId)) await loadDetail(selectedId)
+      if (filterScope && selectedId) await loadDetail(selectedId)
       setMessage(action === 'set_review_state' ? t('activity.message.reviewUpdated') : t('processing.queued'))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Bulk action failed')
@@ -279,10 +299,14 @@ export default function DocumentsPage({ onOpenDocument, onOpenRecord }: { onOpen
           </div>
           <div className="bulk-bar console-bulk">
             <span>{bulkTargetLabel()}</span>
-            <button disabled={Boolean(busyAction) || !selectedDocumentIdsForActions().length} onClick={() => void bulk('retry')}>{t('common.retryOcr')}</button>
-            <button disabled={Boolean(busyAction) || !selectedDocumentIdsForActions().length} onClick={() => void bulk('reextract')}>{t('common.reextract')}</button>
-            <button disabled={Boolean(busyAction) || !selectedDocumentIdsForActions().length} onClick={() => void bulk('set_review_state', { review_state: 'needs_review', review_reason: 'Bulk marked for review' })}>{t('common.needsReview')}</button>
-            <button disabled={Boolean(busyAction) || !selectedDocumentIdsForActions().length} onClick={() => void bulk('set_review_state', { review_state: 'reviewed', review_reason: null })}>{t('common.reviewed')}</button>
+            <label className="bulk-scope-toggle" title={t('documents.bulkFilterHelp')}>
+              <input type="checkbox" checked={bulkAllMatching} disabled={!hasActiveFilters() || !totalEstimate} onChange={(event) => setBulkAllMatching(event.target.checked)} />
+              {t('documents.applyToMatching')}
+            </label>
+            <button disabled={bulkActionDisabled()} onClick={() => void bulk('retry')}>{t('common.retryOcr')}</button>
+            <button disabled={bulkActionDisabled()} onClick={() => void bulk('reextract')}>{t('common.reextract')}</button>
+            <button disabled={bulkActionDisabled()} onClick={() => void bulk('set_review_state', { review_state: 'needs_review', review_reason: 'Bulk marked for review' })}>{t('common.needsReview')}</button>
+            <button disabled={bulkActionDisabled()} onClick={() => void bulk('set_review_state', { review_state: 'reviewed', review_reason: null })}>{t('common.reviewed')}</button>
             <button className="danger-button" disabled={Boolean(busyAction) || !Array.from(selectedIds).filter((id) => !id.startsWith('demo-')).length} onClick={() => void deleteSelectedDocuments()}><Trash2 size={16} /> {t('documents.deleteSelected')}</button>
           </div>
           <div className="document-console-table">

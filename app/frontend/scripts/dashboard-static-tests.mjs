@@ -46,6 +46,8 @@ const checks = [
   ['Documents inspector exposes delete action', documentsPage, 'onDelete'],
   ['Documents page uses cursor-paginated API', documentsPage, 'api.documentsPage'],
   ['Documents page exposes Load more pagination', documentsPage, 'loadMoreDocuments'],
+  ["Documents page exposes all-matching filter bulk scope", documentsPage, "selection_mode: 'filters'"],
+  ['Documents page caps all-matching bulk actions', documentsPage, 'DOCUMENT_BULK_FILTER_LIMIT'],
   ['Folders page uses paginated folder contents API', foldersPage, 'api.folderContents'],
   ['Folders page can load more folder contents', foldersPage, 'loadMore'],
   ['Folders Home does not load all documents by default', foldersPage, 'emptyDocumentPage'],

@@ -277,9 +277,31 @@ class OCRSettingsPatch(BaseModel):
     ocr_config_json: dict[str, Any] = Field(default_factory=dict)
 
 
+class DocumentBulkFilters(BaseModel):
+    batch_id: uuid.UUID | None = None
+    record_id: uuid.UUID | None = None
+    collection_name: str | None = None
+    state: DocumentState | None = None
+    review_state: ReviewState | None = None
+    date_from: str | None = None
+    date_to: str | None = None
+    filename: str | None = None
+    title: str | None = None
+    correspondent_id: uuid.UUID | None = None
+    document_type_id: uuid.UUID | None = None
+    tag_id: uuid.UUID | None = None
+    storage_path_id: uuid.UUID | None = None
+    folder_id: uuid.UUID | None = None
+    ocr_mode: OCRMode | None = None
+    include_deleted: bool = False
+
+
 class DocumentBulkAction(BaseModel):
-    document_ids: list[uuid.UUID]
+    document_ids: list[uuid.UUID] = Field(default_factory=list)
     action: str
+    selection_mode: str = "ids"
+    filters: DocumentBulkFilters | None = None
+    max_matches: int = Field(default=1000, ge=1, le=1000)
     force: bool = False
     review_state: ReviewState | None = None
     review_reason: str | None = None
