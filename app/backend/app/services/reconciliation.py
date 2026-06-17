@@ -3,12 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 import uuid
+import re
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import Document, DocumentState, StageState
+from app.models import Document, DocumentState, ReviewState, StageState
 from app.services.events import record_event
 from app.services.collections import update_record_status
 from app.services.processing import has_active_processing_lease, queue_ocr, reserve_processing_task, update_batch_status
@@ -42,6 +43,7 @@ def reconcile_stuck_documents(db: Session, *, limit: int = 100) -> dict[str, Any
     )
     queued_ocr = 0
     queued_metadata = 0
+    queued_metadata_repair = 0
     skipped = 0
     document_ids: list[str] = []
     enqueue_after_commit: list[tuple[str, str, bool, str]] = []
@@ -70,6 +72,30 @@ def reconcile_stuck_documents(db: Session, *, limit: int = 100) -> dict[str, Any
                 enqueue_after_commit.append(("ocr", str(document.id), True, task_id))
                 queued_ocr += 1
                 document_ids.append(str(document.id))
+            continue
+
+        if metadata_quality_needs_repair(document):
+            if has_active_processing_lease(document):
+                skipped += 1
+                continue
+            document.processing_state = DocumentState.ocr_done
+            document.final_state = DocumentState.ocr_done
+            document.metadata_state = StageState.pending
+            task_id = str(uuid.uuid4())
+            reserve_processing_task(document, task_id=task_id, stage="metadata", force=True)
+            record_event(
+                db,
+                document,
+                "reconcile_metadata_quality_repair",
+                "Suspicious or stale metadata detected; metadata repair queued",
+                metadata={"reasons": metadata_quality_repair_reasons(document)},
+            )
+            enqueue_after_commit.append(("metadata", str(document.id), True, task_id))
+            queued_metadata += 1
+            queued_metadata_repair += 1
+            document_ids.append(str(document.id))
+            update_batch_status(db, document.batch_id)
+            update_record_status(db, document.record_id)
             continue
 
         if document.ocr_text and document.ocr_state == StageState.done and document.metadata_state not in {StageState.done, StageState.skipped}:
@@ -241,9 +267,71 @@ def reconcile_stuck_documents(db: Session, *, limit: int = 100) -> dict[str, Any
         "details": {
             "queued_ocr": queued_ocr,
             "queued_metadata": queued_metadata,
+            "queued_metadata_repair": queued_metadata_repair,
             "document_ids": document_ids,
         },
     }
+
+
+METADATA_REPAIR_REVIEW_PREFIXES = (
+    "Qwen metadata brain",
+    "Qwen disagrees with deterministic",
+    "Fallback title",
+    "Suspicious",
+)
+
+BAD_METADATA_PARTY_TOKENS = {
+    "leistungszeitraum",
+    "vertragslaufzeit",
+    "rechnungsbetrag",
+    "zahlenderbetrag",
+    "falligam",
+    "faelligam",
+}
+
+
+def metadata_quality_repair_reasons(document: Document) -> list[str]:
+    reasons: list[str] = []
+    if document.deleted_at is not None or document.metadata_locked:
+        return reasons
+    if document.ocr_state not in {StageState.done, StageState.skipped} or not document.ocr_text:
+        return reasons
+    if document.processing_state not in {DocumentState.complete, DocumentState.needs_review, DocumentState.metadata_done}:
+        return reasons
+    metadata = document.metadata_json or {}
+    refinement = metadata.get("qwen_refinement") if isinstance(metadata.get("qwen_refinement"), dict) else {}
+    review_reason = str(document.review_reason or "")
+    if document.review_state == ReviewState.needs_review and review_reason.startswith(METADATA_REPAIR_REVIEW_PREFIXES):
+        reasons.append("auto_review_reason")
+    error = str(refinement.get("error") or "")
+    if error and ("invalid metadata candidate JSON" in error or "invalid" in error.lower()):
+        reasons.append("qwen_invalid_json")
+    if _bad_metadata_party(document.extracted_sender):
+        reasons.append("bad_sender_token")
+    if _suspicious_year_amount(document.extracted_amount):
+        reasons.append("suspicious_year_amount")
+    title = str(document.extracted_title or "")
+    if any(token in title.lower() for token in BAD_METADATA_PARTY_TOKENS):
+        reasons.append("bad_title_token")
+    if re.search(r"_(?:19|20)\d{2},00$", title):
+        reasons.append("title_year_amount")
+    warnings = metadata.get("review_warnings") if isinstance(metadata.get("review_warnings"), list) else []
+    if any(str(item).startswith(METADATA_REPAIR_REVIEW_PREFIXES) for item in warnings):
+        reasons.append("auto_review_warning")
+    return sorted(set(reasons))
+
+
+def metadata_quality_needs_repair(document: Document) -> bool:
+    return bool(metadata_quality_repair_reasons(document))
+
+
+def _bad_metadata_party(value: str | None) -> bool:
+    token = re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+    return token in BAD_METADATA_PARTY_TOKENS
+
+
+def _suspicious_year_amount(value: str | None) -> bool:
+    return bool(re.fullmatch(r"(?:19|20)\d{2},00", str(value or "").strip()))
 
 
 def retry_failed_documents(db: Session, *, limit: int = 100) -> dict[str, Any]:

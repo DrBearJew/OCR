@@ -138,6 +138,33 @@ def build_qwen_metadata_payload(
     }
 
 
+def qwen_debug_from_raw_metadata(
+    raw_text: str | None,
+    payload: dict[str, Any],
+    *,
+    raw_response: dict[str, Any] | None = None,
+    prompt: dict[str, Any] | None = None,
+    model: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    raw = str(raw_text or "")
+    parsed = parse_json_suggestion(raw)
+    candidate = validate_metadata_candidates(parsed)
+    debug = {
+        "ok": candidate is not None,
+        "candidate": candidate or {},
+        "raw_text": raw,
+        "raw_response": raw_response or {"source": "stored_qwen_response"},
+        "prompt": prompt or {"name": "stored_qwen_response", "version": "stored"},
+        "model": model or {"role": "qwen_metadata_brain", "endpoint": "stored://qwen-response", "model": "stored-qwen-response"},
+        "payload": payload,
+        "similar_documents": payload.get("similar_documents", []),
+        "recovered_from_stored_raw": True,
+    }
+    if candidate is None:
+        debug["error"] = "Stored Qwen metadata candidate JSON is invalid"
+    return debug
+
+
 def qwen_generate_metadata_candidates(
     db: Session,
     document: Document,
@@ -160,6 +187,11 @@ def qwen_generate_metadata_candidates(
             raise QwenProviderError("Qwen provider does not implement metadata candidates")
         refinement = generate(payload)
     except QwenProviderError as exc:
+        stored_debug = qwen_debug_from_raw_metadata(document.qwen_response_text, payload)
+        if stored_debug.get("ok"):
+            stored_debug["live_error"] = str(exc)
+            record_event(db, document, "qwen_stored_response_recovered", "Stored Qwen metadata response reused after live Qwen failure", metadata={"reason": str(exc)})
+            return stored_debug
         record_event(db, document, "qwen_unavailable", "Qwen metadata brain unavailable", metadata={"reason": str(exc)})
         return {
             "ok": False,

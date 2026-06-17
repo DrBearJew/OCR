@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Batch, CustomFieldDefinition, CustomFieldType, Document, DocumentState, FieldValueSource, ReviewState, StageState
 from app.services.collections import create_record_for_upload, ensure_collection
-from app.services.llm_qwen import QwenRefinement, parse_json_suggestion
+from app.services.llm_qwen import QwenProviderError, QwenRefinement, parse_json_suggestion
 from app.services.processing import run_metadata_for_document
 from app.services.prompt_loader import PromptLoader
 
@@ -186,6 +186,39 @@ Endsumme 205,25"""
     assert doc.review_state != ReviewState.needs_review
     assert doc.metadata_json["qwen_candidates"] == {}
     assert doc.metadata_json["qwen_refinement"]["error"] == "Qwen returned invalid metadata candidate JSON"
+
+
+def test_metadata_rerun_recovers_stored_qwen_response_when_live_qwen_fails(db_session: Session, tmp_path: Path) -> None:
+    class FailingQwen:
+        def generate_metadata_candidates(self, payload: dict[str, Any]) -> QwenRefinement:
+            raise QwenProviderError("live qwen down")
+
+    text = """Telefonica Germany GmbH & Co. OHG
+Rechnungsnummer
+1318249263/08
+Rechnungsdatum
+28.07.2025
+Rechnungsbetrag
+26,49 €"""
+    doc = make_record_document(db_session, tmp_path, text, "Eingangsrechnung")
+    doc.qwen_response_text = """{
+      "sender": {"value": "Telefonica Germany GmbH & Co. OHG", "confidence": 0.95, "evidence": "Sender address"},
+      "created_date": {"value": "2025-07-28", "confidence": 0.99, "evidence": "Rechnungsdatum"},
+      "invoice_number": {"value": "1318249263/08", "confidence": 0.99, "evidence": "Rechnungsnummer"},
+      "amount": {"value": "26,49", "confidence": 0.99, "evidence": "Rechnungsbetrag"},
+      "entities": {"amounts": [{"value": "26,49", "confidence": 0.99}]}
+    },
+    "document_purpose": "extra trailing model data"
+    }"""
+    db_session.commit()
+
+    run_metadata_for_document(db_session, doc.id, qwen_provider=FailingQwen(), qwen_enabled=True, force=True)
+    db_session.refresh(doc)
+
+    assert doc.processing_state == DocumentState.complete
+    assert doc.metadata_json["qwen_refinement"]["recovered_from_stored_raw"] is True
+    assert doc.extracted_amount == "26,49"
+    assert doc.extracted_invoice_number == "1318249263/08"
 
 
 def test_qwen_suggested_title_base_only_replaces_weak_base(db_session: Session, tmp_path: Path) -> None:

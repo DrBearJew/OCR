@@ -19,7 +19,7 @@ from app.api.admin import reindex_documents, storage_integrity
 from app.api.app_shell import failed_and_review
 from app.api.documents import list_documents
 from app.cli import import_legacy
-from app.models import Batch, Document, DocumentEvent, DocumentPage, DocumentState, StageState
+from app.models import Batch, Document, DocumentEvent, DocumentPage, DocumentState, ReviewState, StageState
 from app.services.extraction import ExtractionInput, extract_metadata, normalize_amount
 from app.services.ocr_glm import OCRProviderError, OCRResult
 from app.services.processing import (
@@ -393,6 +393,42 @@ def test_reconcile_repairs_old_stack_incomplete_shapes(db_session: Session, tmp_
     assert ("metadata", str(missing_title.id)) in queued
     assert complete_not_indexed.metadata_json["search_indexed"] is True
     assert result["updated"] >= 2
+
+
+def test_reconcile_queues_suspicious_metadata_quality_repair(db_session: Session, tmp_path: Path, monkeypatch) -> None:
+    queued: list[tuple[str, str, bool]] = []
+    monkeypatch.setattr("app.services.reconciliation._enqueue_ocr", lambda doc_id, task_id=None: queued.append(("ocr", str(doc_id), False)))
+    monkeypatch.setattr("app.services.reconciliation._enqueue_metadata", lambda doc_id, force=False, task_id=None: queued.append(("metadata", str(doc_id), force)))
+    text = """Telefonica Germany GmbH & Co. OHG
+Rechnungsnummer
+1318249263/08
+Rechnungsdatum
+28.07.2025
+Rechnungsbetrag
+26,49 €"""
+    document = make_doc(db_session, tmp_path, text, sha="m" * 64)
+    document.ocr_text = text
+    document.ocr_state = StageState.done
+    document.metadata_state = StageState.done
+    document.processing_state = DocumentState.needs_review
+    document.final_state = DocumentState.needs_review
+    document.review_state = ReviewState.needs_review
+    document.review_reason = "Qwen metadata brain returned invalid JSON"
+    document.extracted_title = "Leistungszeitraum_1318249263/08_28/07/2025_2025,00"
+    document.extracted_sender = "Leistungszeitraum"
+    document.extracted_invoice_number = "1318249263/08"
+    document.extracted_date = "28/07/2025"
+    document.extracted_amount = "2025,00"
+    document.metadata_json = {"qwen_refinement": {"ok": False, "error": "Qwen returned invalid metadata candidate JSON"}, "search_indexed": True}
+    db_session.commit()
+
+    result = reconcile_stuck_documents(db_session)
+    db_session.refresh(document)
+
+    assert ("metadata", str(document.id), True) in queued
+    assert result["details"]["queued_metadata_repair"] == 1
+    assert document.processing_state == DocumentState.ocr_done
+    assert document.metadata_state == StageState.pending
 
 
 def test_admin_storage_integrity_and_reindex(db_session: Session, tmp_path: Path, monkeypatch) -> None:
