@@ -166,7 +166,7 @@ function SelectedDocument({ document, onOpenDocument, onDelete, busy }: { docume
       <div className="preview-pane">
         {canPreview ? (
           document.mime_type === 'application/pdf'
-            ? <iframe src={previewUrl(document.id)} title={t('documents.preview')} />
+            ? <iframe className="record-native-pdf-preview" src={previewUrl(document.id)} title={t('documents.preview')} />
             : <img src={previewUrl(document.id)} alt={document.original_filename} />
         ) : document.thumbnail_path ? (
           <img src={thumbnailUrl(document.id)} alt={document.original_filename} />

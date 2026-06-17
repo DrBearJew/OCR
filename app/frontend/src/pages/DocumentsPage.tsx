@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Download, FileText, Maximize2, Minus, Plus, RefreshCw, Search, Trash2, UploadCloud } from 'lucide-react'
 import type { KeyboardEvent, MouseEvent, ReactNode } from 'react'
-import { api, downloadUrl, previewPageUrl, previewUrl, thumbnailUrl } from '../api/client'
+import { api, downloadUrl, previewUrl, thumbnailUrl } from '../api/client'
 import SavedViewsBar from '../components/SavedViewsBar'
 import StatusBadge from '../components/StatusBadge'
 import type { Document, DocumentEvent, DocumentPage } from '../types'
@@ -367,7 +367,9 @@ function DocumentPreviewPanel({ document, pages, loading, onOpenDocument }: { do
   const previewSurfaceRef = useRef<HTMLDivElement | null>(null)
   const canPreview = document.mime_type?.startsWith('image/') || document.mime_type === 'application/pdf'
   const isPdf = document.mime_type === 'application/pdf'
-  const mediaStyle = { width: `${zoom}%`, maxWidth: zoom <= 100 ? '100%' : 'none' }
+  const mediaStyle = isPdf
+    ? { width: '100%', maxWidth: '1100px', height: 'min(68vh, 760px)' }
+    : { width: `${zoom}%`, maxWidth: zoom <= 100 ? '100%' : 'none' }
 
   useEffect(() => {
     setActiveTab('ocr')
@@ -407,6 +409,7 @@ function DocumentPreviewPanel({ document, pages, loading, onOpenDocument }: { do
   }
 
   function handlePreviewClick(event: MouseEvent<HTMLDivElement>) {
+    if (isPdf) return
     const media = event.currentTarget.querySelector('.zoomable-preview-media') as HTMLElement | null
     if (!media) return
     const rect = media.getBoundingClientRect()
@@ -420,17 +423,25 @@ function DocumentPreviewPanel({ document, pages, loading, onOpenDocument }: { do
       <div className="card-title-row">
         <h2>{document.original_filename}</h2>
         <div className="button-row preview-zoom-controls">
-          <button type="button" className="icon-button" title={t('common.zoomOut')} onClick={() => adjustZoom(-20)}><Minus size={16} /></button>
-          <button type="button" className="zoom-value" title={t('common.resetZoom')} onClick={resetZoom}>{zoom}%</button>
-          <button type="button" className="icon-button" title={t('common.zoomIn')} onClick={() => adjustZoom(20)}><Plus size={16} /></button>
+          {isPdf ? (
+            <small className="native-pdf-toolbar-note">Use the PDF toolbar for pages and zoom.</small>
+          ) : (
+            <>
+              <button type="button" className="icon-button" title={t('common.zoomOut')} onClick={() => adjustZoom(-20)}><Minus size={16} /></button>
+              <button type="button" className="zoom-value" title={t('common.resetZoom')} onClick={resetZoom}>{zoom}%</button>
+              <button type="button" className="icon-button" title={t('common.zoomIn')} onClick={() => adjustZoom(20)}><Plus size={16} /></button>
+            </>
+          )}
           <button type="button" className="icon-button" title={t('documents.largePreview')} onClick={() => setLargePreviewOpen(true)}><Maximize2 size={16} /></button>
           <a className="icon-button" href={downloadUrl(document.id)} title={t('common.download')}><Download size={17} /></a>
           <button className="icon-button" onClick={() => onOpenDocument(document.id)} title={t('common.open')}><FileText size={17} /></button>
         </div>
       </div>
-      <div ref={previewSurfaceRef} className="document-preview-surface console-preview zoomable-preview" onClick={handlePreviewClick} title={isPdf ? 'Use zoom controls above the PDF preview' : 'Click image to zoom around that point'}>
+      <div ref={previewSurfaceRef} className="document-preview-surface console-preview zoomable-preview" onClick={handlePreviewClick} title={isPdf ? 'Use the PDF toolbar for pages and zoom.' : 'Click image to zoom around that point'}>
         {canPreview && !document.id.startsWith('demo-') ? (
-          <img className="zoomable-preview-media" style={mediaStyle} src={isPdf ? previewPageUrl(document.id, 1) : previewUrl(document.id)} alt={document.original_filename} />
+          isPdf
+            ? <iframe className="zoomable-preview-media document-native-pdf-preview" style={mediaStyle} src={previewUrl(document.id)} title={t('documents.preview')} />
+            : <img className="zoomable-preview-media" style={mediaStyle} src={previewUrl(document.id)} alt={document.original_filename} />
         ) : document.thumbnail_path && !document.id.startsWith('demo-') ? <img className="zoomable-preview-media" style={mediaStyle} src={thumbnailUrl(document.id)} alt={document.original_filename} /> : <InvoiceMockup />}
       </div>
       <div className="ocr-tabs">
@@ -452,22 +463,34 @@ function LargePreviewModal({ document, onClose }: { document: Document; onClose:
   const [zoom, setZoom] = useState(100)
   const isPdf = document.mime_type === 'application/pdf'
   const canPreview = document.mime_type?.startsWith('image/') || isPdf
-  const source = document.id.startsWith('demo-') ? '' : isPdf ? previewPageUrl(document.id, 1) : canPreview ? previewUrl(document.id) : document.thumbnail_path ? thumbnailUrl(document.id) : ''
-  const mediaStyle = { width: `${zoom}%`, maxWidth: zoom <= 100 ? '100%' : 'none' }
+  const source = document.id.startsWith('demo-') ? '' : canPreview ? previewUrl(document.id) : document.thumbnail_path ? thumbnailUrl(document.id) : ''
+  const mediaStyle = isPdf
+    ? { width: '100%', height: 'min(82vh, 900px)' }
+    : { width: `${zoom}%`, maxWidth: zoom <= 100 ? '100%' : 'none' }
   return (
     <div className="large-preview-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
       <section className="large-preview-dialog" onClick={(event) => event.stopPropagation()}>
         <header>
           <strong>{document.original_filename}</strong>
           <div className="button-row">
-            <button type="button" className="icon-button" onClick={() => setZoom((value) => Math.max(50, value - 20))}><Minus size={16} /></button>
-            <button type="button" className="zoom-value" onClick={() => setZoom(100)}>{zoom}%</button>
-            <button type="button" className="icon-button" onClick={() => setZoom((value) => Math.min(260, value + 20))}><Plus size={16} /></button>
+            {isPdf ? (
+              <small className="native-pdf-toolbar-note">Use the PDF toolbar for pages and zoom.</small>
+            ) : (
+              <>
+                <button type="button" className="icon-button" onClick={() => setZoom((value) => Math.max(50, value - 20))}><Minus size={16} /></button>
+                <button type="button" className="zoom-value" onClick={() => setZoom(100)}>{zoom}%</button>
+                <button type="button" className="icon-button" onClick={() => setZoom((value) => Math.min(260, value + 20))}><Plus size={16} /></button>
+              </>
+            )}
             <button type="button" onClick={onClose}>{t('common.close')}</button>
           </div>
         </header>
         <div className="large-preview-surface">
-          {source ? <img style={mediaStyle} src={source} alt={document.original_filename} /> : <InvoiceMockup />}
+          {source ? (
+            isPdf
+              ? <iframe className="large-native-pdf-preview" style={mediaStyle} src={source} title={t('documents.preview')} />
+              : <img style={mediaStyle} src={source} alt={document.original_filename} />
+          ) : <InvoiceMockup />}
         </div>
       </section>
     </div>

@@ -192,7 +192,7 @@ export default function DocumentDetailPage({ id }: { id: string }) {
   const canPreview = document.mime_type?.startsWith('image/') || document.mime_type === 'application/pdf'
   const isPdf = document.mime_type === 'application/pdf'
   const previewMediaStyle = isPdf
-    ? { width: `${previewZoom}%`, maxWidth: previewZoom <= 100 ? '100%' : 'none', height: `${Math.round(78 * previewZoom / 100)}vh` }
+    ? { width: '100%', maxWidth: '1100px', height: 'min(78vh, 900px)' }
     : { width: `${previewZoom}%`, maxWidth: previewZoom <= 100 ? '100%' : 'none' }
 
   function adjustPreviewZoom(delta: number) {
@@ -223,10 +223,16 @@ export default function DocumentDetailPage({ id }: { id: string }) {
           <div className="preview-toolbar">
             <strong>{t('documents.preview')}</strong>
             <div className="button-row">
-              <button type="button" className="icon-button" title={t('common.zoomOut')} onClick={() => adjustPreviewZoom(-20)}><Minus size={16} /></button>
-              <button type="button" className="zoom-value" title={t('common.resetZoom')} onClick={() => setPreviewZoom(100)}>{previewZoom}%</button>
-              <button type="button" className="icon-button" title={t('common.zoomIn')} onClick={() => adjustPreviewZoom(20)}><Plus size={16} /></button>
-              <button type="button" className="icon-button" title={t('documentDetail.readableSize')} onClick={() => setPreviewZoom((current) => current >= 160 ? 100 : 160)}><Maximize2 size={16} /></button>
+              {isPdf ? (
+                <small className="native-pdf-toolbar-note">Use the PDF toolbar for pages and zoom.</small>
+              ) : (
+                <>
+                  <button type="button" className="icon-button" title={t('common.zoomOut')} onClick={() => adjustPreviewZoom(-20)}><Minus size={16} /></button>
+                  <button type="button" className="zoom-value" title={t('common.resetZoom')} onClick={() => setPreviewZoom(100)}>{previewZoom}%</button>
+                  <button type="button" className="icon-button" title={t('common.zoomIn')} onClick={() => adjustPreviewZoom(20)}><Plus size={16} /></button>
+                  <button type="button" className="icon-button" title={t('documentDetail.readableSize')} onClick={() => setPreviewZoom((current) => current >= 160 ? 100 : 160)}><Maximize2 size={16} /></button>
+                </>
+              )}
             </div>
           </div>
           <div className="preview-pane document-detail-preview-pane">
@@ -234,7 +240,7 @@ export default function DocumentDetailPage({ id }: { id: string }) {
               <img className="document-detail-preview-media" style={previewMediaStyle} src={thumbnailUrl(document.id)} alt={document.original_filename} />
             ) : canPreview ? (
               isPdf
-                ? <iframe className="document-detail-preview-media" style={previewMediaStyle} src={previewUrl(document.id)} title={t('documents.preview')} />
+                ? <iframe className="document-detail-preview-media document-native-pdf-preview" style={previewMediaStyle} src={previewUrl(document.id)} title={t('documents.preview')} />
                 : <img className="document-detail-preview-media" style={previewMediaStyle} src={previewUrl(document.id)} alt={document.original_filename} />
             ) : (
               <a href={downloadUrl(document.id)}>{t('common.download')} {document.original_filename}</a>

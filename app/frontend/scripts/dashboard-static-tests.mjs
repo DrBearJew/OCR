@@ -13,6 +13,7 @@ const schemaPage = readFileSync(resolve(root, 'src/pages/SchemaPage.tsx'), 'utf8
 const adminPage = readFileSync(resolve(root, 'src/pages/AdminPage.tsx'), 'utf8')
 const processingPage = readFileSync(resolve(root, 'src/pages/ProcessingPage.tsx'), 'utf8')
 const recordDetailPage = readFileSync(resolve(root, 'src/pages/RecordDetailPage.tsx'), 'utf8')
+const documentDetailPage = readFileSync(resolve(root, 'src/pages/DocumentDetailPage.tsx'), 'utf8')
 const styles = readFileSync(resolve(root, 'src/styles.css'), 'utf8')
 const packageJson = readFileSync(resolve(root, 'package.json'), 'utf8')
 
@@ -62,8 +63,10 @@ const checks = [
   ['Documents inspector does not fake sender fallback', documentsPage, "document.extracted_sender || 'Demo Ges.mbh'", true],
   ['Documents inspector does not fake invoice fallback', documentsPage, "document.extracted_invoice_number || 'PR400000005'", true],
   ['Documents inspector does not fake demo tags', documentsPage, 'supplier:demo</button>', true],
-  ['Documents PDF preview uses rendered page image', documentsPage, 'isPdf ? previewPageUrl(document.id, 1) : previewUrl(document.id)'],
-  ['Documents large PDF preview does not use iframe', documentsPage, 'Large document preview', true],
+  ['Documents PDF preview uses native viewer', documentsPage, 'document-native-pdf-preview'],
+  ['Documents PDF preview does not force first rendered page', documentsPage, 'previewPageUrl(document.id, 1)', true],
+  ['Documents PDF preview disables click zoom', documentsPage, 'if (isPdf) return'],
+  ['Documents large PDF preview uses native iframe', documentsPage, 'large-native-pdf-preview'],
   ['Documents page uses cursor-paginated API', documentsPage, 'api.documentsPage'],
   ['Documents page exposes Load more pagination', documentsPage, 'loadMoreDocuments'],
   ["Documents page exposes all-matching filter bulk scope", documentsPage, "selection_mode: 'filters'"],
@@ -89,6 +92,9 @@ const checks = [
   ['Schemas page exposes create collection action', schemaPage, 'collections.create'],
   ['Records page uses cursor-paginated API', `${client}\n${readFileSync(resolve(root, 'src/pages/RecordListPage.tsx'), 'utf8')}`, 'api.recordsPage'],
   ['Records page exposes Load more pagination', readFileSync(resolve(root, 'src/pages/RecordListPage.tsx'), 'utf8'), 'loadMoreRecords'],
+  ['Document detail PDF preview uses native viewer', documentDetailPage, 'document-native-pdf-preview'],
+  ['Document detail PDF preview explains native toolbar', documentDetailPage, 'Use the PDF toolbar for pages and zoom.'],
+  ['Record detail PDF preview uses native viewer', recordDetailPage, 'record-native-pdf-preview'],
   ['Record detail can delete a single child document', recordDetailPage, 'api.deleteDocument(document.id)'],
   ['Record detail distinguishes document delete from record delete', recordDetailPage, 'recordDetail.deleteDocumentConfirm'],
   ['Collection detail uses paginated records API', collectionDetailPage, 'api.recordsPage'],
