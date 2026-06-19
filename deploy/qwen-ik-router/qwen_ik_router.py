@@ -24,12 +24,12 @@ CHILD_HOST = os.getenv("QWEN_IK_CHILD_HOST", "127.0.0.1")
 CHILD_PORT = int(os.getenv("QWEN_IK_CHILD_PORT", "18083"))
 CHILD_URL = f"http://{CHILD_HOST}:{CHILD_PORT}"
 
-MODEL_ID = os.getenv("QWEN_IK_MODEL_ID", "gemma-4-e2b-it-q8")
-ALIASES = [item.strip() for item in os.getenv("QWEN_IK_ALIASES", "gemma-4-e2b-it-q8,gemma-e2b,qwen-mtp,qwen3.5-2b,qwen").split(",") if item.strip()]
+MODEL_ID = os.getenv("QWEN_IK_MODEL_ID", "gemma-4-e2b-it-qat-q4_0")
+ALIASES = [item.strip() for item in os.getenv("QWEN_IK_ALIASES", "gemma-4-e2b-it-qat-q4_0,gemma-e2b,qwen-mtp,qwen3.5-2b,qwen").split(",") if item.strip()]
 BINARY = os.getenv("QWEN_IK_BINARY", "/root/ik_llama.cpp/build/bin/llama-server")
-MODEL = os.getenv("QWEN_IK_MODEL", "/root/llm-models/gemma-4-E2B-it/gemma-4-E2B-it-Q8_0.gguf")
-CHAT_TEMPLATE_FILE = os.getenv("QWEN_IK_CHAT_TEMPLATE_FILE", "/root/llm-models/gemma-4-E2B-it/google-gemma4-E2B-chat_template-main.jinja")
-SPEC_TYPE = os.getenv("QWEN_IK_SPEC_TYPE", "ngram-mod:n_max=64,n_min=2,ngram_size_n=8").strip()
+MODEL = os.getenv("QWEN_IK_MODEL", "/root/llm-models/gemma-4-E2B-it-qat-q4_0-gguf/gemma-4-E2B_q4_0-it.gguf")
+CHAT_TEMPLATE_FILE = os.getenv("QWEN_IK_CHAT_TEMPLATE_FILE", "/root/llm-models/gemma-4-E2B-it-qat-q4_0-gguf/google-gemma4-E2B-chat_template-main.jinja")
+SPEC_TYPE = os.getenv("QWEN_IK_SPEC_TYPE", "ngram-mod:n_max=16,n_min=0,ngram_size_n=40").strip()
 
 CTX_SIZE = os.getenv("QWEN_IK_CTX_SIZE", "4096")
 BATCH_SIZE = os.getenv("QWEN_IK_BATCH_SIZE", "1024")
