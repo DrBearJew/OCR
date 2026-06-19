@@ -7,7 +7,8 @@ set -Eeuo pipefail
 #   - llamacpp: legacy GGUF + smart-proxy gateway for llama.cpp/LM Studio style OCR.
 #
 # Skip this installer if you already have a GPU/native/remote PaddleOCR-VL endpoint.
-# This script does not install the optional Gemma/Qwen metadata model sidecar.
+# This script does not install the optional Gemma/Qwen metadata model sidecar;
+# the CPU metadata sidecar lives under deploy/qwen-ik-router/.
 # The installer is intentionally idempotent. It writes helper assets/services and
 # prints Admin -> Model Setup values; it does not edit Dok OCR .env or
 # docker-compose.yml.
@@ -58,6 +59,7 @@ Backends:
 Use this only if you need to provision a local PaddleOCR-VL OCR endpoint. If you already
 have a GPU/native/remote PaddleOCR-VL endpoint, configure that URL in Admin instead.
 Metadata refinement models are configured separately; this script does not install Gemma/Qwen.
+For CPU metadata refinement, use the ik_llama.cpp sidecar under deploy/qwen-ik-router/.
 
 Common environment overrides:
   DOKOCR_PADDLE_BACKEND          default: openvino-cpu

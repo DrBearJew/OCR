@@ -183,11 +183,15 @@ After either installer path finishes:
 
 ### Metadata sidecar standard
 
-Production metadata refinement uses an OpenAI-compatible text endpoint after OCR. The deployed low-RAM sidecar in `deploy/qwen-ik-router/` uses ik_llama.cpp with Google Gemma 4 E2B QAT Q4_0 and keeps legacy Qwen model names for compatibility. This is a tested CPU/RAM-friendly default, not a requirement: on a strong GPU, you can point metadata refinement at a larger local or remote text model instead.
+Production metadata refinement uses an OpenAI-compatible text endpoint after OCR. Runtime choices are intentionally configurable:
 
-The sidecar is text-only metadata extraction after OCR; it does not run PaddleOCR-VL and does not replace your PaddleOCR-VL endpoint, whether that endpoint is OpenVINO CPU, GPU/native, or remote.
+- **CPU / low-RAM metadata:** use the `deploy/qwen-ik-router/` ik_llama.cpp sidecar with Google Gemma 4 E2B QAT Q4_0. This is the deployed tested default and keeps legacy Qwen model names for compatibility.
+- **Strong GPU metadata:** point metadata refinement at a larger local OpenAI-compatible text model.
+- **Remote metadata:** point metadata refinement at any compatible remote text endpoint.
 
-Tested low-RAM sidecar defaults:
+The ik_llama.cpp sidecar is text-only metadata extraction after OCR; it does not run PaddleOCR-VL and does not replace your PaddleOCR-VL endpoint, whether that endpoint is OpenVINO CPU, GPU/native, or remote.
+
+Tested CPU / low-RAM ik_llama.cpp sidecar defaults:
 
 ```text
 model: /root/llm-models/gemma-4-E2B-it-qat-q4_0-gguf/gemma-4-E2B_q4_0-it.gguf
@@ -243,7 +247,7 @@ QWEN_LLAMACPP_BASE_URL=http://host.docker.internal:18082/v1
 QWEN_MODEL_PATH=qwen
 ```
 
-The deployed metadata sidecar serves Gemma 4 E2B QAT Q4_0 behind the legacy `qwen` aliases, but metadata models are configurable. Strong-GPU installs can use a larger local/remote OpenAI-compatible text model by setting the metadata base URL/model in **Admin → Model Setup** or via `QWEN_LLAMACPP_BASE_URL` and `QWEN_MODEL_PATH`. This is separate from OCR: PaddleOCR-VL still needs a real PaddleOCR-VL endpoint, such as OpenVINO CPU, GPU/native, or remote. The OpenVINO gateway also exposes `/v1/ocr/batch`, which Dok OCR uses to process rendered PaddleOCR-VL PDF pages in chunks of up to four without loading multiple model copies. The internal gateway hides routing details, normalizes OCR output, applies deterministic decode settings, and keeps model service details out of the normal user flow.
+The deployed CPU metadata sidecar serves Gemma 4 E2B QAT Q4_0 through ik_llama.cpp behind the legacy `qwen` aliases, but metadata models are configurable. Strong-GPU installs can use a larger local/remote OpenAI-compatible text model by setting the metadata base URL/model in **Admin → Model Setup** or via `QWEN_LLAMACPP_BASE_URL` and `QWEN_MODEL_PATH`. This is separate from OCR: PaddleOCR-VL still needs a real PaddleOCR-VL endpoint, such as OpenVINO CPU, GPU/native, or remote. The OpenVINO gateway also exposes `/v1/ocr/batch`, which Dok OCR uses to process rendered PaddleOCR-VL PDF pages in chunks of up to four without loading multiple model copies. The internal gateway hides routing details, normalizes OCR output, applies deterministic decode settings, and keeps model service details out of the normal user flow.
 
 ---
 
@@ -293,7 +297,7 @@ Still environment-dependent:
 
 - smart model weights and reliable download URLs.
 - external PaddleOCR-VL endpoint setup: OpenVINO CPU, GPU/native/remote, or legacy GGUF.
-- optional metadata model choice: tested Gemma E2B QAT Q4 sidecar, larger GPU-hosted text models, or remote OpenAI-compatible models.
+- optional metadata model choice: tested CPU ik_llama.cpp + Gemma E2B QAT Q4 sidecar, larger GPU-hosted text models, or remote OpenAI-compatible models.
 - GPU/CPU performance of external model endpoints.
 - HTTPS/reverse proxy and backup policy.
 

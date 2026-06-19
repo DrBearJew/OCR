@@ -106,7 +106,7 @@ Choose a mode before configuring `.env` or the Admin model setup page.
 | Smart document OCR | `paddle_vl` | Strict PaddleOCR-VL via any real PaddleOCR-VL-compatible endpoint. OpenVINO is the tested CPU gateway; GPU/native/remote endpoints are valid. Best default for rich documents/diagrams. |
 | GLM OCR | `glm` | GLM multimodal OCR through a compatible endpoint. Kept as a selectable OCR provider. |
 
-Gemma/Qwen metadata refinement is separate from OCR. It is optional text reasoning for metadata candidates, search hints, tags/folders, and summaries; it does not replace the PaddleOCR-VL endpoint. The bundled Gemma E2B QAT Q4 sidecar is a tested low-RAM default, but larger GPU-hosted or remote OpenAI-compatible text models can be configured instead.
+Gemma/Qwen metadata refinement is separate from OCR. It is optional text reasoning for metadata candidates, search hints, tags/folders, and summaries; it does not replace the PaddleOCR-VL endpoint. Runtime choices are configurable: CPU/low-RAM installs can use the bundled `deploy/qwen-ik-router/` ik_llama.cpp + Gemma E2B QAT Q4 sidecar, strong-GPU installs can use a larger local text model, and remote OpenAI-compatible text models can be configured instead.
 
 ---
 
@@ -227,8 +227,8 @@ GLM_MODEL_PATH=/llm-models/glm.gguf
 GLM_MMPROJ_PATH=/llm-models/glm-mmproj.gguf
 
 # Optional metadata refinement endpoint.
-# The deployed low-RAM default serves Gemma 4 E2B QAT Q4_0 behind legacy qwen aliases.
-# Strong-GPU installs can point this at a larger local/remote OpenAI-compatible text model.
+# CPU/low-RAM default: ik_llama.cpp sidecar serving Gemma 4 E2B QAT Q4_0 behind legacy qwen aliases.
+# Strong-GPU or remote installs can point this at a larger OpenAI-compatible text model instead.
 QWEN_LLAMACPP_BASE_URL=http://smart-proxy:8081/v1
 QWEN_MODEL_PATH=qwen
 LLM_METADATA_REFINEMENT_ENABLED=false
