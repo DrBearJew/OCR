@@ -13,6 +13,9 @@ logging.basicConfig(level=logging.INFO)
 
 LLAMA_URL = os.getenv("LLAMA_URL", "http://172.18.0.1:1234/v1")
 LLAMA_ADMIN = os.getenv("LLAMA_ADMIN", "http://172.18.0.1:1234")
+QWEN_URL = os.getenv("QWEN_URL", LLAMA_URL)
+QWEN_ADMIN = os.getenv("QWEN_ADMIN", LLAMA_ADMIN)
+QWEN_MODEL_IDS = {item.strip().lower() for item in os.getenv("QWEN_MODEL_IDS", "qwen,qwen-mtp,qwen3.5-2b").split(",") if item.strip()}
 
 IDLE_UNLOAD_SECONDS = int(os.getenv("IDLE_UNLOAD_SECONDS", "180"))
 UNLOAD_AFTER_REQUEST = os.getenv("UNLOAD_AFTER_REQUEST", "1").strip().lower() not in {"0", "false", "no"}
@@ -698,9 +701,23 @@ def apply_title_rule_postprocessing(raw_title: str, original_prompt: str) -> str
 
 
 
+def admin_url_for_model(model_name: str) -> str:
+    return LLAMA_ADMIN if is_ocr_model(model_name) else QWEN_ADMIN
+
+
+def upstream_url_for_model(model_name: str) -> str:
+    return LLAMA_URL if is_ocr_model(model_name) else QWEN_URL
+
+
+def is_qwen_model_listing(item: dict) -> bool:
+    model_id = str(item.get("id") or "").strip().lower()
+    aliases = {str(alias).strip().lower() for alias in (item.get("aliases") or []) if str(alias).strip()}
+    return bool(QWEN_MODEL_IDS.intersection({model_id, *aliases}))
+
+
 def model_status(model_name: str) -> str | None:
     try:
-        resp = requests.get(f"{LLAMA_ADMIN}/models", timeout=5)
+        resp = requests.get(f"{admin_url_for_model(model_name)}/models", timeout=5)
         if resp.status_code >= 300:
             return None
         for item in (resp.json().get("data") or []):
@@ -731,7 +748,7 @@ def unload_model(model_name: str, *, wait: bool = True) -> bool:
 
     try:
         resp = requests.post(
-            f"{LLAMA_ADMIN}/models/unload",
+            f"{admin_url_for_model(model_name)}/models/unload",
             json={"model": model_name},
             timeout=10,
         )
@@ -784,8 +801,21 @@ def idle_unload_worker():
 @app.route("/v1/models", methods=["GET"])
 def proxy_models():
     try:
-        resp = requests.get(f"{LLAMA_ADMIN}/models", timeout=30)
-        return jsonify(resp.json()), resp.status_code
+        admin_urls = []
+        for url in (LLAMA_ADMIN, QWEN_ADMIN):
+            if url not in admin_urls:
+                admin_urls.append(url)
+        merged = {"object": "list", "data": []}
+        status_code = 200
+        for url in admin_urls:
+            resp = requests.get(f"{url}/models", timeout=30)
+            status_code = max(status_code, resp.status_code)
+            if resp.status_code < 300:
+                for item in (resp.json().get("data") or []):
+                    if url == LLAMA_ADMIN and QWEN_ADMIN != LLAMA_ADMIN and is_qwen_model_listing(item):
+                        continue
+                    merged["data"].append(item)
+        return jsonify(merged), status_code
     except Exception as e:
         logging.error(f"/v1/models proxy error: {e}")
         return jsonify({"error": str(e)}), 503
@@ -860,8 +890,9 @@ def smart_router():
             data, rewrite_ctx = maybe_rewrite_qwen_messages(data)
 
         upstream_timeout = min(float(data.get("timeout", 300) or 300), float(os.getenv("LLAMA_UPSTREAM_TIMEOUT_SECONDS", "300")))
+        upstream_url = upstream_url_for_model(requested_model)
         resp = requests.post(
-            f"{LLAMA_URL}/chat/completions",
+            f"{upstream_url}/chat/completions",
             json=data,
             timeout=upstream_timeout,
         )

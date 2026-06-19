@@ -1,0 +1,28 @@
+[Unit]
+Description=Dok OCR Qwen ik_llama.cpp sidecar
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/ocr
+Environment=QWEN_IK_PUBLIC_HOST=172.18.0.1
+Environment=QWEN_IK_PUBLIC_PORT=18082
+Environment=QWEN_IK_CHILD_HOST=127.0.0.1
+Environment=QWEN_IK_CHILD_PORT=18083
+Environment=QWEN_IK_BINARY=/root/ik_llama.cpp/build/bin/llama-server
+Environment=QWEN_IK_MODEL=/root/llm-models/qwen-mtp/Qwen3.5-2B-Q8_0.gguf
+Environment=QWEN_IK_MODEL_ID=qwen-mtp
+Environment=QWEN_IK_ALIASES=qwen-mtp,qwen3.5-2b
+Environment=QWEN_IK_CHAT_TEMPLATE_FILE=/root/llm-models/templates/qwen3.6_merged_template.jinja
+Environment=QWEN_IK_SPEC_TYPE=mtp:n_max=1,p_min=0.0
+Environment=QWEN_IK_CACHE_RAM=0
+ExecStart=/usr/bin/python3 /opt/ocr/deploy/qwen-ik-router/qwen_ik_router.py
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
