@@ -150,6 +150,9 @@ class GLMLlamaCppOCRProvider:
                 f"configured model '{self.settings.glm_model_name}' is not in /v1/models ({', '.join(model_ids)})"
             )
 
+    def unload_model(self) -> bool:
+        return unload_remote_model(self.settings.glm_llamacpp_base_url, self.settings.glm_model_name)
+
 
 class PaddleVLLlamaCppOCRProvider:
     """PaddleOCR-VL adapter for llama.cpp OpenAI-compatible multimodal server."""
@@ -329,6 +332,9 @@ class PaddleVLLlamaCppOCRProvider:
                 "PaddleOCR-VL model configuration error: "
                 f"configured model '{self.settings.paddle_vl_model_name}' is not in /v1/models ({', '.join(model_ids)})"
             )
+
+    def unload_model(self) -> bool:
+        return unload_remote_model(self.settings.paddle_vl_llamacpp_base_url, self.settings.paddle_vl_model_name)
 
 
 def _format_diagram_ocr_markdown_if_needed(text: str) -> str:
@@ -730,6 +736,35 @@ def llama_health_urls(base_url: str) -> list[str]:
 def llama_models_url(base_url: str) -> str:
     base = base_url.rstrip("/")
     return f"{base}/models" if base.endswith("/v1") else f"{base}/v1/models"
+
+
+def model_admin_base_url(base_url: str) -> str:
+    base = base_url.rstrip("/")
+    return base[:-3] if base.endswith("/v1") else base
+
+
+def unload_remote_model(base_url: str, model_name: str, *, timeout_s: float = 10.0) -> bool:
+    model_name = (model_name or "").strip()
+    if not model_name:
+        return False
+    root = model_admin_base_url(base_url)
+    candidates = (
+        f"{root}/models/unload",
+        f"{root}/v1/unload",
+        f"{root}/unload",
+    )
+    for url in candidates:
+        try:
+            response = httpx.post(url, json={"model": model_name}, timeout=timeout_s)
+            if response.status_code < 300:
+                logger.info("Requested OCR model unload model=%s url=%s", model_name, url)
+                return True
+            if response.status_code in {404, 405}:
+                continue
+            logger.warning("OCR model unload failed model=%s url=%s status=%s body=%s", model_name, url, response.status_code, response.text[:300])
+        except httpx.HTTPError as exc:
+            logger.warning("OCR model unload request failed model=%s url=%s error=%s", model_name, url, exc)
+    return False
 
 
 def list_llama_model_ids(base_url: str, *, timeout_s: float = 5.0) -> list[str]:

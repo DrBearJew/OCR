@@ -14,7 +14,8 @@ logging.basicConfig(level=logging.INFO)
 LLAMA_URL = os.getenv("LLAMA_URL", "http://172.18.0.1:1234/v1")
 LLAMA_ADMIN = os.getenv("LLAMA_ADMIN", "http://172.18.0.1:1234")
 
-IDLE_UNLOAD_SECONDS = 180
+IDLE_UNLOAD_SECONDS = int(os.getenv("IDLE_UNLOAD_SECONDS", "180"))
+UNLOAD_AFTER_REQUEST = os.getenv("UNLOAD_AFTER_REQUEST", "1").strip().lower() not in {"0", "false", "no"}
 
 last_request_time = time.time()
 last_models_used = set()
@@ -698,27 +699,34 @@ def apply_title_rule_postprocessing(raw_title: str, original_prompt: str) -> str
 
 
 def unload_model(model_name: str) -> bool:
-    candidates = [
-        f"{LLAMA_ADMIN}/models/{model_name}/unload",
-        f"{LLAMA_ADMIN}/models/unload",
-    ]
+    model_name = (model_name or "").strip()
+    if not model_name or model_name == "unknown":
+        return False
 
-    for url in candidates:
-        try:
-            if url.endswith("/models/unload"):
-                resp = requests.post(url, json={"model": model_name}, timeout=10)
-            else:
-                resp = requests.post(url, timeout=10)
+    try:
+        resp = requests.post(
+            f"{LLAMA_ADMIN}/models/unload",
+            json={"model": model_name},
+            timeout=10,
+        )
 
-            if 200 <= resp.status_code < 300:
-                logging.info(f"Unloaded model '{model_name}' via {url}")
-                return True
+        if 200 <= resp.status_code < 300:
+            logging.info(f"Unload requested for model '{model_name}' via /models/unload")
+            return True
 
-            logging.info(f"Unload attempt for '{model_name}' via {url} returned {resp.status_code}")
-        except Exception as e:
-            logging.warning(f"Unload attempt failed for '{model_name}' via {url}: {e}")
+        logging.info(f"Unload attempt for '{model_name}' returned {resp.status_code}: {resp.text[:300]}")
+    except Exception as e:
+        logging.warning(f"Unload attempt failed for '{model_name}': {e}")
 
     return False
+
+
+def unload_model_async(model_name: str, reason: str) -> None:
+    def _run() -> None:
+        logging.info(f"Attempting unload of model '{model_name}' ({reason})")
+        unload_model(model_name)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def idle_unload_worker():
@@ -759,6 +767,18 @@ def proxy_models():
     except Exception as e:
         logging.error(f"/v1/models proxy error: {e}")
         return jsonify({"error": str(e)}), 503
+
+
+@app.route("/models/unload", methods=["POST"])
+@app.route("/v1/unload", methods=["POST"])
+@app.route("/unload", methods=["POST"])
+def proxy_unload_model():
+    payload = request.get_json(silent=True) or {}
+    model_name = str(payload.get("model") or payload.get("model_id") or "").strip()
+    if not model_name:
+        return jsonify({"success": False, "error": "model is required"}), 400
+    ok = unload_model(model_name)
+    return jsonify({"success": ok, "model": model_name}), 200 if ok else 502
 
 
 @app.route("/v1/chat/completions", methods=["POST"])
@@ -885,6 +905,11 @@ def smart_router():
             last_request_time = time.time()
             remaining = active_requests
         logging.info(f"Request finished for model: {requested_model}; active_requests={remaining}")
+        # Metadata/Qwen requests can be unloaded as soon as the response is done.
+        # OCR models are unloaded by the backend after the full document/page job,
+        # not by the proxy after an individual page or batch chunk.
+        if UNLOAD_AFTER_REQUEST and remaining == 0 and not is_ocr_model(requested_model):
+            unload_model_async(requested_model, "metadata request complete")
 
 
 if __name__ == "__main__":

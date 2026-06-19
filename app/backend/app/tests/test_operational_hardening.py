@@ -713,13 +713,21 @@ def test_pdf_ocr_with_paddlevl_renders_pages_and_calls_provider(db_session: Sess
     calls: list[str] = []
 
     class PaddleOnlyProvider:
+        unload_calls = 0
+
         def extract_text(self, file_path: str) -> OCRResult:
             calls.append(file_path)
             return OCRResult(text=f"paddlevl:{Path(file_path).stem}", raw_response={"provider": "paddle_vl", "file": file_path}, model_role="paddleocr_vl")
 
-    run_ocr_for_document(db_session, doc.id, PaddleOnlyProvider(), enqueue_metadata=False)
+        def unload_model(self) -> bool:
+            self.unload_calls += 1
+            return True
+
+    provider = PaddleOnlyProvider()
+    run_ocr_for_document(db_session, doc.id, provider, enqueue_metadata=False)
     db_session.refresh(doc)
     assert calls == [str(page1), str(page2)]
+    assert provider.unload_calls == 1
     assert doc.ocr_text == "paddlevl:page1paddlevl:page2"
     assert doc.raw_ocr_json["source"] == "pdf_page_rendering"
     assert doc.raw_ocr_json["provider"] == "paddle_vl"

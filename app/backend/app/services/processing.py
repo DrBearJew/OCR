@@ -931,10 +931,13 @@ def run_ocr_for_document(
             else nullcontext()
         )
         with gateway_lock:
-            if _is_pdf_document(document):
-                result = _extract_pdf_pages(provider, document, config)
-            else:
-                result = provider.extract_text(document.storage_path)
+            try:
+                if _is_pdf_document(document):
+                    result = _extract_pdf_pages(provider, document, config)
+                else:
+                    result = provider.extract_text(document.storage_path)
+            finally:
+                _unload_ocr_provider_after_document(provider, config, document)
         document.ocr_text = result.text
         document.raw_ocr_json = result.raw_response
         _write_page_fragments(db, document, result.text, result.raw_response)
@@ -994,6 +997,26 @@ def _is_pdf_document(document: Document) -> bool:
 
 def _ocr_uses_shared_model_gateway(config: Any) -> bool:
     return str(getattr(config, "ocr_engine", "")).strip() in {"paddle_vl", "glm"}
+
+
+def _unload_ocr_provider_after_document(provider: OCRProvider, config: Any, document: Document) -> None:
+    unload = getattr(provider, "unload_model", None)
+    if not callable(unload):
+        return
+    try:
+        if unload():
+            logger.info(
+                "OCR model unload requested after document job document_id=%s engine=%s",
+                document.id,
+                getattr(config, "ocr_engine", None),
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "OCR model unload failed after document job document_id=%s engine=%s error=%s",
+            document.id,
+            getattr(config, "ocr_engine", None),
+            exc,
+        )
 
 
 def _extract_pdf_pages(provider: OCRProvider, document: Document, config: Any):

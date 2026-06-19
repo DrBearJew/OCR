@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import gc
 import io
 import json
 import logging
@@ -17,7 +18,7 @@ from urllib.parse import urlparse
 from PIL import Image
 import openvino as ov
 
-ROOT = Path(os.getenv("PADDLE_OV_ROOT", "/opt/paddleocr-vl-openvino"))
+ROOT = Path(os.getenv("PADDLE_OV_ROOT", "/opt/paddleocr-vl-openvino-bench"))
 UPSTREAM_DIR = ROOT / "paddleocr_vl_ov_add_layout"
 LEGACY_CODE_DIR = ROOT / "paddleocr_vl_ov"
 if UPSTREAM_DIR.exists():
@@ -36,6 +37,7 @@ HOST = os.getenv("PADDLE_OV_HOST", "0.0.0.0")
 PORT = int(os.getenv("PADDLE_OV_PORT", "8091"))
 MAX_NEW_TOKENS = int(os.getenv("PADDLE_OV_MAX_NEW_TOKENS", "1024"))
 MAX_BATCH_SIZE = int(os.getenv("PADDLE_OV_MAX_BATCH_SIZE", "4"))
+PRELOAD_MODEL = os.getenv("PADDLE_OV_PRELOAD", "0").strip().lower() in {"1", "true", "yes"}
 IMAGE_WIDTH = int(os.getenv("PADDLE_OV_IMAGE_WIDTH", "1200"))
 IMAGE_HEIGHT = int(os.getenv("PADDLE_OV_IMAGE_HEIGHT", "800"))
 
@@ -46,6 +48,8 @@ _model_lock = threading.Lock()
 
 def _load_model() -> None:
     global _model, _generation_config
+    if _model is not None:
+        return
     start = time.perf_counter()
     core = ov.Core()
     _model = OVPaddleOCRVLForCausalLM(
@@ -75,6 +79,22 @@ def _load_model() -> None:
     )
 
 
+def _ensure_model_loaded() -> None:
+    if _model is None:
+        _load_model()
+
+
+def _unload_model() -> bool:
+    global _model, _generation_config
+    if _model is None:
+        return False
+    _model = None
+    _generation_config = None
+    gc.collect()
+    LOG.info("Unloaded PaddleOCR-VL OpenVINO model")
+    return True
+
+
 def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
@@ -86,6 +106,8 @@ def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict) 
 
 def _read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     length = int(handler.headers.get("Content-Length") or "0")
+    if length <= 0:
+        return {}
     return json.loads(handler.rfile.read(length).decode("utf-8"))
 
 
@@ -224,7 +246,8 @@ class Handler(BaseHTTPRequestHandler):
                     "model": MODEL_ID,
                     "engine": "paddleocr-vl-openvino",
                     "openvino": ov.get_version(),
-                    "batch_generate": bool(hasattr(_model, "batch_generate")),
+                    "loaded": _model is not None,
+                    "batch_generate": bool(_model is not None and hasattr(_model, "batch_generate")),
                     "max_batch_size": MAX_BATCH_SIZE,
                 },
             )
@@ -238,11 +261,17 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             payload = _read_json(self)
-            generation_config = _generation_config_for(payload)
+            if path in {"/models/unload", "/v1/unload", "/unload"}:
+                with _model_lock:
+                    unloaded = _unload_model()
+                _json_response(self, 200, {"success": True, "unloaded": unloaded, "model": MODEL_ID})
+                return
             if path == "/v1/chat/completions":
                 prompt, image = _extract_text_and_image(payload)
                 start = time.perf_counter()
                 with _model_lock:
+                    _ensure_model_loaded()
+                    generation_config = _generation_config_for(payload)
                     response_text, stats = _run_single(prompt, image, generation_config)
                 elapsed = time.perf_counter() - start
                 LOG.info("OCR completed chars=%s seconds=%.2f", len(response_text or ""), elapsed)
@@ -266,6 +295,8 @@ class Handler(BaseHTTPRequestHandler):
                 early_stop_ratio = float(payload.get("early_stop_ratio") or 0.0)
                 start = time.perf_counter()
                 with _model_lock:
+                    _ensure_model_loaded()
+                    generation_config = _generation_config_for(payload)
                     pages, timings = _run_batch(prompt, images, generation_config, early_stop_ratio)
                 elapsed = time.perf_counter() - start
                 timings["wall_seconds"] = elapsed
@@ -292,7 +323,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    _load_model()
+    if PRELOAD_MODEL:
+        with _model_lock:
+            _ensure_model_loaded()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     LOG.info("Serving PaddleOCR-VL OpenVINO on %s:%s", HOST, PORT)
     server.serve_forever()
