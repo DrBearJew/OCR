@@ -16,7 +16,9 @@ from app.services.prompt_loader import PromptLoader, RenderedPrompt
 
 logger = logging.getLogger(__name__)
 
-QWEN_METADATA_MAX_TOKENS = 1024
+QWEN_METADATA_BASE_MAX_TOKENS = 1024
+QWEN_METADATA_PER_CUSTOM_FIELD_TOKENS = 96
+QWEN_METADATA_MAX_TOKENS = 4096
 
 
 QWEN_THINKING_DISABLED_SYSTEM_PROMPT = (
@@ -96,7 +98,8 @@ class QwenLlamaCppProvider:
                 "OcrText": payload.get("ocr_text", ""),
             },
         )
-        return self._chat(prompt, role_name="metadata candidates", json_only=True)
+        max_tokens = qwen_metadata_max_tokens_for_payload(payload, settings_max_tokens=int(self.settings.llm_max_tokens))
+        return self._chat(prompt, role_name="metadata candidates", json_only=True, max_tokens=max_tokens)
 
     def extract_correspondent(self, payload: dict[str, Any]) -> QwenRefinement:
         prompt = self.prompt_loader.render(
@@ -157,7 +160,7 @@ class QwenLlamaCppProvider:
         )
         return self._chat(prompt, role_name="secondbrain enrichment")
 
-    def _chat(self, prompt: RenderedPrompt, *, role_name: str, json_only: bool = False) -> QwenRefinement:
+    def _chat(self, prompt: RenderedPrompt, *, role_name: str, json_only: bool = False, max_tokens: int | None = None) -> QwenRefinement:
         body = {
             "model": self.settings.qwen_model_name,
             "messages": [
@@ -165,7 +168,7 @@ class QwenLlamaCppProvider:
                 {"role": "user", "content": prompt.text},
             ],
             "temperature": self.settings.llm_temperature,
-            "max_tokens": min(int(self.settings.llm_max_tokens), QWEN_METADATA_MAX_TOKENS),
+            "max_tokens": max_tokens or min(int(self.settings.llm_max_tokens), QWEN_METADATA_BASE_MAX_TOKENS),
         }
         if json_only:
             body["response_format"] = {"type": "json_object"}
@@ -230,6 +233,20 @@ class QwenLlamaCppProvider:
         )
         response.raise_for_status()
         return response.json()
+
+
+def qwen_metadata_max_tokens_for_payload(payload: dict[str, Any], *, settings_max_tokens: int) -> int:
+    custom_field_count = _custom_field_count(payload.get("custom_fields"))
+    requested = QWEN_METADATA_BASE_MAX_TOKENS + (custom_field_count * QWEN_METADATA_PER_CUSTOM_FIELD_TOKENS)
+    return max(1, min(int(settings_max_tokens), QWEN_METADATA_MAX_TOKENS, requested))
+
+
+def _custom_field_count(value: Any) -> int:
+    if isinstance(value, list):
+        return len(value)
+    if isinstance(value, dict):
+        return len(value)
+    return 0
 
 
 class DisabledQwenProvider:

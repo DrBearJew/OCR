@@ -854,7 +854,7 @@ def smart_router():
             # Qwen metadata responses are compact JSON. Keep CPU-only inference
             # bounded; large output limits caused long-running requests to outlive
             # the caller and accumulate in llama.cpp.
-            data["max_tokens"] = min(int(data.get("max_tokens", 1024)), 1024)
+            data["max_tokens"] = min(int(data.get("max_tokens", 1024)), int(os.getenv("QWEN_METADATA_MAX_TOKENS", "4096")))
             data["stop"] = ["```"]
 
             data, rewrite_ctx = maybe_rewrite_qwen_messages(data)

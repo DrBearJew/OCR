@@ -10,7 +10,7 @@ from app.config import Settings
 from app.models import Batch, Document, DocumentState, StageState
 from app.services.extraction import ExtractionInput, extract_belege_title
 from app.services.integrations import collect_integrations
-from app.services.llm_qwen import QwenLlamaCppProvider, QwenProviderError, QwenRefinement
+from app.services.llm_qwen import QWEN_METADATA_MAX_TOKENS, QwenLlamaCppProvider, QwenProviderError, QwenRefinement, qwen_metadata_max_tokens_for_payload
 from app.services.ocr_glm import GLMLlamaCppOCRProvider, OCRProviderError, PaddleVLLlamaCppOCRProvider, PPOCRv6Provider, _compact_repeated_ocr_lines, _format_diagram_ocr_markdown_if_needed, build_ocr_provider
 from app.services.processing import run_metadata_for_document
 from app.services.prompt_loader import PromptLoader
@@ -229,6 +229,15 @@ def test_qwen_metadata_candidate_adapter_requests_json_mode(monkeypatch) -> None
 
     assert result.raw_text == '{"summary":"ok"}'
     assert captured["json"]["response_format"] == {"type": "json_object"}
+    assert captured["json"]["max_tokens"] == 1024
+
+
+def test_qwen_metadata_candidate_budget_scales_with_custom_fields() -> None:
+    assert QWEN_METADATA_MAX_TOKENS == 4096
+    assert qwen_metadata_max_tokens_for_payload({"custom_fields": []}, settings_max_tokens=4096) == 1024
+    assert qwen_metadata_max_tokens_for_payload({"custom_fields": [{"slug": "a"}, {"slug": "b"}, {"slug": "c"}]}, settings_max_tokens=4096) == 1312
+    assert qwen_metadata_max_tokens_for_payload({"custom_fields": [{"slug": str(i)} for i in range(100)]}, settings_max_tokens=4096) == 4096
+    assert qwen_metadata_max_tokens_for_payload({"custom_fields": [{"slug": str(i)} for i in range(100)]}, settings_max_tokens=2048) == 2048
 
 
 def test_qwen_json_mode_fallback_failure_is_provider_error() -> None:
@@ -277,8 +286,8 @@ def test_qwen_metadata_brain_prompt_requires_structured_candidates() -> None:
             "OcrText": "Rechnung",
         },
     )
-    assert "strict JSON" in rendered.text or "valid compact JSON only" in rendered.text
-    assert '"correspondent"' in rendered.text
+    assert "valid MINIFIED JSON object" in rendered.text
+    assert '"sender"' in rendered.text
     assert '"custom_fields"' in rendered.text
     assert "Deterministic extraction is a candidate source, not automatic truth" in rendered.text
 

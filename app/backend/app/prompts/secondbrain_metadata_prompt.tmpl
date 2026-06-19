@@ -34,8 +34,8 @@ Processing options:
 OCR text:
 {{ OcrText }}
 
-Return one valid MINIFIED JSON object only. Keep it under 700 output tokens.
-Put high-confidence core metadata first. Omit unknown optional keys instead of filling long empty structures.
+Return one valid MINIFIED JSON object only. Keep it compact, but include required/custom schema values when grounded.
+Put high-confidence core metadata first. Omit unknown optional keys and unknown optional custom fields instead of filling empty structures.
 Evidence strings must be short OCR quotes, max 80 characters. No markdown, no prose.
 
 Required compact shape:
