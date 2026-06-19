@@ -885,7 +885,11 @@ def smart_router():
             # bounded; large output limits caused long-running requests to outlive
             # the caller and accumulate in llama.cpp.
             data["max_tokens"] = min(int(data.get("max_tokens", 1024)), int(os.getenv("QWEN_METADATA_MAX_TOKENS", "4096")))
-            data["stop"] = ["```"]
+            # Do not force a Markdown-fence stop sequence. Gemma4 may begin JSON
+            # answers with ```json when response_format is absent; stopping on
+            # the opening fence yields an empty metadata response. Fence wrappers
+            # are stripped after generation instead.
+            data.pop("stop", None)
 
             data, rewrite_ctx = maybe_rewrite_qwen_messages(data)
 

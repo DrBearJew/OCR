@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import signal
+import shlex
 import subprocess
 import threading
 import time
@@ -23,21 +24,22 @@ CHILD_HOST = os.getenv("QWEN_IK_CHILD_HOST", "127.0.0.1")
 CHILD_PORT = int(os.getenv("QWEN_IK_CHILD_PORT", "18083"))
 CHILD_URL = f"http://{CHILD_HOST}:{CHILD_PORT}"
 
-MODEL_ID = os.getenv("QWEN_IK_MODEL_ID", "qwen-mtp")
-ALIASES = [item.strip() for item in os.getenv("QWEN_IK_ALIASES", "qwen-mtp,qwen3.5-2b").split(",") if item.strip()]
+MODEL_ID = os.getenv("QWEN_IK_MODEL_ID", "gemma-4-e2b-it-q8")
+ALIASES = [item.strip() for item in os.getenv("QWEN_IK_ALIASES", "gemma-4-e2b-it-q8,gemma-e2b,qwen-mtp,qwen3.5-2b,qwen").split(",") if item.strip()]
 BINARY = os.getenv("QWEN_IK_BINARY", "/root/ik_llama.cpp/build/bin/llama-server")
-MODEL = os.getenv("QWEN_IK_MODEL", "/root/llm-models/qwen-mtp/Qwen3.5-2B-Q8_0.gguf")
-CHAT_TEMPLATE_FILE = os.getenv("QWEN_IK_CHAT_TEMPLATE_FILE", "/root/llm-models/templates/qwen3.6_merged_template.jinja")
-SPEC_TYPE = os.getenv("QWEN_IK_SPEC_TYPE", "mtp:n_max=1,p_min=0.0").strip()
+MODEL = os.getenv("QWEN_IK_MODEL", "/root/llm-models/gemma-4-E2B-it/gemma-4-E2B-it-Q8_0.gguf")
+CHAT_TEMPLATE_FILE = os.getenv("QWEN_IK_CHAT_TEMPLATE_FILE", "/root/llm-models/gemma-4-E2B-it/google-gemma4-E2B-chat_template-main.jinja")
+SPEC_TYPE = os.getenv("QWEN_IK_SPEC_TYPE", "ngram-mod:n_max=64,n_min=2,ngram_size_n=8").strip()
 
 CTX_SIZE = os.getenv("QWEN_IK_CTX_SIZE", "4096")
-BATCH_SIZE = os.getenv("QWEN_IK_BATCH_SIZE", "512")
+BATCH_SIZE = os.getenv("QWEN_IK_BATCH_SIZE", "1024")
 UBATCH_SIZE = os.getenv("QWEN_IK_UBATCH_SIZE", "512")
 THREADS = os.getenv("QWEN_IK_THREADS", "4")
 THREADS_BATCH = os.getenv("QWEN_IK_THREADS_BATCH", THREADS)
 CACHE_TYPE_K = os.getenv("QWEN_IK_CACHE_TYPE_K", "q8_0")
 CACHE_TYPE_V = os.getenv("QWEN_IK_CACHE_TYPE_V", "q8_0")
 CACHE_RAM = os.getenv("QWEN_IK_CACHE_RAM", "0")
+RUN_TIME_REPACK = os.getenv("QWEN_IK_RUN_TIME_REPACK", "0").strip().lower() not in {"", "0", "false", "no", "off"}
 START_TIMEOUT_SECONDS = float(os.getenv("QWEN_IK_START_TIMEOUT_SECONDS", "90"))
 STOP_TIMEOUT_SECONDS = float(os.getenv("QWEN_IK_STOP_TIMEOUT_SECONDS", "20"))
 UPSTREAM_TIMEOUT_SECONDS = float(os.getenv("QWEN_IK_UPSTREAM_TIMEOUT_SECONDS", "360"))
@@ -91,15 +93,16 @@ def _build_cmd() -> list[str]:
         "--ctx-checkpoints", "0",
         "--ctx-checkpoints-interval", "0",
         "--no-warmup",
-        "--run-time-repack",
     ]
+    if RUN_TIME_REPACK:
+        cmd += ["--run-time-repack"]
     if CHAT_TEMPLATE_FILE:
         cmd += ["--chat-template-file", CHAT_TEMPLATE_FILE]
     if SPEC_TYPE:
         cmd += ["--spec-type", SPEC_TYPE]
     extra = os.getenv("QWEN_IK_EXTRA_ARGS", "").strip()
     if extra:
-        cmd += extra.split()
+        cmd += shlex.split(extra)
     return cmd
 
 
