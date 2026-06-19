@@ -189,13 +189,15 @@ def _qwen_prompt_ocr_text(text: str, *, max_chars: int = QWEN_OCR_TEXT_MAX_CHARS
     normalized = str(text or "").strip()
     if len(normalized) <= max_chars:
         return normalized
-    head_chars = int(max_chars * 0.7)
-    tail_chars = max_chars - head_chars
+    marker = "\n\n[... OCR text truncated for Qwen metadata prompt; middle omitted ...]\n\n"
+    available = max(1, max_chars - len(marker))
+    head_chars = int(available * 0.7)
+    tail_chars = available - head_chars
     return (
         normalized[:head_chars].rstrip()
-        + "\n\n[... OCR text truncated for Qwen metadata prompt; middle omitted ...]\n\n"
+        + marker
         + normalized[-tail_chars:].lstrip()
-    )
+    )[:max_chars]
 
 
 def qwen_debug_from_raw_metadata(
