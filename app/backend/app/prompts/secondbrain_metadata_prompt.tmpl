@@ -41,9 +41,14 @@ FINAL OUTPUT CONTRACT, HARD REQUIREMENTS:
 - Do not include hidden reasoning, analysis, or chain-of-thought in assistant message content.
 - Put high-confidence core metadata first. Omit unknown optional keys and unknown optional custom fields instead of filling empty structures.
 - Evidence strings must be short OCR quotes, max 80 characters.
+- Every core metadata field shown as an object in the required shape must stay an object with value, confidence, and evidence. Do not use scalar shortcuts.
 
 Required compact shape:
 {"sender":{"value":"","confidence":0.0,"evidence":""},"recipient":{"value":"","confidence":0.0,"evidence":""},"document_type":{"value":"","confidence":0.0,"evidence":""},"created_date":{"value":"YYYY-MM-DD","confidence":0.0,"evidence":""},"invoice_number":{"value":"","confidence":0.0,"evidence":""},"amount":{"value":0.0,"confidence":0.0,"evidence":""},"currency":{"value":"","confidence":0.0,"evidence":""},"payment_method":{"value":"","confidence":0.0,"evidence":""},"custom_fields":{},"suggested_title_base":{"value":"","confidence":0.0,"evidence":""},"search_keywords":[],"summary":"","uncertain_fields":[]}
+
+Shape rules:
+- Invalid scalar shortcuts: "amount":42.17, "currency":"EUR", "payment_method":null.
+- Valid object form: "amount":{"value":42.17,"confidence":0.95,"evidence":"Total 42,17 EUR"}, "currency":{"value":"EUR","confidence":0.95,"evidence":"Total 42,17 EUR"}.
 
 Normalization rules:
 - created_date.value and every date custom field must be ISO 8601 YYYY-MM-DD. Convert German/English date text when the OCR evidence is clear.
@@ -55,5 +60,5 @@ Normalization rules:
 - If a language field/custom field is requested, use ISO 639-1 lowercase such as de or en, never German/English/Deutsch/Englisch.
 - document_type.value should be concise lowercase English when clear, for example invoice, contract, receipt, letter.
 - If invoice number is absent, set invoice_number.value to "" and include "invoice_number" in uncertain_fields.
-- suggested_title_base should be the clean sender/customer name only, without invoice/date/amount.
+- suggested_title_base.value should be one clean party name only, usually the sender/customer; do not concatenate multiple parties and do not include invoice/date/amount.
 - search_keywords max 8 short strings; summary max 160 characters.

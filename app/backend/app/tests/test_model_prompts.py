@@ -297,6 +297,7 @@ def test_qwen_metadata_brain_prompt_requires_structured_candidates() -> None:
     assert "ISO 8601 YYYY-MM-DD" in rendered.text
     assert "ISO 639-1 lowercase" in rendered.text
     assert "amount.value must be a JSON number" in rendered.text
+    assert "Do not use scalar shortcuts" in rendered.text
     assert '"sender"' in rendered.text
     assert '"custom_fields"' in rendered.text
     assert "Deterministic extraction is a candidate source, not automatic truth" in rendered.text
