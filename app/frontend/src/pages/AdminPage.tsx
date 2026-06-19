@@ -25,10 +25,10 @@ const defaultModelForm: ModelFormState = {
 }
 
 const engineLabels: Record<string, { title: string; detail: string }> = {
-  paddle_vl: { title: 'PaddleOCR-VL', detail: 'Smart document parser, default for invoices and mixed layouts.' },
-  ppocrv6: { title: 'PP-OCRv6', detail: 'Fast/simple OCR through ONNX Runtime.' },
-  glm: { title: 'GLM OCR', detail: 'Legacy multimodal fallback.' },
-  fake: { title: 'Fake OCR', detail: 'Development/test stub only.' }
+  paddle_vl: { title: 'Primary OCR runtime', detail: 'Smart document OCR endpoint for rich layouts.' },
+  ppocrv6: { title: 'Local OCR runtime', detail: 'Fast local OCR for ordinary text documents.' },
+  glm: { title: 'Secondary OCR runtime', detail: 'Optional fallback multimodal OCR endpoint.' },
+  fake: { title: 'Demo OCR runtime', detail: 'Development/test stub only.' }
 }
 
 const INTERNAL_MODEL_GATEWAY_URL = 'http://smart-proxy:8081/v1'
@@ -448,7 +448,7 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
         <div className="admin-list technical-list">
           {integrations?.integrations.map((item) => (
             <div key={item.name} className="admin-row technical-row">
-              <strong>{item.name}</strong>
+              <strong>{translateIntegrationName(item.name, t)}</strong>
               <TechnicalPill state={item.ok ? 'ok' : 'down'} label={item.ok ? t('admin.up') : t('admin.down')} />
               <span>{translateIntegrationDetail(item.detail, t)}</span>
               <small>{item.latency_ms ?? ''}{item.latency_ms !== null ? ' ms' : ''}</small>
@@ -597,10 +597,11 @@ function providerLabel(provider: string, t: (key: string, fallback?: string) => 
 function EngineCard({ engine, item, note, title, detail }: { engine: string; item: IntegrationSummary['integrations'][number] | undefined; note?: string; title?: string; detail?: string }) {
   const { t } = useI18n()
   const meta = engineLabels[engine] || { title: title || engine, detail: detail || '' }
+  const translatedTitle = title || t(`admin.engineTitle.${engine}`, meta.title)
   const translatedDetail = detail || t(`admin.engineDetail.${engine}`, meta.detail)
   return (
     <article className="engine-card">
-      <div><strong>{title || meta.title}</strong><p>{translatedDetail}</p></div>
+      <div><strong>{translatedTitle}</strong><p>{translatedDetail}</p></div>
       <TechnicalPill state={item ? item.ok ? 'ok' : 'down' : 'info'} label={item ? item.ok ? t('admin.up') : t('admin.down') : t('admin.configuredStandalone')} />
       {item?.detail && <small>{translateIntegrationDetail(item.detail, t)}</small>}
       {note && <small>{note}</small>}
@@ -608,11 +609,17 @@ function EngineCard({ engine, item, note, title, detail }: { engine: string; ite
   )
 }
 
+function translateIntegrationName(name: string, t: (key: string, fallback?: string) => string) {
+  return t(`admin.integrationName.${name}`, name.replace(/_/g, ' '))
+}
+
 function translateIntegrationDetail(detail: string, t: (key: string, fallback?: string) => string) {
   if (detail === 'reachable') return t('admin.detailReachable')
   if (detail === 'workers reachable') return t('admin.detailWorkersReachable')
   if (detail === 'PaddleOCR-VL multimodal parser config looks usable') return t('admin.detailPaddleUsable')
   if (detail === 'multimodal OCR config looks usable') return t('admin.detailMultimodalUsable')
+  if (/Configured PaddleOCR-VL model .* not found in \/v1\/models/.test(detail)) return t('admin.detailPrimaryModelMissing')
+  if (/Configured GLM model .* not found in \/v1\/models/.test(detail)) return t('admin.detailSecondaryModelMissing')
   if (detail.startsWith('reachable via ')) return translateEndpointDetail(detail, t)
   return detail
 }
