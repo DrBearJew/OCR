@@ -616,10 +616,9 @@ function translateIntegrationName(name: string, t: (key: string, fallback?: stri
 function translateIntegrationDetail(detail: string, t: (key: string, fallback?: string) => string) {
   if (detail === 'reachable') return t('admin.detailReachable')
   if (detail === 'workers reachable') return t('admin.detailWorkersReachable')
-  if (detail === 'PaddleOCR-VL multimodal parser config looks usable') return t('admin.detailPaddleUsable')
+  if (detail.endsWith('multimodal parser config looks usable')) return t('admin.detailPaddleUsable')
   if (detail === 'multimodal OCR config looks usable') return t('admin.detailMultimodalUsable')
-  if (/Configured PaddleOCR-VL model .* not found in \/v1\/models/.test(detail)) return t('admin.detailPrimaryModelMissing')
-  if (/Configured GLM model .* not found in \/v1\/models/.test(detail)) return t('admin.detailSecondaryModelMissing')
+  if (/^Configured .* model .* not found in \/v1\/models$/.test(detail)) return t('admin.detailEndpointModelMissing')
   if (detail.startsWith('reachable via ')) return translateEndpointDetail(detail, t)
   return detail
 }
