@@ -229,15 +229,20 @@ def test_qwen_metadata_candidate_adapter_requests_json_mode(monkeypatch) -> None
 
     assert result.raw_text == '{"summary":"ok"}'
     assert captured["json"]["response_format"] == {"type": "json_object"}
-    assert captured["json"]["max_tokens"] == 1024
+    assert captured["json"]["max_tokens"] == 2048
+    assert "<|think_off|>" not in captured["json"]["messages"][0]["content"]
+    assert "private reasoning channel" in captured["json"]["messages"][0]["content"]
 
 
-def test_qwen_metadata_candidate_budget_scales_with_custom_fields() -> None:
+def test_qwen_metadata_candidate_budget_scales_with_custom_fields_and_ocr_length() -> None:
     assert QWEN_METADATA_MAX_TOKENS == 4096
-    assert qwen_metadata_max_tokens_for_payload({"custom_fields": []}, settings_max_tokens=4096) == 1024
-    assert qwen_metadata_max_tokens_for_payload({"custom_fields": [{"slug": "a"}, {"slug": "b"}, {"slug": "c"}]}, settings_max_tokens=4096) == 1312
-    assert qwen_metadata_max_tokens_for_payload({"custom_fields": [{"slug": str(i)} for i in range(100)]}, settings_max_tokens=4096) == 4096
-    assert qwen_metadata_max_tokens_for_payload({"custom_fields": [{"slug": str(i)} for i in range(100)]}, settings_max_tokens=2048) == 2048
+    assert qwen_metadata_max_tokens_for_payload({"custom_fields": []}, settings_max_tokens=4096) == 2048
+    assert qwen_metadata_max_tokens_for_payload({"custom_fields": [{"slug": "a"}, {"slug": "b"}, {"slug": "c"}]}, settings_max_tokens=4096) == 2336
+    assert qwen_metadata_max_tokens_for_payload({"ocr_text": "x" * 4000}, settings_max_tokens=4096) == 2048
+    assert qwen_metadata_max_tokens_for_payload({"ocr_text": "x" * 4001}, settings_max_tokens=4096) == 2560
+    assert qwen_metadata_max_tokens_for_payload({"ocr_text": "x" * 12000}, settings_max_tokens=4096) == 3072
+    assert qwen_metadata_max_tokens_for_payload({"custom_fields": [{"slug": str(i)} for i in range(100)], "ocr_text": "x" * 12000}, settings_max_tokens=4096) == 4096
+    assert qwen_metadata_max_tokens_for_payload({"custom_fields": [{"slug": str(i)} for i in range(100)], "ocr_text": "x" * 12000}, settings_max_tokens=2048) == 2048
 
 
 def test_qwen_json_mode_fallback_failure_is_provider_error() -> None:
@@ -286,7 +291,12 @@ def test_qwen_metadata_brain_prompt_requires_structured_candidates() -> None:
             "OcrText": "Rechnung",
         },
     )
+    assert "FINAL OUTPUT CONTRACT" in rendered.text
     assert "valid MINIFIED JSON object" in rendered.text
+    assert "Close the JSON object even for long documents" in rendered.text
+    assert "ISO 8601 YYYY-MM-DD" in rendered.text
+    assert "ISO 639-1 lowercase" in rendered.text
+    assert "amount.value must be a JSON number" in rendered.text
     assert '"sender"' in rendered.text
     assert '"custom_fields"' in rendered.text
     assert "Deterministic extraction is a candidate source, not automatic truth" in rendered.text

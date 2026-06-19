@@ -16,8 +16,11 @@ from app.services.prompt_loader import PromptLoader, RenderedPrompt
 
 logger = logging.getLogger(__name__)
 
-QWEN_METADATA_BASE_MAX_TOKENS = 1024
+QWEN_METADATA_BASE_MAX_TOKENS = 2048
 QWEN_METADATA_PER_CUSTOM_FIELD_TOKENS = 96
+QWEN_METADATA_OCR_TEXT_BASE_CHARS = 4_000
+QWEN_METADATA_OCR_TEXT_STEP_CHARS = 4_000
+QWEN_METADATA_PER_OCR_TEXT_STEP_TOKENS = 512
 QWEN_METADATA_MAX_TOKENS = 4096
 
 
@@ -25,6 +28,14 @@ QWEN_THINKING_DISABLED_SYSTEM_PROMPT = (
     "<|think_off|>\n"
     "You are a precise metadata extraction engine. Return only the requested final answer "
     "in assistant message content. Do not put output in reasoning_content."
+)
+
+
+QWEN_METADATA_THINKING_SYSTEM_PROMPT = (
+    "You are a precise metadata extraction engine. You may reason internally if the runtime "
+    "supports a private reasoning channel, but the final assistant message content must contain "
+    "only the requested final answer. Do not include reasoning, analysis, or chain-of-thought "
+    "in assistant message content."
 )
 
 
@@ -164,7 +175,7 @@ class QwenLlamaCppProvider:
         body = {
             "model": self.settings.qwen_model_name,
             "messages": [
-                {"role": "system", "content": QWEN_THINKING_DISABLED_SYSTEM_PROMPT},
+                {"role": "system", "content": self._system_prompt(json_only=json_only)},
                 {"role": "user", "content": prompt.text},
             ],
             "temperature": self.settings.llm_temperature,
@@ -225,6 +236,11 @@ class QwenLlamaCppProvider:
             model=self.settings.qwen_model_name,
         )
 
+    def _system_prompt(self, *, json_only: bool) -> str:
+        if json_only and self.settings.qwen_metadata_thinking_enabled:
+            return QWEN_METADATA_THINKING_SYSTEM_PROMPT
+        return QWEN_THINKING_DISABLED_SYSTEM_PROMPT
+
     def _post_chat(self, url: str, body: dict[str, Any]) -> dict[str, Any]:
         response = httpx.post(
             url,
@@ -237,8 +253,22 @@ class QwenLlamaCppProvider:
 
 def qwen_metadata_max_tokens_for_payload(payload: dict[str, Any], *, settings_max_tokens: int) -> int:
     custom_field_count = _custom_field_count(payload.get("custom_fields"))
-    requested = QWEN_METADATA_BASE_MAX_TOKENS + (custom_field_count * QWEN_METADATA_PER_CUSTOM_FIELD_TOKENS)
+    requested = (
+        QWEN_METADATA_BASE_MAX_TOKENS
+        + (custom_field_count * QWEN_METADATA_PER_CUSTOM_FIELD_TOKENS)
+        + _ocr_text_budget_tokens(payload.get("ocr_text"))
+    )
     return max(1, min(int(settings_max_tokens), QWEN_METADATA_MAX_TOKENS, requested))
+
+
+def _ocr_text_budget_tokens(value: Any) -> int:
+    if not isinstance(value, str):
+        return 0
+    extra_chars = max(0, len(value) - QWEN_METADATA_OCR_TEXT_BASE_CHARS)
+    if extra_chars <= 0:
+        return 0
+    steps = (extra_chars + QWEN_METADATA_OCR_TEXT_STEP_CHARS - 1) // QWEN_METADATA_OCR_TEXT_STEP_CHARS
+    return steps * QWEN_METADATA_PER_OCR_TEXT_STEP_TOKENS
 
 
 def _custom_field_count(value: Any) -> int:

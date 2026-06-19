@@ -91,6 +91,7 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 4096
     llm_temperature: float = 0.0
     llm_metadata_refinement_enabled: bool = False
+    qwen_metadata_thinking_enabled: bool = True
 
     ocr_max_pages_per_doc: int = 50
     ocr_image_dpi: int = 200
