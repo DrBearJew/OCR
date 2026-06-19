@@ -26,7 +26,7 @@ CORE_CANDIDATE_FIELDS = (
     "suggested_title_base",
 )
 
-QWEN_OCR_TEXT_MAX_CHARS = 12000
+QWEN_OCR_TEXT_MAX_CHARS = 96_000
 
 
 QWEN_PROMPT_OMIT_METADATA_KEYS = {
@@ -121,7 +121,7 @@ def build_qwen_metadata_payload(
     return {
         "collection_name": document.collection_name,
         "title": _qwen_prompt_title(document),
-        "ocr_text": _qwen_prompt_ocr_text(document.ocr_text or ""),
+        "ocr_text": _qwen_prompt_document_ocr_text(document),
         "collection_schema": {
             "name": collection.name if collection else document.collection_name,
             "slug": collection.slug if collection else "",
@@ -140,6 +140,49 @@ def build_qwen_metadata_payload(
         "similar_documents": find_similar_documents(db, document, deterministic_metadata),
         "processing_options": processing_options,
     }
+
+
+def _qwen_prompt_document_ocr_text(document: Document, *, max_chars: int = QWEN_OCR_TEXT_MAX_CHARS) -> str:
+    page_texts = [(page.page_number, page.ocr_text or "") for page in sorted(document.pages, key=lambda item: item.page_number) if page.ocr_text]
+    if page_texts:
+        return _qwen_prompt_page_ocr_text(page_texts, max_chars=max_chars)
+    return _qwen_prompt_ocr_text(document.ocr_text or "", max_chars=max_chars)
+
+
+def _qwen_prompt_page_ocr_text(page_texts: list[tuple[int, str]], *, max_chars: int = QWEN_OCR_TEXT_MAX_CHARS) -> str:
+    full = "\n\n".join(f"--- PAGE {page_number} ---\n{text.strip()}" for page_number, text in page_texts if text.strip()).strip()
+    if len(full) <= max_chars:
+        return full
+
+    page_count = len(page_texts)
+    header = (
+        f"[Dok OCR page-aware metadata input: {page_count} pages. "
+        "Each page may be excerpted; use page labels as evidence and do not infer omitted text.]"
+    )
+    overhead = len(header) + (page_count * 24)
+    per_page = max(240, (max_chars - overhead) // max(1, page_count))
+    fragments = [header]
+    for page_number, text in page_texts:
+        clean = text.strip()
+        if not clean:
+            continue
+        fragments.append(f"--- PAGE {page_number} ---\n{_page_excerpt(clean, per_page, page_number)}")
+    rendered = "\n\n".join(fragments).strip()
+    if len(rendered) <= max_chars:
+        return rendered
+    return _qwen_prompt_ocr_text(rendered, max_chars=max_chars)
+
+
+def _page_excerpt(text: str, max_chars: int, page_number: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    head_chars = max(80, int(max_chars * 0.6))
+    tail_chars = max(80, max_chars - head_chars)
+    return (
+        text[:head_chars].rstrip()
+        + f"\n[... page {page_number} middle omitted for metadata prompt ...]\n"
+        + text[-tail_chars:].lstrip()
+    )
 
 
 def _qwen_prompt_ocr_text(text: str, *, max_chars: int = QWEN_OCR_TEXT_MAX_CHARS) -> str:

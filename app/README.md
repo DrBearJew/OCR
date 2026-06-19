@@ -106,7 +106,7 @@ Choose a mode before configuring `.env` or the Admin model setup page.
 | Smart document OCR | `paddle_vl` | Strict PaddleOCR-VL via any real PaddleOCR-VL-compatible endpoint. OpenVINO is the tested CPU gateway; GPU/native/remote endpoints are valid. Best default for rich documents/diagrams. |
 | GLM OCR | `glm` | GLM multimodal OCR through a compatible endpoint. Kept as a selectable OCR provider. |
 
-Gemma/Qwen metadata refinement is separate from OCR. It is optional text reasoning for metadata candidates, search hints, tags/folders, and summaries; it does not replace the PaddleOCR-VL endpoint. Runtime choices are configurable: CPU/low-RAM installs can use the bundled `deploy/qwen-ik-router/` ik_llama.cpp + Gemma E2B QAT Q4 sidecar, strong-GPU installs can use a larger local text model, and remote OpenAI-compatible text models can be configured instead.
+Gemma/Qwen metadata refinement is separate from OCR. It is optional text reasoning for metadata candidates, search hints, tags/folders, and summaries; it does not replace the PaddleOCR-VL endpoint. Runtime choices are configurable: CPU/low-RAM installs can use the bundled `deploy/qwen-ik-router/` ik_llama.cpp + Gemma E2B QAT Q4 sidecar with 128k context, strong-GPU installs can use a larger local text model, and remote OpenAI-compatible text models can be configured instead. For long PDFs, metadata prompts use stored page OCR rows when available so the model sees ordered page snippets instead of only a naive head/tail excerpt.
 
 ---
 

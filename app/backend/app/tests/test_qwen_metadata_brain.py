@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models import Batch, CustomFieldDefinition, CustomFieldType, Document, DocumentState, FieldValueSource, ReviewState, StageState
+from app.models import Batch, CustomFieldDefinition, CustomFieldType, Document, DocumentPage, DocumentState, FieldValueSource, ReviewState, StageState
 from app.services.collections import create_record_for_upload, ensure_collection
 from app.services.llm_qwen import QwenProviderError, QwenRefinement, parse_json_suggestion
 from app.services.processing import run_metadata_for_document
@@ -151,7 +151,7 @@ def test_qwen_fills_real_metadata_fields_sources_evidence_and_custom_fields(db_s
 
 
 def test_qwen_payload_truncates_long_ocr_text_before_prompt(db_session: Session, tmp_path: Path) -> None:
-    long_text = "Header important sender\n" + ("middle filler " * 2000) + "\nTail important amount 42,00"
+    long_text = "Header important sender\n" + ("middle filler " * 10000) + "\nTail important amount 42,00"
     doc = make_record_document(db_session, tmp_path, long_text, "Eingangsrechnung")
     qwen = CandidateQwen("{}")
 
@@ -163,6 +163,26 @@ def test_qwen_payload_truncates_long_ocr_text_before_prompt(db_session: Session,
     assert "OCR text truncated for Qwen metadata prompt" in prompt_text
     assert prompt_text.startswith("Header important sender")
     assert prompt_text.endswith("Tail important amount 42,00")
+
+
+def test_qwen_payload_uses_page_aware_snippets_for_large_documents(db_session: Session, tmp_path: Path) -> None:
+    doc = make_record_document(db_session, tmp_path, "fallback full OCR", "Eingangsrechnung")
+    for page_number in range(1, 101):
+        page_text = f"Page {page_number} header sender marker\n" + (f"middle page {page_number} filler " * 80) + f"\nPage {page_number} tail amount marker"
+        db_session.add(DocumentPage(document_id=doc.id, page_number=page_number, ocr_text=page_text, raw_ocr_json={}))
+    db_session.commit()
+    qwen = CandidateQwen("{}")
+
+    run_metadata_for_document(db_session, doc.id, qwen_provider=qwen, qwen_enabled=True)
+
+    assert qwen.last_payload is not None
+    prompt_text = qwen.last_payload["ocr_text"]
+    assert "Dok OCR page-aware metadata input: 100 pages" in prompt_text
+    assert "--- PAGE 1 ---" in prompt_text
+    assert "--- PAGE 50 ---" in prompt_text
+    assert "--- PAGE 100 ---" in prompt_text
+    assert "page 50 middle omitted" in prompt_text
+    assert len(prompt_text) <= 96_000
 
 
 def test_qwen_preserves_manual_locked_values_and_records_invalid_json(db_session: Session, tmp_path: Path) -> None:
