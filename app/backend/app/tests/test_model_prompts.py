@@ -125,7 +125,7 @@ def test_paddle_vl_adapter_uses_prompt_and_mocked_llama_response(monkeypatch, tm
     assert captured["url"] == "http://smart-proxy:8081/v1/chat/completions"
     assert captured["json"]["model"] == "paddleocr-vl"
     assert captured["json"]["temperature"] == 0.0
-    assert captured["json"]["max_tokens"] == 512
+    assert captured["json"]["max_tokens"] == 2048
     assert captured["json"]["repeat_penalty"] == 1.18
     assert captured["json"]["repeat_last_n"] == 512
     assert captured["timeout"] == 11
