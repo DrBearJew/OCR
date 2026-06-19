@@ -809,18 +809,19 @@ def smart_router():
             logging.info(f"Qwen metadata routing to server: {requested_model}")
             data["temperature"] = 0.1
             data["top_p"] = 0.8
-            # Qwen metadata responses are structured JSON and routinely need more
-            # than 128 tokens. Preserve smaller caller-requested limits, but cap
-            # large requests to keep CPU-only inference bounded.
-            data["max_tokens"] = min(int(data.get("max_tokens", 1024)), 2048)
+            # Qwen metadata responses are compact JSON. Keep CPU-only inference
+            # bounded; large output limits caused long-running requests to outlive
+            # the caller and accumulate in llama.cpp.
+            data["max_tokens"] = min(int(data.get("max_tokens", 512)), 512)
             data["stop"] = ["```"]
 
             data, rewrite_ctx = maybe_rewrite_qwen_messages(data)
 
+        upstream_timeout = min(float(data.get("timeout", 300) or 300), float(os.getenv("LLAMA_UPSTREAM_TIMEOUT_SECONDS", "300")))
         resp = requests.post(
             f"{LLAMA_URL}/chat/completions",
             json=data,
-            timeout=1800,
+            timeout=upstream_timeout,
         )
 
         logging.info(f"Upstream status: {resp.status_code}")

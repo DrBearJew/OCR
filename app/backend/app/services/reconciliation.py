@@ -300,11 +300,13 @@ def metadata_quality_repair_reasons(document: Document) -> list[str]:
         return reasons
     metadata = document.metadata_json or {}
     refinement = metadata.get("qwen_refinement") if isinstance(metadata.get("qwen_refinement"), dict) else {}
+    qwen_error = str(refinement.get("error") or "")
+    qwen_transient_failure = _qwen_transient_failure_error(qwen_error)
     review_reason = str(document.review_reason or "")
     if document.review_state == ReviewState.needs_review and review_reason.startswith(METADATA_REPAIR_REVIEW_PREFIXES):
-        reasons.append("auto_review_reason")
-    error = str(refinement.get("error") or "")
-    if error and ("invalid metadata candidate JSON" in error or "invalid" in error.lower()):
+        if not qwen_transient_failure:
+            reasons.append("auto_review_reason")
+    if qwen_error and ("invalid metadata candidate JSON" in qwen_error or "invalid" in qwen_error.lower()):
         reasons.append("qwen_invalid_json")
     if _bad_metadata_party(document.extracted_sender):
         reasons.append("bad_sender_token")
@@ -317,8 +319,25 @@ def metadata_quality_repair_reasons(document: Document) -> list[str]:
         reasons.append("title_year_amount")
     warnings = metadata.get("review_warnings") if isinstance(metadata.get("review_warnings"), list) else []
     if any(str(item).startswith(METADATA_REPAIR_REVIEW_PREFIXES) for item in warnings):
-        reasons.append("auto_review_warning")
+        if not qwen_transient_failure:
+            reasons.append("auto_review_warning")
     return sorted(set(reasons))
+
+
+def _qwen_transient_failure_error(error: str) -> bool:
+    value = (error or "").lower()
+    return any(
+        marker in value
+        for marker in (
+            "timed out",
+            "timeout",
+            "read timed out",
+            "model gateway lock timeout",
+            "qwen request failed",
+            "http 503",
+            "503 service unavailable",
+        )
+    )
 
 
 def metadata_quality_needs_repair(document: Document) -> bool:

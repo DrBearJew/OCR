@@ -31,7 +31,7 @@ from app.services.processing import (
     run_metadata_for_document,
     run_ocr_for_document,
 )
-from app.services.reconciliation import reconcile_stuck_documents
+from app.services.reconciliation import reconcile_stuck_documents, metadata_quality_repair_reasons
 from app.services.search import search_documents
 from app.services.document_assets import inspect_page_count
 from app.services.storage import LocalStorage
@@ -338,6 +338,28 @@ def test_pdf_preview_page_renders_on_demand(db_session: Session, tmp_path: Path,
     assert page.rendered_image_path == str(response.path)
     config_module.get_settings.cache_clear()
 
+
+
+
+def test_reconciliation_does_not_requeue_stable_qwen_timeout_review(db_session: Session, tmp_path: Path) -> None:
+    doc = make_doc(db_session, tmp_path, "Telefonica Rechnung")
+    doc.ocr_text = "Telefonica Rechnung"
+    doc.ocr_state = StageState.done
+    doc.metadata_state = StageState.done
+    doc.processing_state = DocumentState.needs_review
+    doc.final_state = DocumentState.needs_review
+    doc.review_state = ReviewState.needs_review
+    doc.review_reason = "Fallback title or missing title segment used; Low confidence for title"
+    doc.extracted_title = "Telefonica_NA_19/06/2026_4,23"
+    doc.metadata_json = {
+        "qwen_refinement": {"ok": False, "error": "Qwen request failed: timed out"},
+        "review_warnings": ["Fallback title or missing title segment used", "Low confidence for title"],
+    }
+    db_session.commit()
+
+    assert metadata_quality_repair_reasons(doc) == []
+    result = reconcile_stuck_documents(db_session)
+    assert str(doc.id) not in result["details"]["document_ids"]
 
 def test_document_diagnostics_extraction_preview_and_reindex(db_session: Session, tmp_path: Path) -> None:
     text = "Demo GmbH\nRechnungsnummer PR400000005\nRechnungsdatum 12.10.2020\nEndsumme 205,25"

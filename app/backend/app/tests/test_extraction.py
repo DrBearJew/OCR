@@ -10,6 +10,7 @@ from app.services.extraction import (
     extract_invoice_number,
     normalize_amount,
     normalize_date,
+    normalize_filename_invoice_date,
 )
 
 
@@ -133,6 +134,50 @@ Gesamt
     assert result.amount == "26,49"
     assert result.title == "TelefonicaGermany_1318249263/08_28/07/2025_26,49"
 
+
+
+def test_eingangsrechnung_o2_noisy_ocr_uses_filename_date_and_total_not_vat() -> None:
+    text = """Tetefonica Germany GmbH & Co. OHG RE 90345 Nürnberg
+Guten Tag Igor Serbul,
+Rechnungsnummer
+Ihre Kundennummer
+Rechnungsdatum
+Leistungszeitraum
+Fällig am
+Mobilfunknummer 017630322126 Grundgebühren
+Vergünstigungen / Guthaben
+Rechnungsbetrag (davon enthaltene MwSt. 4,23 €)
+Zulählender Betrag
+26,49 €
+Ihre Rechnungsdetails
+Zusammenstellung nach MwSt.-Sätzen
+MwSt.-Satz
+Nettorechnungsbetrag in €
+MwSt.-Betrag in € Bruttorechnungsbetrag in €
+19%
+22,26
+4,23
+26,49
+Gesamt
+22,26
+4,23
+26,49
+"""
+    result = extract_eingangsrechnung_title(
+        ExtractionInput(
+            "Eingangsrechnung",
+            text,
+            original_filename="2025-9-26-RG.pdf",
+            created_at=datetime(2026, 6, 19, tzinfo=timezone.utc),
+        )
+    )
+
+    assert normalize_filename_invoice_date("2025-9-26-RG.pdf") == "26/09/2025"
+    assert result.sender == "TetefonicaGermany"
+    assert result.invoice_number == "NA"
+    assert result.date == "26/09/2025"
+    assert result.amount == "26,49"
+    assert result.title == "TetefonicaGermany_NA_26/09/2025_26,49"
 
 def test_ausgangsrechnung_golden_titles() -> None:
     habermann = "\n".join(

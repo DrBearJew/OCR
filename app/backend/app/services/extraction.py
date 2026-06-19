@@ -326,6 +326,27 @@ def normalize_month_year(raw: str, created_at: datetime | None = None) -> str:
     return "00/00"
 
 
+def normalize_filename_invoice_date(original_filename: str) -> str:
+    stem = re.sub(r"\.[A-Za-z0-9]{1,5}$", "", original_filename or "")
+    match = re.search(r"(?:^|\D)(20\d{2})[-_. ](\d{1,2})[-_. ](\d{1,2})(?=\D|$)", stem)
+    if not match:
+        return ""
+    year, month, day = match.groups()
+    return f"{int(day):02d}/{int(month):02d}/{int(year):04d}"
+
+
+def _prefer_filename_date(current: str, original_filename: str) -> str:
+    filename_date = normalize_filename_invoice_date(original_filename)
+    if not filename_date:
+        return current
+    if current in {"", "00/00/0000"}:
+        return filename_date
+    # Created-at fallback often points at upload day, not the invoice. If the
+    # filename carries a YYYY-M-D date, prefer that stable source over an upload
+    # timestamp when OCR did not provide a labelled date.
+    return filename_date
+
+
 def normalize_amount(raw: str) -> str:
     original = (raw or "").strip()
     value = re.sub(r"[^0-9,.\-]", "", original)
@@ -474,23 +495,48 @@ def extract_invoice_amount(text: str) -> str:
     num_re = re.compile(r"(?<!\d)(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+[.,]\d{2}|\d+)(?!\d)")
     strong = ("endsumme", "gesamtsumme", "gesamtbetrag", "rechnungsbetrag", "zu zahlen", "zu zahlender betrag", "balance due", "invoice total", "grand total")
     medium = ("summe", "gesamt", "total", "bruttorechnungsbetrag")
-    bad = ("netto", "mwst", "ust", "steuer", "skonto", "rabatt")
+    bad = ("netto", "mwst", "ust", "steuer", "skonto", "rabatt", "davon enthaltene")
     identifier_context = ("iban", "bic", "hrb", "hra", "weee", "ust.-id", "ust-id", "amtsgericht", "gläubiger", "glaeubiger", "kundennummer", "mobilfunknummer", "telefon", "mandats-id")
     date_context = ("leistungszeitraum", "vertragslaufzeit", "kündigungsfrist", "kuendigungsfrist", "zahlungseingänge", "zahlungseingaenge", "stand ", "fällig am", "faellig am", "rechnungsdatum")
+    lines = [re.sub(r"\s+", " ", raw.strip()) for raw in text.splitlines() if raw.strip()]
+
+    # Some VLM OCR layouts put the real invoice total on the next line after a
+    # label whose inline number is only the included VAT, for example:
+    # "Rechnungsbetrag (davon enthaltene MwSt. 4,23 €)" then "26,49 €".
+    for index, line in enumerate(lines):
+        low = line.lower()
+        if not any(cue in low for cue in ("rechnungsbetrag", "zu zahlender betrag", "zu zahlenderbetrag", "zulählender betrag", "zulaehlender betrag")):
+            continue
+        if not any(cue in low for cue in ("mwst", "ust", "steuer", "davon enthaltene")):
+            continue
+        for next_line in lines[index + 1 : index + 4]:
+            next_low = next_line.lower()
+            if any(cue in next_low for cue in identifier_context) or re.search(r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}", next_line):
+                continue
+            numbers = num_re.findall(next_line)
+            if not numbers:
+                continue
+            amount = normalize_amount(numbers[-1])
+            if amount == "NA":
+                continue
+            try:
+                numeric = float(amount.replace(",", "."))
+            except ValueError:
+                continue
+            if numeric > 0 and not _looks_like_garbage_amount(numeric, amount):
+                return amount
+
     candidates: list[tuple[int, float, str]] = []
     pending_score = 0
 
-    for raw in text.splitlines():
-        line = re.sub(r"\s+", " ", raw.strip())
-        if not line:
-            continue
+    for line in lines:
         low = line.lower()
         score = 0
         if any(cue in low for cue in strong):
             score += 4
         elif any(cue in low for cue in medium):
             score += 2
-        if any(cue in low for cue in bad) and not any(cue in low for cue in strong):
+        if any(cue in low for cue in bad):
             score -= 3
         numbers = num_re.findall(line)
         has_currency = "€" in line or " eur" in low or low.endswith("eur") or "$" in line
@@ -514,6 +560,8 @@ def extract_invoice_amount(text: str) -> str:
         pending_score = 0
         if has_currency:
             score += 1
+        if len(numbers) >= 3 and any(cue in low for cue in ("mwst", "ust", "steuer", "netto", "brutto")):
+            score -= 3
         amount = normalize_amount(raw_number)
         if amount == "NA":
             continue
@@ -802,7 +850,7 @@ def extract_eingangsrechnung_title(payload: ExtractionInput) -> ExtractionResult
     amount = extract_invoice_amount(payload.ocr_text)
     if is_neutral_invoice_file(payload.ocr_text, invoice_number=invoice_number, amount=amount):
         return neutral_invoice_result(payload, "Eingangsrechnung")
-    date = extract_invoice_date(payload.ocr_text, payload.created_at)
+    date = _prefer_filename_date(extract_invoice_date(payload.ocr_text, payload.created_at), payload.original_filename)
     title = f"{sender}_{invoice_number}_{date}_{amount}"
     valid = validate_title_for_collection("Eingangsrechnung", title)
     return ExtractionResult(
@@ -821,7 +869,7 @@ def extract_ausgangsrechnung_title(payload: ExtractionInput) -> ExtractionResult
     amount = extract_invoice_amount(payload.ocr_text)
     if is_neutral_invoice_file(payload.ocr_text, invoice_number=invoice_number, amount=amount):
         return neutral_invoice_result(payload, "Ausgangsrechnung")
-    date = extract_invoice_date(payload.ocr_text, payload.created_at)
+    date = _prefer_filename_date(extract_invoice_date(payload.ocr_text, payload.created_at), payload.original_filename)
     title = f"{recipient}_{invoice_number}_{date}_{amount}"
     valid = validate_title_for_collection("Ausgangsrechnung", title)
     return ExtractionResult(

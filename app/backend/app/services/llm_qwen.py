@@ -16,6 +16,8 @@ from app.services.prompt_loader import PromptLoader, RenderedPrompt
 
 logger = logging.getLogger(__name__)
 
+QWEN_METADATA_MAX_TOKENS = 512
+
 
 QWEN_THINKING_DISABLED_SYSTEM_PROMPT = (
     "<|think_off|>\n"
@@ -163,7 +165,7 @@ class QwenLlamaCppProvider:
                 {"role": "user", "content": prompt.text},
             ],
             "temperature": self.settings.llm_temperature,
-            "max_tokens": self.settings.llm_max_tokens,
+            "max_tokens": min(int(self.settings.llm_max_tokens), QWEN_METADATA_MAX_TOKENS),
         }
         if json_only:
             body["response_format"] = {"type": "json_object"}
