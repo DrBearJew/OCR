@@ -43,7 +43,7 @@ const defaultRuntimeSetup: ModelSetup = {
   glm_model: 'glm',
   qwen_enabled: false,
   qwen_base_url: INTERNAL_MODEL_GATEWAY_URL,
-  qwen_model: 'qwen',
+  qwen_model: 'metadata',
   timeout_seconds: 120,
   ocr_task_soft_time_limit: 600,
   ocr_task_time_limit: 660,
@@ -123,6 +123,8 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
     return new Map(rows.map((item) => [item.name, item]))
   }, [integrations])
 
+  const runtimeProviderLabel = providerLabel(runtimeSetup.ocr_provider, t)
+
   async function retry(id: string) {
     await api.retryDocument(id)
     await load()
@@ -139,7 +141,11 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
     setSetupBusy(true)
     setMessage('')
     try {
-      const saved = await api.saveModelSetup(runtimeSetup)
+      const payload = {
+        ...runtimeSetup,
+        qwen_enabled: Boolean(runtimeSetup.qwen_base_url.trim() && runtimeSetup.qwen_model.trim())
+      }
+      const saved = await api.saveModelSetup(payload)
       setRuntimeSetup(saved)
       setMessage(t('admin.modelSetupSaved'))
       await load()
@@ -244,80 +250,111 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
             <h2>{t('admin.modelSetup')}</h2>
             <p>{t('admin.modelSetupCopy')}</p>
           </div>
-          <TechnicalPill state={runtimeSetup.ocr_provider === 'fake' ? 'info' : 'ok'} label={runtimeSetup.ocr_provider} />
+          <TechnicalPill state={runtimeSetup.ocr_provider === 'fake' ? 'info' : 'ok'} label={runtimeProviderLabel} />
         </div>
-        <div className="model-config-form runtime-model-form">
-          <label>{t('admin.setupMode')}
-            <select value={runtimeSetup.mode} onChange={(event) => {
-              const mode = event.target.value
-              const provider = mode === 'local' ? 'ppocrv6' : mode === 'smart' ? 'paddle_vl' : 'fake'
-              setRuntimeSetup({ ...runtimeSetup, mode, ocr_provider: provider })
-            }}>
-              <option value="fake">{t('admin.modeFake')}</option>
-              <option value="local">{t('admin.modeLocal')}</option>
-              <option value="smart">{t('admin.modeSmart')}</option>
-            </select>
-          </label>
-          <label>{t('admin.defaultOcrProvider')}
-            <select value={runtimeSetup.ocr_provider} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_provider: event.target.value })}>
-              <option value="fake">fake</option>
-              <option value="ppocrv6">ppocrv6</option>
-              <option value="paddle_vl">paddle_vl</option>
-              <option value="glm">glm</option>
-            </select>
-          </label>
-          <label>{t('admin.paddleBaseUrl')}
-            <input value={runtimeSetup.paddle_vl_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, paddle_vl_base_url: event.target.value })} placeholder={DIRECT_MODEL_ENDPOINT_PLACEHOLDER} />
-          </label>
-          <label>{t('admin.paddleModel')}
-            <input value={runtimeSetup.paddle_vl_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, paddle_vl_model: event.target.value })} placeholder="paddleocr-vl" />
-          </label>
-          <label>{t('admin.glmBaseUrl')}
-            <input value={runtimeSetup.glm_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, glm_base_url: event.target.value })} placeholder={DIRECT_MODEL_ENDPOINT_PLACEHOLDER} />
-          </label>
-          <label>{t('admin.glmModel')}
-            <input value={runtimeSetup.glm_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, glm_model: event.target.value })} placeholder="glm" />
-          </label>
-          <label className="check runtime-check"><input type="checkbox" checked={runtimeSetup.qwen_enabled} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_enabled: event.target.checked })} /> {t('admin.enableQwenMetadata')}</label>
-          <label>{t('admin.qwenBaseUrl')}
-            <input value={runtimeSetup.qwen_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_base_url: event.target.value })} placeholder={DIRECT_MODEL_ENDPOINT_PLACEHOLDER} />
-          </label>
-          <label>{t('admin.qwenModel')}
-            <input value={runtimeSetup.qwen_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_model: event.target.value })} placeholder="qwen" />
-          </label>
-          <label>{t('admin.timeoutSeconds')}
-            <input type="number" min="5" value={runtimeSetup.timeout_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, timeout_seconds: Number(event.target.value) || 120 })} />
-          </label>
-          <div className="runtime-budget-section">
-            <div>
-              <strong>{t('admin.ocrTimeBudget')}</strong>
-              <p>{t('admin.ocrTimeBudgetCopy')}</p>
+        <div className="runtime-wizard-grid">
+          <article className="runtime-wizard-panel">
+            <div className="runtime-panel-heading">
+              <strong>{t('admin.ocrRuntime')}</strong>
+              <p>{t('admin.ocrRuntimeCopy')}</p>
             </div>
-            <label>{t('admin.ocrSoftLimit')}
-              <input type="number" min="60" value={runtimeSetup.ocr_task_soft_time_limit} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_soft_time_limit: Number(event.target.value) || 600 })} />
-            </label>
-            <label>{t('admin.ocrHardLimit')}
-              <input type="number" min="60" value={runtimeSetup.ocr_task_time_limit} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_time_limit: Number(event.target.value) || 660 })} />
-            </label>
-            <label>{t('admin.ocrHardGrace')}
-              <input type="number" min="1" value={runtimeSetup.ocr_task_hard_time_limit_grace_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_hard_time_limit_grace_seconds: Number(event.target.value) || 120 })} />
-            </label>
-            <label>{t('admin.ocrLeaseGrace')}
-              <input type="number" min="1" value={runtimeSetup.ocr_task_lease_grace_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_lease_grace_seconds: Number(event.target.value) || 300 })} />
-            </label>
-            <label>{t('admin.ocrBaseOverhead')}
-              <input type="number" min="1" value={runtimeSetup.ocr_task_base_overhead_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_base_overhead_seconds: Number(event.target.value) || 300 })} />
-            </label>
-            <label>{t('admin.paddleChunkBudget')}
-              <input type="number" min="1" value={runtimeSetup.ocr_task_paddle_vl_seconds_per_chunk} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_paddle_vl_seconds_per_chunk: Number(event.target.value) || 180 })} />
-            </label>
-            <label>{t('admin.glmPageBudget')}
-              <input type="number" min="1" value={runtimeSetup.ocr_task_glm_seconds_per_page} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_glm_seconds_per_page: Number(event.target.value) || 180 })} />
-            </label>
-            <label>{t('admin.ppocrPageBudget')}
-              <input type="number" min="1" value={runtimeSetup.ocr_task_ppocrv6_seconds_per_page} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_ppocrv6_seconds_per_page: Number(event.target.value) || 30 })} />
-            </label>
-          </div>
+            <div className="runtime-panel-grid">
+              <label>{t('admin.setupMode')}
+                <select value={runtimeSetup.mode} onChange={(event) => {
+                  const mode = event.target.value
+                  const provider = mode === 'local' ? 'ppocrv6' : mode === 'smart' ? 'paddle_vl' : 'fake'
+                  setRuntimeSetup({ ...runtimeSetup, mode, ocr_provider: provider })
+                }}>
+                  <option value="fake">{t('admin.modeFake')}</option>
+                  <option value="local">{t('admin.modeLocal')}</option>
+                  <option value="smart">{t('admin.modeSmart')}</option>
+                </select>
+              </label>
+              <label>{t('admin.defaultOcrProvider')}
+                <select value={runtimeSetup.ocr_provider} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_provider: event.target.value })}>
+                  <option value="fake">{t('admin.providerOptionFake')}</option>
+                  <option value="ppocrv6">{t('admin.providerOptionLocal')}</option>
+                  <option value="paddle_vl">{t('admin.providerOptionSmart')}</option>
+                  <option value="glm">{t('admin.providerOptionSecondary')}</option>
+                </select>
+              </label>
+              <label>{t('admin.paddleBaseUrl')}
+                <input value={runtimeSetup.paddle_vl_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, paddle_vl_base_url: event.target.value })} placeholder={DIRECT_MODEL_ENDPOINT_PLACEHOLDER} />
+              </label>
+              <label>{t('admin.paddleModel')}
+                <input value={runtimeSetup.paddle_vl_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, paddle_vl_model: event.target.value })} placeholder={t('admin.modelIdPlaceholder')} />
+              </label>
+            </div>
+          </article>
+
+          <article className="runtime-wizard-panel secondary-runtime-panel">
+            <div className="runtime-panel-heading">
+              <strong>{t('admin.secondaryOcrRuntime')}</strong>
+              <p>{t('admin.secondaryOcrRuntimeCopy')}</p>
+            </div>
+            <div className="runtime-panel-grid two-column">
+              <label>{t('admin.glmBaseUrl')}
+                <input value={runtimeSetup.glm_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, glm_base_url: event.target.value })} placeholder={DIRECT_MODEL_ENDPOINT_PLACEHOLDER} />
+              </label>
+              <label>{t('admin.glmModel')}
+                <input value={runtimeSetup.glm_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, glm_model: event.target.value })} placeholder={t('admin.modelIdPlaceholder')} />
+              </label>
+            </div>
+          </article>
+
+          <article className="runtime-wizard-panel metadata-runtime-panel">
+            <div className="runtime-panel-heading">
+              <strong>{t('admin.metadataRuntime')}</strong>
+              <p>{t('admin.metadataRuntimeCopy')}</p>
+            </div>
+            <div className="runtime-panel-grid metadata-runtime-grid">
+              <label>{t('admin.qwenBaseUrl')}
+                <input value={runtimeSetup.qwen_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_base_url: event.target.value })} placeholder={DIRECT_MODEL_ENDPOINT_PLACEHOLDER} />
+              </label>
+              <label>{t('admin.qwenModel')}
+                <input value={runtimeSetup.qwen_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_model: event.target.value })} placeholder={t('admin.modelIdPlaceholder')} />
+              </label>
+              <label>{t('admin.timeoutSeconds')}
+                <input type="number" min="5" value={runtimeSetup.timeout_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, timeout_seconds: Number(event.target.value) || 120 })} />
+              </label>
+            </div>
+            <p className="form-help runtime-field-help">{t('admin.metadataEndpointHelp')}</p>
+          </article>
+
+          <details className="runtime-budget-section">
+            <summary>
+              <span>
+                <strong>{t('admin.ocrTimeBudget')}</strong>
+                <small>{t('admin.ocrTimeBudgetCopy')}</small>
+              </span>
+            </summary>
+            <div className="runtime-budget-grid">
+              <label>{t('admin.ocrSoftLimit')}
+                <input type="number" min="60" value={runtimeSetup.ocr_task_soft_time_limit} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_soft_time_limit: Number(event.target.value) || 600 })} />
+              </label>
+              <label>{t('admin.ocrHardLimit')}
+                <input type="number" min="60" value={runtimeSetup.ocr_task_time_limit} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_time_limit: Number(event.target.value) || 660 })} />
+              </label>
+              <label>{t('admin.ocrHardGrace')}
+                <input type="number" min="1" value={runtimeSetup.ocr_task_hard_time_limit_grace_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_hard_time_limit_grace_seconds: Number(event.target.value) || 120 })} />
+              </label>
+              <label>{t('admin.ocrLeaseGrace')}
+                <input type="number" min="1" value={runtimeSetup.ocr_task_lease_grace_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_lease_grace_seconds: Number(event.target.value) || 300 })} />
+              </label>
+              <label>{t('admin.ocrBaseOverhead')}
+                <input type="number" min="1" value={runtimeSetup.ocr_task_base_overhead_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_base_overhead_seconds: Number(event.target.value) || 300 })} />
+              </label>
+              <label>{t('admin.paddleChunkBudget')}
+                <input type="number" min="1" value={runtimeSetup.ocr_task_paddle_vl_seconds_per_chunk} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_paddle_vl_seconds_per_chunk: Number(event.target.value) || 180 })} />
+              </label>
+              <label>{t('admin.glmPageBudget')}
+                <input type="number" min="1" value={runtimeSetup.ocr_task_glm_seconds_per_page} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_glm_seconds_per_page: Number(event.target.value) || 180 })} />
+              </label>
+              <label>{t('admin.ppocrPageBudget')}
+                <input type="number" min="1" value={runtimeSetup.ocr_task_ppocrv6_seconds_per_page} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_ppocrv6_seconds_per_page: Number(event.target.value) || 30 })} />
+              </label>
+            </div>
+          </details>
         </div>
         <p className="form-help">{t('admin.internalGatewayHelp')}</p>
         <div className="button-row form-actions runtime-setup-actions">
@@ -547,6 +584,14 @@ function formFromCollection(collection: Collection): ModelFormState {
 function toNumber(value: string, fallback: string) {
   const parsed = Number(value || fallback)
   return Number.isFinite(parsed) ? parsed : Number(fallback)
+}
+
+function providerLabel(provider: string, t: (key: string, fallback?: string) => string) {
+  if (provider === 'fake') return t('admin.providerOptionFake')
+  if (provider === 'ppocrv6') return t('admin.providerOptionLocal')
+  if (provider === 'paddle_vl') return t('admin.providerOptionSmart')
+  if (provider === 'glm') return t('admin.providerOptionSecondary')
+  return provider
 }
 
 function EngineCard({ engine, item, note, title, detail }: { engine: string; item: IntegrationSummary['integrations'][number] | undefined; note?: string; title?: string; detail?: string }) {

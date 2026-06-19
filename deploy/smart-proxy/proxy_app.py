@@ -15,7 +15,7 @@ LLAMA_URL = os.getenv("LLAMA_URL", "http://172.18.0.1:1234/v1")
 LLAMA_ADMIN = os.getenv("LLAMA_ADMIN", "http://172.18.0.1:1234")
 QWEN_URL = os.getenv("QWEN_URL", LLAMA_URL)
 QWEN_ADMIN = os.getenv("QWEN_ADMIN", LLAMA_ADMIN)
-QWEN_MODEL_IDS = {item.strip().lower() for item in os.getenv("QWEN_MODEL_IDS", "qwen,qwen-mtp,qwen3.5-2b").split(",") if item.strip()}
+QWEN_MODEL_IDS = {item.strip().lower() for item in os.getenv("QWEN_MODEL_IDS", "metadata,metadata-model,qwen,qwen-mtp,qwen3.5-2b").split(",") if item.strip()}
 
 IDLE_UNLOAD_SECONDS = int(os.getenv("IDLE_UNLOAD_SECONDS", "180"))
 UNLOAD_AFTER_REQUEST = os.getenv("UNLOAD_AFTER_REQUEST", "1").strip().lower() not in {"0", "false", "no"}
@@ -844,7 +844,7 @@ def smart_router():
 
     try:
         data = request.get_json(force=True) or {}
-        requested_model = str(data.get("model", "qwen3.5-2b")).lower()
+        requested_model = str(data.get("model", "metadata")).lower()
 
         with state_lock:
             last_request_time = time.time()

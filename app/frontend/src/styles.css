@@ -7646,35 +7646,77 @@ main,
 .runtime-model-setup-card {
   border-color: rgba(45, 212, 191, 0.26);
 }
-.runtime-model-form {
-  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+.runtime-wizard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(18rem, 0.75fr);
+  gap: 0.75rem;
+  align-items: stretch;
 }
-.runtime-check {
-  align-self: end;
-  min-height: 3.35rem;
+.runtime-wizard-panel,
+.runtime-budget-section {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.85rem;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.35);
+}
+.runtime-wizard-panel {
+  align-content: start;
+}
+.metadata-runtime-panel {
+  grid-row: span 2;
+}
+.runtime-panel-heading {
+  display: grid;
+  gap: 0.2rem;
+}
+.runtime-panel-heading p,
+.runtime-budget-section small,
+.runtime-field-help {
+  margin: 0;
+  color: #9db4cc;
+  font-size: 0.82rem;
+}
+.runtime-panel-grid,
+.runtime-budget-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.65rem;
+  align-items: end;
+}
+.runtime-panel-grid.two-column,
+.metadata-runtime-grid {
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+.runtime-budget-section {
+  grid-column: 1 / -1;
+}
+.runtime-budget-section summary {
+  cursor: pointer;
+  color: var(--text);
+}
+.runtime-budget-section summary span {
+  display: inline-grid;
+  gap: 0.2rem;
+  margin-inline-start: 0.4rem;
+  vertical-align: middle;
+}
+.runtime-budget-grid {
+  padding-top: 0.35rem;
 }
 .runtime-setup-actions {
   margin-top: 0.9rem;
   flex-wrap: wrap;
 }
 
-.runtime-budget-section {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
-  gap: 0.65rem;
-  padding: 0.85rem;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 18px;
-  background: rgba(15, 23, 42, 0.35);
-}
-.runtime-budget-section > div:first-child {
-  grid-column: 1 / -1;
-}
-.runtime-budget-section p {
-  margin: 0.15rem 0 0;
-  color: #9db4cc;
-  font-size: 0.82rem;
+@media (max-width: 980px) {
+  .runtime-wizard-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .metadata-runtime-panel {
+    grid-row: auto;
+  }
 }
 
 

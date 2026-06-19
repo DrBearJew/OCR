@@ -144,12 +144,17 @@ write_admin_env() {
   cat > "$file" <<ENV
 # Use these values in Admin -> Model Setup
 # $provider_note
+# OCR and metadata endpoints are separate.
+# PaddleOCR-VL: use this local endpoint, or replace it with your GPU/native/remote PaddleOCR-VL URL.
+# Metadata model: optional. CPU default is the separate ik_llama.cpp + Gemma sidecar under deploy/qwen-ik-router/;
+# strong-GPU/remote installs can use any compatible text-model endpoint instead.
 OCR_PROVIDER=paddle_vl
 PADDLE_VL_BASE_URL=$base_url
 PADDLE_VL_MODEL=paddleocr-vl
 GLM_BASE_URL=http://smart-proxy:8081/v1
 GLM_MODEL=glm
 QWEN_BASE_URL=http://smart-proxy:8081/v1
+QWEN_MODEL=metadata
 # OCR time budget defaults are user-editable in Admin -> Model Setup.
 OCR_TASK_SOFT_TIME_LIMIT=600
 OCR_TASK_TIME_LIMIT=660

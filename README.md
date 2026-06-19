@@ -197,7 +197,7 @@ Tested CPU / low-RAM ik_llama.cpp sidecar defaults:
 model: /root/llm-models/gemma-4-E2B-it-qat-q4_0-gguf/gemma-4-E2B_q4_0-it.gguf
 download: https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf/resolve/main/gemma-4-E2B_q4_0-it.gguf?download=true
 model id: gemma-4-e2b-it-qat-q4_0
-aliases: gemma-e2b,qwen-mtp,qwen3.5-2b,qwen
+aliases: metadata,metadata-model,gemma-e2b,qwen-mtp,qwen3.5-2b,qwen
 spec: ngram-mod:n_max=16,n_min=0,ngram_size_n=40
 batch/ubatch: 1024/512
 ```
@@ -244,7 +244,7 @@ PADDLE_VL_MODEL_PATH=paddleocr-vl
 
 LLM_METADATA_REFINEMENT_ENABLED=true
 QWEN_LLAMACPP_BASE_URL=http://host.docker.internal:18082/v1
-QWEN_MODEL_PATH=qwen
+QWEN_MODEL_PATH=metadata
 ```
 
 The deployed CPU metadata sidecar serves Gemma 4 E2B QAT Q4_0 through ik_llama.cpp behind the legacy `qwen` aliases, but metadata models are configurable. Strong-GPU installs can use a larger local/remote OpenAI-compatible text model by setting the metadata base URL/model in **Admin → Model Setup** or via `QWEN_LLAMACPP_BASE_URL` and `QWEN_MODEL_PATH`. This is separate from OCR: PaddleOCR-VL still needs a real PaddleOCR-VL endpoint, such as OpenVINO CPU, GPU/native, or remote. The OpenVINO gateway also exposes `/v1/ocr/batch`, which Dok OCR uses to process rendered PaddleOCR-VL PDF pages in chunks of up to four without loading multiple model copies. The internal gateway hides routing details, normalizes OCR output, applies deterministic decode settings, and keeps model service details out of the normal user flow.

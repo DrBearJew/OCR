@@ -114,7 +114,7 @@ const seededFiles: UploadDraftFile[] = [
     confidence: 98,
     metadata: sampleMetadata,
     qwenRunStatus: 'succeeded',
-    qwenMessage: 'Qwen suggested recipient and amount with evidence.',
+    qwenMessage: 'Metadata model suggested recipient and amount with evidence.',
     qwenSuggestedFolder: 'Eingangsrechnung/Demo/2020',
     metadataSources: {
       title: { source: 'deterministic', confidence: 98 },
@@ -143,7 +143,7 @@ const seededFiles: UploadDraftFile[] = [
     confidence: 96,
     metadata: { ...sampleMetadata, collection: 'Belege', documentType: 'Beleg', title: 'CommerceBank_B_04/26_NA_NA', correspondent: 'CommerceBank', recipient: '', invoiceNo: '', amount: '', taxAmount: '' },
     qwenRunStatus: 'not_run',
-    qwenMessage: 'Qwen has not run for this sample.',
+    qwenMessage: 'Metadata model has not run for this sample.',
     qwenSuggestedFolder: '',
     metadataSources: {
       title: { source: 'deterministic', confidence: 93 },
@@ -256,7 +256,7 @@ export default function DashboardPage({ onOpenDocument }: DashboardPageProps) {
         confidence: 0,
         metadata: { ...sampleMetadata, collection: collectionName, title: '', correspondent: '', recipient: '', date: '', invoiceNo: '', amount: '', taxAmount: '', notes: '', customFields: ensureCustomFieldDefaults({}, customFieldDefinitions) },
         qwenRunStatus: 'not_run' as const,
-        qwenMessage: 'Qwen will fill missing metadata after OCR when enabled.',
+        qwenMessage: 'Metadata model will fill missing metadata after OCR when enabled.',
         qwenSuggestedFolder: '',
         metadataSources: {}
       }
@@ -857,7 +857,7 @@ function MetadataExtractionCard({ selected, qwenStatus, qwenEnabled, onRunAgain 
   const runLabel = selected?.qwenRunStatus === 'succeeded' ? t('dashboard.qwenFilled') : selected?.qwenRunStatus === 'failed' ? t('dashboard.qwenFailed') : selected?.qwenRunStatus === 'disabled' ? t('dashboard.qwenDidNotRun') : t('dashboard.qwenPending')
   return (
     <InspectorCard title={t('dashboard.aiMetadataExtraction')}>
-      <p className="model-line">{t('dashboard.model')}: <strong>Qwen Metadata</strong> <span className={qwenEnabled ? '' : 'muted-chip'}>{label}</span></p>
+      <p className="model-line">{t('dashboard.model')}: <strong>{t('dashboard.metadataModel')}</strong> <span className={qwenEnabled ? '' : 'muted-chip'}>{label}</span></p>
       <div className={`qwen-run-state qwen-${selected?.qwenRunStatus || 'not_run'}`}>
         <strong>{runLabel}</strong>
         <small>{selected?.qwenMessage || t('dashboard.qwenProcessingCopy')}</small>
@@ -1061,12 +1061,12 @@ function qwenRunStatusFromDocument(document: Document): UploadDraftFile['qwenRun
 function qwenMessageFromDocument(document: Document): string {
   const refinement = document.metadata_json.qwen_refinement as Record<string, unknown> | undefined
   const sourceValues = Object.values(fromDocumentSources(document.metadata_sources_json)).filter((item) => item.source === 'qwen')
-  if (sourceValues.length) return `Qwen filled ${sourceValues.length} field${sourceValues.length === 1 ? '' : 's'}; hover badges for evidence.`
-  if (refinement?.disabled === true) return 'Qwen did not run for this document.'
-  if (refinement?.empty_response === true) return 'Qwen did not produce metadata candidates for this document.'
+  if (sourceValues.length) return `Metadata model filled ${sourceValues.length} field${sourceValues.length === 1 ? '' : 's'}; hover badges for evidence.`
+  if (refinement?.disabled === true) return 'Metadata model did not run for this document.'
+  if (refinement?.empty_response === true) return 'Metadata model did not produce metadata candidates for this document.'
   if (refinement?.error) return String(refinement.error)
   if (document.llm_summary) return document.llm_summary
-  return 'Qwen has not produced metadata candidates yet.'
+  return 'Metadata model has not produced metadata candidates yet.'
 }
 
 function toDocumentMetadataPayload(metadata: MetadataFormState, sources: Record<string, FieldSourceInfo>, options: ProcessingOptionsState, customFieldDefinitions: CustomFieldDefinition[] = []) {

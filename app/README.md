@@ -230,7 +230,7 @@ GLM_MMPROJ_PATH=/llm-models/glm-mmproj.gguf
 # CPU/low-RAM default: ik_llama.cpp sidecar serving Gemma 4 E2B QAT Q4_0 behind legacy qwen aliases.
 # Strong-GPU or remote installs can point this at a larger OpenAI-compatible text model instead.
 QWEN_LLAMACPP_BASE_URL=http://smart-proxy:8081/v1
-QWEN_MODEL_PATH=qwen
+QWEN_MODEL_PATH=metadata
 LLM_METADATA_REFINEMENT_ENABLED=false
 LLM_REQUEST_TIMEOUT_SECONDS=120
 LLM_MAX_TOKENS=4096

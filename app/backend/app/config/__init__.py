@@ -84,8 +84,8 @@ class Settings(BaseSettings):
     ppocrv6_engine: str = "onnxruntime"
     ppocrv6_device: str = "cpu"
 
-    qwen_llamacpp_base_url: str = "http://qwen-llama:8080"
-    qwen_model_path: str = "/llm-models/qwen.gguf"
+    qwen_llamacpp_base_url: str = "http://smart-proxy:8081/v1"
+    qwen_model_path: str = "metadata"
 
     llm_request_timeout_seconds: float = 120.0
     llm_max_tokens: int = 4096

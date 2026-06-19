@@ -25,7 +25,7 @@ CHILD_PORT = int(os.getenv("QWEN_IK_CHILD_PORT", "18083"))
 CHILD_URL = f"http://{CHILD_HOST}:{CHILD_PORT}"
 
 MODEL_ID = os.getenv("QWEN_IK_MODEL_ID", "gemma-4-e2b-it-qat-q4_0")
-ALIASES = [item.strip() for item in os.getenv("QWEN_IK_ALIASES", "gemma-4-e2b-it-qat-q4_0,gemma-e2b,qwen-mtp,qwen3.5-2b,qwen").split(",") if item.strip()]
+ALIASES = [item.strip() for item in os.getenv("QWEN_IK_ALIASES", "metadata,metadata-model,gemma-4-e2b-it-qat-q4_0,gemma-e2b,qwen-mtp,qwen3.5-2b,qwen").split(",") if item.strip()]
 BINARY = os.getenv("QWEN_IK_BINARY", "/root/ik_llama.cpp/build/bin/llama-server")
 MODEL = os.getenv("QWEN_IK_MODEL", "/root/llm-models/gemma-4-E2B-it-qat-q4_0-gguf/gemma-4-E2B_q4_0-it.gguf")
 CHAT_TEMPLATE_FILE = os.getenv("QWEN_IK_CHAT_TEMPLATE_FILE", "/root/llm-models/gemma-4-E2B-it-qat-q4_0-gguf/google-gemma4-E2B-chat_template-main.jinja")
