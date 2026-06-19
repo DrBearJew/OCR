@@ -181,8 +181,15 @@ def strip_accents(value: str) -> str:
     return "".join(ch for ch in value if not unicodedata.combining(ch))
 
 
+def normalize_known_party_ocr_errors(value: str) -> str:
+    value = value or ""
+    value = re.sub(r"(?i)\b(?:tetefonica|telefnica|teiefonica)(?=\s+germany\b)", "Telefonica", value)
+    value = re.sub(r"(?i)\b(?:tetefonicagermany|telefnicagermany|teiefonicagermany)\b", "TelefonicaGermany", value)
+    return value
+
+
 def compact_party(value: str, max_len: int = 40) -> str:
-    value = strip_accents(value)
+    value = normalize_known_party_ocr_errors(strip_accents(value))
     value = re.sub(r"\bco\.?\s*ohg\b", " ", value, flags=re.I)
     value = re.sub(r"\b(ges\.?\s*mbh|gesmbh|gmbh|mbh|ag|kg|ug|ohg|re|inc|ltd|llc|sarl|e\.?k\.?)\b", " ", value, flags=re.I)
     value = re.sub(r"[^A-Za-z0-9 ]+", " ", value)
@@ -192,7 +199,7 @@ def compact_party(value: str, max_len: int = 40) -> str:
 
 
 def compact_sender_token(value: str) -> str:
-    value = strip_accents(value).replace("&", " And ")
+    value = normalize_known_party_ocr_errors(strip_accents(value)).replace("&", " And ")
     value = re.sub(r"[_/\\|]+", " ", value)
     value = re.sub(r"[^A-Za-z0-9 .,-]+", " ", value)
     value = re.sub(r"\s+", " ", value).strip()

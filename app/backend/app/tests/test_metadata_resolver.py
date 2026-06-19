@@ -78,8 +78,8 @@ def test_qwen_grounded_candidates_win_over_weak_deterministic_and_regenerate_tit
 def test_missing_invoice_number_can_still_derive_non_fallback_title(db_session: Session, tmp_path: Path) -> None:
     doc = make_doc(db_session, tmp_path, "O2 invoice without invoice number")
     deterministic = {
-        "title": "TetefonicaGermany_NA_26/09/2025_26,49",
-        "sender": "TetefonicaGermany",
+        "title": "TelefonicaGermany_NA_26/09/2025_26,49",
+        "sender": "TelefonicaGermany",
         "recipient": None,
         "invoice_number": "NA",
         "date": "26/09/2025",
@@ -87,7 +87,7 @@ def test_missing_invoice_number_can_still_derive_non_fallback_title(db_session: 
         "payment_method": None,
     }
     qwen = {
-        "metadata": {"sender": "TetefonicaGermany", "date": "2025-09-26", "amount": "26,49"},
+        "metadata": {"sender": "TelefonicaGermany", "date": "2025-09-26", "amount": "26,49"},
         "confidence": {"sender": 95, "date": 90, "amount": 95},
         "evidence": {"sender": "Sender line", "date": "filename", "amount": "gross total"},
     }
@@ -96,7 +96,7 @@ def test_missing_invoice_number_can_still_derive_non_fallback_title(db_session: 
     warnings = review_warnings_for_resolution(doc, resolution.merged, resolution.sources, qwen, deterministic)
 
     assert resolution.merged["invoice_number"] is None
-    assert resolution.merged["title"] == "TetefonicaGermany_26/09/2025_26,49"
+    assert resolution.merged["title"] == "TelefonicaGermany_26/09/2025_26,49"
     assert resolution.sources["title"]["source"] == "derived"
     assert "Fallback title or missing title segment used" not in warnings
     assert "Low confidence for title" not in warnings

@@ -173,11 +173,11 @@ Gesamt
     )
 
     assert normalize_filename_invoice_date("2025-9-26-RG.pdf") == "26/09/2025"
-    assert result.sender == "TetefonicaGermany"
+    assert result.sender == "TelefonicaGermany"
     assert result.invoice_number == "NA"
     assert result.date == "26/09/2025"
     assert result.amount == "26,49"
-    assert result.title == "TetefonicaGermany_NA_26/09/2025_26,49"
+    assert result.title == "TelefonicaGermany_NA_26/09/2025_26,49"
 
 def test_ausgangsrechnung_golden_titles() -> None:
     habermann = "\n".join(

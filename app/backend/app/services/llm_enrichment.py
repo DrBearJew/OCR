@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import re
 import uuid
 
 from sqlalchemy import func, or_, select
@@ -461,16 +462,25 @@ def _candidate_from_custom_field_list(value: list[Any]) -> dict[str, Any] | None
     }
 
 
+def _normalize_known_party_ocr_errors(value: str, field_name: str | None) -> str:
+    if field_name not in {"correspondent", "sender", "recipient", "suggested_title_base"}:
+        return value
+    value = value or ""
+    value = re.sub(r"(?i)\b(?:tetefonica|telefnica|teiefonica)(?=\s+germany\b)", "Telefonica", value)
+    value = re.sub(r"(?i)\b(?:tetefonicagermany|telefnicagermany|teiefonicagermany)\b", "TelefonicaGermany", value)
+    return value
+
+
 def _field_candidate(value: Any, confidence_source: Any = None, field_name: str | None = None) -> dict[str, Any]:
     if isinstance(value, dict):
         raw_confidence = value.get("confidence", confidence_source)
         return {
-            "value": _string(value.get("value")),
+            "value": _normalize_known_party_ocr_errors(_string(value.get("value")), field_name),
             "confidence": _confidence(raw_confidence),
             "evidence": _string(value.get("evidence")),
         }
     confidence = confidence_source.get(field_name) if isinstance(confidence_source, dict) and field_name else confidence_source
-    return {"value": _string(value), "confidence": _confidence(confidence), "evidence": ""}
+    return {"value": _normalize_known_party_ocr_errors(_string(value), field_name), "confidence": _confidence(confidence), "evidence": ""}
 
 
 def _custom_field_candidates(value: Any) -> dict[str, dict[str, Any]]:
