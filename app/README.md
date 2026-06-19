@@ -17,7 +17,7 @@ File input
   -> validation and storage
   -> OCR / text extraction
   -> deterministic metadata extraction
-  -> optional Qwen metadata/search enrichment
+  -> optional Gemma/Qwen metadata/search enrichment
   -> title generation and validation
   -> review state assignment
   -> PostgreSQL search indexing
@@ -33,7 +33,7 @@ The main user-facing objects are:
 | `Document` | One physical uploaded/imported file, its OCR text, metadata, review state, events, pages, and retry path. |
 | `Batch` | Upload grouping and migration compatibility layer. It is not the primary user mental model. |
 
-A document is considered complete only when file storage, OCR, metadata extraction, title persistence, required-field validation, and search indexing are done. Optional Qwen enrichment can improve search metadata, but deterministic extraction remains the safe baseline.
+A document is considered complete only when file storage, OCR, metadata extraction, title persistence, required-field validation, and search indexing are done. Optional Gemma/Qwen enrichment can improve search metadata, but deterministic extraction remains the safe baseline.
 
 ---
 
@@ -45,7 +45,7 @@ app/
     app/api/                       HTTP routes
     app/config/                    Settings and collection/rule config
     app/models/                    Database model definitions
-    app/prompts/                   OCR/Qwen prompt templates
+    app/prompts/                   OCR/metadata prompt templates
     app/services/                  Pipeline, OCR, metadata, search, folders, diagnostics
     app/workers/                   Celery app and task entry points
     app/tests/                     Backend regression tests
@@ -103,10 +103,10 @@ Choose a mode before configuring `.env` or the Admin model setup page.
 | --- | --- | --- |
 | Basic dev/test | `fake` | Fast UI/backend development with no model server. |
 | Fast local OCR | `ppocrv6` | CPU/local OCR for ordinary text extraction. |
-| Smart document OCR | `paddle_vl` | Strict PaddleOCR-VL via the OpenVINO CPU gateway, internal gateway, or another compatible endpoint. Best default for rich documents/diagrams. |
+| Smart document OCR | `paddle_vl` | Strict PaddleOCR-VL via any real PaddleOCR-VL-compatible endpoint. OpenVINO is the tested CPU gateway; GPU/native/remote endpoints are valid. Best default for rich documents/diagrams. |
 | GLM OCR | `glm` | GLM multimodal OCR through a compatible endpoint. Kept as a selectable OCR provider. |
 
-Qwen is separate from OCR. It is optional text reasoning for metadata candidates, search hints, tags/folders, and summaries.
+Gemma/Qwen metadata refinement is separate from OCR. It is optional text reasoning for metadata candidates, search hints, tags/folders, and summaries; it does not replace the PaddleOCR-VL endpoint. The bundled Gemma E2B QAT Q4 sidecar is a tested low-RAM default, but larger GPU-hosted or remote OpenAI-compatible text models can be configured instead.
 
 ---
 
@@ -167,9 +167,11 @@ docker compose run --rm backend alembic upgrade head
 
 ## 6. Model and OCR configuration
 
-### Recommended smart setup
+### Smart OCR setup
 
-For CPU-only smart OCR, use the OpenVINO PaddleOCR-VL gateway from the repository root:
+If you already have a GPU/native/remote PaddleOCR-VL-compatible endpoint, skip the installer and configure that endpoint in **Admin → Model Setup**.
+
+For CPU-only smart OCR that needs a local endpoint, use the optional OpenVINO PaddleOCR-VL gateway from the repository root:
 
 ```bash
 ../scripts/install-smart-paddlevl.sh --backend openvino-cpu --dry-run
@@ -185,7 +187,7 @@ POST /v1/chat/completions
 POST /v1/ocr/batch       # up to 4 rendered PDF pages, one loaded model
 ```
 
-For legacy llama.cpp/GGUF deployments, use:
+For legacy PaddleOCR-VL GGUF OCR deployments only, use:
 
 ```bash
 sudo ../scripts/install-smart-paddlevl.sh --backend llamacpp
@@ -197,7 +199,7 @@ Then open:
 Admin -> Model Setup
 ```
 
-Set the PaddleOCR-VL endpoint printed by the installer, test PaddleOCR-VL, adjust the OCR time budget if needed, and save. The Admin setup stores model endpoint and timeout-policy configuration in the app settings database so the API and workers see the same model config.
+Set the PaddleOCR-VL endpoint printed by the installer, or paste your GPU/native/remote PaddleOCR-VL endpoint. Test PaddleOCR-VL, adjust the OCR time budget if needed, and save. The Admin setup stores model endpoint and timeout-policy configuration in the app settings database so the API and workers see the same model config.
 
 ### `.env` provider keys
 
@@ -207,8 +209,9 @@ The important model settings are:
 # OCR provider: fake, ppocrv6, paddle_vl, glm
 OCR_PROVIDER=paddle_vl
 
-# PaddleOCR-VL through OpenVINO gateway, internal gateway, or smart proxy
+# PaddleOCR-VL through any real compatible endpoint.
 # For OpenVINO host-level service, use the Docker network gateway printed by the installer.
+# For GPU/native/remote PaddleOCR-VL, use that endpoint URL instead.
 PADDLE_VL_LLAMACPP_BASE_URL=http://172.19.0.1:8091/v1
 PADDLE_VL_MODEL_PATH=paddleocr-vl
 PADDLE_VL_MMPROJ_PATH=/llm-models/paddleocr-vl-mmproj.gguf
@@ -223,8 +226,9 @@ GLM_LLAMACPP_BASE_URL=http://glm-llama:8080
 GLM_MODEL_PATH=/llm-models/glm.gguf
 GLM_MMPROJ_PATH=/llm-models/glm-mmproj.gguf
 
-# Optional metadata refinement sidecar.
-# Production serves Gemma 4 E2B QAT Q4_0 behind legacy qwen aliases.
+# Optional metadata refinement endpoint.
+# The deployed low-RAM default serves Gemma 4 E2B QAT Q4_0 behind legacy qwen aliases.
+# Strong-GPU installs can point this at a larger local/remote OpenAI-compatible text model.
 QWEN_LLAMACPP_BASE_URL=http://smart-proxy:8081/v1
 QWEN_MODEL_PATH=qwen
 LLM_METADATA_REFINEMENT_ENABLED=false
@@ -256,7 +260,7 @@ These are kill ceilings, not speed predictions. Users with slower CPUs or very l
 
 ### Model boundary
 
-The app calls OpenAI-compatible HTTP endpoints. It does not hardcode GPU topology, llama.cpp flags, or model-manager behavior.
+The app calls OpenAI-compatible HTTP endpoints. It does not hardcode GPU topology, OpenVINO, llama.cpp flags, metadata model family, or model-manager behavior.
 
 Expected endpoint shape:
 
@@ -264,7 +268,7 @@ Expected endpoint shape:
 POST /v1/chat/completions
 ```
 
-For PaddleOCR-VL and GLM image OCR, the request includes multimodal `image_url` content with a data URL. For Qwen, the request is text-only and expects compact JSON metadata candidates.
+For PaddleOCR-VL and GLM image OCR, the request includes multimodal `image_url` content with a data URL. For Gemma/Qwen metadata refinement, the request is text-only and expects compact JSON metadata candidates.
 
 ### Provider behavior
 
@@ -275,7 +279,7 @@ The OCR path is deliberately conservative and explicit:
 - GLM remains available as a separate multimodal OCR provider.
 - Strict PaddleOCR-VL PDFs are rendered to page images and processed by PaddleOCR-VL; embedded PDF text is not silently substituted.
 - Strict PaddleOCR-VL failures are surfaced for retry/review instead of silently switching to PP-OCRv6.
-- Qwen failures should not erase deterministic metadata. Empty Qwen output is treated as no candidate; malformed non-empty JSON is recorded for review/diagnostics.
+- Gemma/Qwen metadata failures should not erase deterministic metadata. Empty metadata-model output is treated as no candidate; malformed non-empty JSON is recorded for review/diagnostics.
 
 ---
 
@@ -401,7 +405,7 @@ Manual edits and locks are respected:
 - `metadata_locked` protects current metadata from normal reprocessing.
 - Field-level locks protect individual fields.
 - Forced processing can overwrite where explicitly allowed.
-- Qwen can fill missing fields or search metadata, but deterministic extraction and manual locks remain authoritative.
+- Gemma/Qwen metadata refinement can fill missing fields or search metadata, but deterministic extraction and manual locks remain authoritative.
 
 Review warnings are generated for missing required fields, weak/invalid title schema, OCR/model failures, duplicate signals, or other pipeline concerns. They are stored on the document and surfaced in the UI, filters, diagnostics, and activity trail.
 
@@ -598,9 +602,9 @@ Keep external links and integrations on the public base URL. Avoid hardcoding lo
 | Upload fails before backend logs appear | Nginx body limit or proxy timeout. Inspect `frontend/nginx.conf` and `nginx -T`. |
 | Upload accepted but document never processes | Worker/Redis health, Celery queue logs, `processing_task_id`, `lease_until`, reconciliation status. |
 | OCR returns empty text | Check selected OCR provider, model endpoint, PaddleOCR-VL template/image support, rendered page images, and provider error events. |
-| Metadata looks wrong | Check OCR text first, then deterministic extraction, then Qwen candidates/sources. |
+| Metadata looks wrong | Check OCR text first, then deterministic extraction, then Gemma/Qwen candidates/sources. |
 | Status says `needs_review` after action | Compare `processing_state` and `review_state`; review-only states should promote to `complete` when marked reviewed. |
-| Qwen shows failed but document is complete | Inspect diagnostics. Empty Qwen output is optional/no-candidate; malformed non-empty JSON is a real Qwen candidate failure. |
+| Metadata sidecar shows failed but document is complete | Inspect diagnostics. Empty model output is optional/no-candidate; malformed non-empty JSON is a real metadata candidate failure. |
 | Office/email files are rejected | Enable Tika/Gotenberg converters and set `CONVERTERS_ENABLED=true`. |
 | Browser still shows old UI | Rebuild/restart `frontend`, then hard-refresh the browser. |
 

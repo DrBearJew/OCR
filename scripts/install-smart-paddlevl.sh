@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# One-click installer for Dok OCR smart PaddleOCR-VL stack.
+# Optional installer for a local Dok OCR PaddleOCR-VL OCR endpoint.
 # Supports two backends:
+#   - openvino-cpu: tested CPU OpenVINO 2025.2 gateway with /v1/ocr/batch for up to 4 pages.
 #   - llamacpp: legacy GGUF + smart-proxy gateway for llama.cpp/LM Studio style OCR.
-#   - openvino-cpu: CPU OpenVINO 2025.2 gateway with /v1/ocr/batch for up to 4 pages.
 #
+# Skip this installer if you already have a GPU/native/remote PaddleOCR-VL endpoint.
+# This script does not install the optional Gemma/Qwen metadata model sidecar.
 # The installer is intentionally idempotent. It writes helper assets/services and
 # prints Admin -> Model Setup values; it does not edit Dok OCR .env or
 # docker-compose.yml.
@@ -40,7 +42,7 @@ OPENVINO_MAX_BATCH_SIZE="${DOKOCR_OPENVINO_MAX_BATCH_SIZE:-4}"
 OPENVINO_MODEL_ID="${DOKOCR_OPENVINO_MODEL_ID:-paddleocr-vl}"
 APP_NETWORK="${DOKOCR_APP_NETWORK:-app_default}"
 
-BACKEND="${DOKOCR_PADDLE_BACKEND:-llamacpp}"
+BACKEND="${DOKOCR_PADDLE_BACKEND:-openvino-cpu}"
 SKIP_DOWNLOAD=0
 DRY_RUN=0
 START_SERVICES=1
@@ -50,11 +52,15 @@ usage() {
 Usage: $0 [--backend llamacpp|openvino-cpu] [--openvino-cpu] [--llamacpp] [--dry-run] [--skip-download] [--no-start]
 
 Backends:
-  llamacpp       Legacy GGUF + smart-proxy gateway. Requires llama-server.
-  openvino-cpu   CPU OpenVINO 2025.2 gateway with /v1/ocr/batch up to 4 pages.
+  openvino-cpu   Tested CPU OpenVINO 2025.2 gateway with /v1/ocr/batch up to 4 pages. Default.
+  llamacpp       Legacy GGUF OCR gateway. Requires compatible llama-server and PaddleOCR-VL GGUF files.
+
+Use this only if you need to provision a local PaddleOCR-VL OCR endpoint. If you already
+have a GPU/native/remote PaddleOCR-VL endpoint, configure that URL in Admin instead.
+Metadata refinement models are configured separately; this script does not install Gemma/Qwen.
 
 Common environment overrides:
-  DOKOCR_PADDLE_BACKEND          default: llamacpp
+  DOKOCR_PADDLE_BACKEND          default: openvino-cpu
   DOKOCR_APP_NETWORK             Docker network used by Dok OCR, default app_default
 
 llamacpp overrides:

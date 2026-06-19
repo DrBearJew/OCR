@@ -45,8 +45,8 @@ Each document can keep its original file, preview, OCR text, extracted metadata,
 
 > Turn messy PDFs, scans, screenshots, and receipts into Markdown-friendly OCR text.
 
-- **PaddleOCR-VL path:** strict smart multimodal OCR through the OpenVINO CPU gateway, the internal model gateway, or any compatible endpoint.
-- **OpenVINO CPU batch path:** optional PaddleOCR-VL gateway with `/v1/ocr/batch` for up to four rendered PDF pages per request using one loaded model.
+- **PaddleOCR-VL path:** strict smart multimodal OCR through any real PaddleOCR-VL-compatible endpoint: OpenVINO CPU, GPU/native, remote, or another compatible service.
+- **OpenVINO CPU batch path:** optional tested CPU PaddleOCR-VL gateway with `/v1/ocr/batch` for up to four rendered PDF pages per request using one loaded model.
 - **PP-OCRv6 local path:** CPU-friendly local OCR for basic deployments without a GPU.
 - **Provider honesty:** when a collection/document selects `paddle_vl`, Dok OCR uses PaddleOCR-VL OCR and surfaces failures instead of silently substituting another OCR engine.
 
@@ -55,7 +55,7 @@ Each document can keep its original file, preview, OCR text, extracted metadata,
 > OCR is only the first step. Dok OCR keeps the document workflow moving.
 
 - **Deterministic extraction:** titles, dates, correspondents, document types, tags, and collection fields.
-- **Optional Qwen refinement:** local text reasoning for metadata cleanup when enabled.
+- **Optional metadata refinement:** configurable OpenAI-compatible text reasoning for metadata cleanup when enabled. The deployed low-RAM default is Gemma 4 E2B QAT Q4_0, while legacy `qwen` aliases remain for app compatibility.
 - **Field locking:** manual corrections can be preserved during reprocessing.
 
 ### 🧾 Review cockpit
@@ -94,7 +94,7 @@ The pipeline can run automatically after upload. Manual controls remain availabl
 | --- | --- | --- | --- |
 | **Fake** | UI development and smoke tests | `fake` | No real OCR. Fastest way to test the app shell. |
 | **Local** | Small machines, CPU-only OCR | `ppocrv6` | No GPU required. PP-OCRv6 models are prewarmed during backend build. |
-| **Smart** | Higher quality document parsing | `paddle_vl` | Uses the OpenVINO CPU gateway, internal smart gateway, or a direct compatible model endpoint. |
+| **Smart** | Higher quality document parsing | `paddle_vl` | Uses any real PaddleOCR-VL-compatible endpoint. OpenVINO is the tested CPU option; GPU/native/remote endpoints are valid. ik_llama/Gemma metadata does not replace PaddleOCR-VL OCR. |
 | **Fallback** | Legacy multimodal OCR | `glm` | Kept as a secondary OCR path. |
 
 > [!TIP]
@@ -123,13 +123,13 @@ Prerequisites: Docker Compose and outbound network access for container images, 
 
 ---
 
-## 🚀 One-click smart PaddleOCR-VL stack
+## 🚀 Optional PaddleOCR-VL endpoint installers
 
-The installer supports two smart PaddleOCR-VL backends.
+These installers provision a local PaddleOCR-VL OCR endpoint. Skip them if you already have a GPU/native/remote PaddleOCR-VL endpoint; paste that endpoint in **Admin → Model Setup** instead. OpenVINO is the tested CPU option. The legacy llama.cpp/GGUF backend remains for old prepared hosts only and is not required for the Gemma metadata sidecar.
 
-### Recommended CPU backend: OpenVINO 2025.2
+### Optional tested CPU backend: OpenVINO 2025.2
 
-For CPU-only hosts, install the OpenVINO gateway:
+For CPU-only hosts that need a local PaddleOCR-VL endpoint, install the OpenVINO gateway:
 
 ```bash
 sudo scripts/install-smart-paddlevl.sh --backend openvino-cpu
@@ -148,9 +148,11 @@ The installer prints the **Admin → Model Setup** values to save. Use the Docke
 
 OpenVINO `2025.2.0` is pinned intentionally. Newer `2025.3+` / `2026.x` CPU wheels have known SIGFPE regressions on some AMD Zen 4 / KVM hosts.
 
-### Legacy GGUF backend: llama.cpp smart proxy
+### Legacy optional GGUF OCR backend: llama.cpp smart proxy
 
-For a host that already has Docker and a llama.cpp `llama-server` binary, run:
+This path is for legacy PaddleOCR-VL GGUF OCR deployments only. Do **not** install normal llama.cpp just for metadata refinement; production metadata uses the separate `deploy/qwen-ik-router/` ik_llama.cpp sidecar. If you already have GPU/native/remote PaddleOCR-VL, skip this installer and configure that endpoint directly.
+
+For a host that already has Docker and a compatible llama.cpp `llama-server` binary, run:
 
 ```bash
 sudo scripts/install-smart-paddlevl.sh --backend llamacpp
@@ -181,7 +183,11 @@ After either installer path finishes:
 
 ### Metadata sidecar standard
 
-Production metadata refinement uses the `deploy/qwen-ik-router/` ik_llama.cpp sidecar. The app still accepts legacy Qwen model names for compatibility, but the recommended model is Google Gemma 4 E2B QAT Q4_0:
+Production metadata refinement uses an OpenAI-compatible text endpoint after OCR. The deployed low-RAM sidecar in `deploy/qwen-ik-router/` uses ik_llama.cpp with Google Gemma 4 E2B QAT Q4_0 and keeps legacy Qwen model names for compatibility. This is a tested CPU/RAM-friendly default, not a requirement: on a strong GPU, you can point metadata refinement at a larger local or remote text model instead.
+
+The sidecar is text-only metadata extraction after OCR; it does not run PaddleOCR-VL and does not replace your PaddleOCR-VL endpoint, whether that endpoint is OpenVINO CPU, GPU/native, or remote.
+
+Tested low-RAM sidecar defaults:
 
 ```text
 model: /root/llm-models/gemma-4-E2B-it-qat-q4_0-gguf/gemma-4-E2B_q4_0-it.gguf
@@ -201,7 +207,7 @@ Gemma 4 requires `--jinja` and `--override-kv tokenizer.ggml.add_bos_token=bool:
 The Admin page includes **Model Setup**, a visual runtime wizard for normal users:
 
 - choose `Fake`, `Local`, or `Smart` mode.
-- configure PaddleOCR-VL, GLM, and Qwen endpoints.
+- configure PaddleOCR-VL OCR, GLM fallback OCR, and optional Gemma/Qwen metadata endpoints.
 - use the internal gateway preset.
 - test endpoints before saving.
 - change global defaults without editing `.env`.
@@ -237,7 +243,7 @@ QWEN_LLAMACPP_BASE_URL=http://host.docker.internal:18082/v1
 QWEN_MODEL_PATH=qwen
 ```
 
-The production metadata sidecar serves Gemma 4 E2B QAT Q4_0 behind the legacy `qwen` aliases. LM Studio, llama.cpp server, or another OpenAI-compatible service can provide compatible endpoints. The OpenVINO gateway also exposes `/v1/ocr/batch`, which Dok OCR uses to process rendered PaddleOCR-VL PDF pages in chunks of up to four without loading multiple model copies. The internal gateway hides routing details, normalizes OCR output, applies deterministic decode settings, and keeps model service details out of the normal user flow.
+The deployed metadata sidecar serves Gemma 4 E2B QAT Q4_0 behind the legacy `qwen` aliases, but metadata models are configurable. Strong-GPU installs can use a larger local/remote OpenAI-compatible text model by setting the metadata base URL/model in **Admin → Model Setup** or via `QWEN_LLAMACPP_BASE_URL` and `QWEN_MODEL_PATH`. This is separate from OCR: PaddleOCR-VL still needs a real PaddleOCR-VL endpoint, such as OpenVINO CPU, GPU/native, or remote. The OpenVINO gateway also exposes `/v1/ocr/batch`, which Dok OCR uses to process rendered PaddleOCR-VL PDF pages in chunks of up to four without loading multiple model copies. The internal gateway hides routing details, normalizes OCR output, applies deterministic decode settings, and keeps model service details out of the normal user flow.
 
 ---
 
@@ -286,7 +292,8 @@ Ready today:
 Still environment-dependent:
 
 - smart model weights and reliable download URLs.
-- llama.cpp build/install path.
+- external PaddleOCR-VL endpoint setup: OpenVINO CPU, GPU/native/remote, or legacy GGUF.
+- optional metadata model choice: tested Gemma E2B QAT Q4 sidecar, larger GPU-hosted text models, or remote OpenAI-compatible models.
 - GPU/CPU performance of external model endpoints.
 - HTTPS/reverse proxy and backup policy.
 
