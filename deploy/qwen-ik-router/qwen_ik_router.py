@@ -31,7 +31,7 @@ MODEL = os.getenv("QWEN_IK_MODEL", "/root/llm-models/gemma-4-E2B-it-qat-q4_0-ggu
 CHAT_TEMPLATE_FILE = os.getenv("QWEN_IK_CHAT_TEMPLATE_FILE", "/root/llm-models/gemma-4-E2B-it-qat-q4_0-gguf/google-gemma4-E2B-chat_template-main.jinja")
 SPEC_TYPE = os.getenv("QWEN_IK_SPEC_TYPE", "ngram-mod:n_max=16,n_min=0,ngram_size_n=40").strip()
 
-CTX_SIZE = os.getenv("QWEN_IK_CTX_SIZE", "4096")
+CTX_SIZE = os.getenv("QWEN_IK_CTX_SIZE", "8192")
 BATCH_SIZE = os.getenv("QWEN_IK_BATCH_SIZE", "1024")
 UBATCH_SIZE = os.getenv("QWEN_IK_UBATCH_SIZE", "512")
 THREADS = os.getenv("QWEN_IK_THREADS", "4")
