@@ -223,9 +223,10 @@ GLM_LLAMACPP_BASE_URL=http://glm-llama:8080
 GLM_MODEL_PATH=/llm-models/glm.gguf
 GLM_MMPROJ_PATH=/llm-models/glm-mmproj.gguf
 
-# Optional Qwen text reasoning
-QWEN_LLAMACPP_BASE_URL=http://qwen-llama:8080
-QWEN_MODEL_PATH=/llm-models/qwen.gguf
+# Optional metadata refinement sidecar.
+# Production serves Gemma 4 E2B QAT Q4_0 behind legacy qwen aliases.
+QWEN_LLAMACPP_BASE_URL=http://smart-proxy:8081/v1
+QWEN_MODEL_PATH=qwen
 LLM_METADATA_REFINEMENT_ENABLED=false
 LLM_REQUEST_TIMEOUT_SECONDS=120
 LLM_MAX_TOKENS=4096
@@ -443,7 +444,7 @@ The Admin UI is the technical configuration area for:
 - failed jobs and retries
 - reconciliation tasks
 
-Normal users should see model setup as an internal model gateway, not as raw smart-proxy internals.
+Normal users should see model setup as an internal model gateway, not as raw smart-proxy or Gemma/Qwen sidecar internals.
 
 ---
 

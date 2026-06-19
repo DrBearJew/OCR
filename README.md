@@ -179,6 +179,21 @@ After either installer path finishes:
 5. Adjust **OCR time budget** if processing large books/docs.
 6. Save.
 
+### Metadata sidecar standard
+
+Production metadata refinement uses the `deploy/qwen-ik-router/` ik_llama.cpp sidecar. The app still accepts legacy Qwen model names for compatibility, but the recommended model is Google Gemma 4 E2B QAT Q4_0:
+
+```text
+model: /root/llm-models/gemma-4-E2B-it-qat-q4_0-gguf/gemma-4-E2B_q4_0-it.gguf
+download: https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf/resolve/main/gemma-4-E2B_q4_0-it.gguf?download=true
+model id: gemma-4-e2b-it-qat-q4_0
+aliases: gemma-e2b,qwen-mtp,qwen3.5-2b,qwen
+spec: ngram-mod:n_max=16,n_min=0,ngram_size_n=40
+batch/ubatch: 1024/512
+```
+
+Gemma 4 requires `--jinja` and `--override-kv tokenizer.ggml.add_bos_token=bool:false`. Keep `--run-time-repack` disabled on small CPU hosts.
+
 ---
 
 ## 🛠️ Admin setup wizard
@@ -210,19 +225,19 @@ For basic local OCR:
 OCR_PROVIDER=ppocrv6
 ```
 
-For smart OCR or Qwen metadata refinement, prefer **Admin → Model Setup**. Advanced users can still configure compatible endpoints directly:
+For smart OCR or metadata refinement, prefer **Admin → Model Setup**. Advanced users can still configure compatible endpoints directly:
 
 ```env
 OCR_PROVIDER=paddle_vl
-PADDLE_VL_LLAMACPP_BASE_URL=http://host.docker.internal:1234/v1
+PADDLE_VL_LLAMACPP_BASE_URL=http://host.docker.internal:8091/v1
 PADDLE_VL_MODEL_PATH=paddleocr-vl
 
 LLM_METADATA_REFINEMENT_ENABLED=true
-QWEN_LLAMACPP_BASE_URL=http://host.docker.internal:1234/v1
+QWEN_LLAMACPP_BASE_URL=http://host.docker.internal:18082/v1
 QWEN_MODEL_PATH=qwen
 ```
 
-LM Studio, llama.cpp server, or another OpenAI-compatible service can provide these endpoints. The OpenVINO gateway also exposes `/v1/ocr/batch`, which Dok OCR uses to process rendered PaddleOCR-VL PDF pages in chunks of up to four without loading multiple model copies. The internal gateway hides routing details, normalizes OCR output, applies deterministic decode settings, and keeps model service details out of the normal user flow.
+The production metadata sidecar serves Gemma 4 E2B QAT Q4_0 behind the legacy `qwen` aliases. LM Studio, llama.cpp server, or another OpenAI-compatible service can provide compatible endpoints. The OpenVINO gateway also exposes `/v1/ocr/batch`, which Dok OCR uses to process rendered PaddleOCR-VL PDF pages in chunks of up to four without loading multiple model copies. The internal gateway hides routing details, normalizes OCR output, applies deterministic decode settings, and keeps model service details out of the normal user flow.
 
 ---
 
@@ -240,7 +255,7 @@ flowchart TB
   OCR --> GW[Internal model gateway]
   GW --> PVL[PaddleOCR-VL]
   GW --> GLM[GLM OCR]
-  W --> QWEN[Optional Qwen metadata]
+  W --> QWEN[Optional Gemma/Qwen metadata]
   W --> DB
 ```
 
