@@ -200,6 +200,8 @@ def derive_title_from_canonical_fields(collection_name: str, merged: dict[str, s
         amount = _title_token(merged.get("amount"), keep_comma=True)
         if all(not is_empty_value(value) for value in [sender, invoice_number, date, amount]):
             return f"{sender}_{invoice_number}_{date}_{amount}"
+        if all(not is_empty_value(value) for value in [sender, date, amount]):
+            return f"{sender}_{date}_{amount}"
     if collection == "ausgangsrechnung":
         recipient = _title_token(merged.get("recipient"), strip_party=True)
         invoice_number = _title_token(merged.get("invoice_number"), keep_slash=True)
@@ -207,6 +209,8 @@ def derive_title_from_canonical_fields(collection_name: str, merged: dict[str, s
         amount = _title_token(merged.get("amount"), keep_comma=True)
         if all(not is_empty_value(value) for value in [recipient, invoice_number, date, amount]):
             return f"{recipient}_{invoice_number}_{date}_{amount}"
+        if all(not is_empty_value(value) for value in [recipient, date, amount]):
+            return f"{recipient}_{date}_{amount}"
     if collection == "belege":
         sender = _title_token(merged.get("sender"), strip_party=True)
         date = _title_token(merged.get("date"), keep_slash=True)

@@ -34,33 +34,16 @@ Processing options:
 OCR text:
 {{ OcrText }}
 
-Return valid compact JSON only with this shape:
-{
-  "correspondent": {"value": "", "confidence": 0.0, "evidence": ""},
-  "sender": {"value": "", "confidence": 0.0, "evidence": ""},
-  "recipient": {"value": "", "confidence": 0.0, "evidence": ""},
-  "document_type": {"value": "", "confidence": 0.0, "evidence": ""},
-  "created_date": {"value": "YYYY-MM-DD", "confidence": 0.0, "evidence": ""},
-  "invoice_number": {"value": "", "confidence": 0.0, "evidence": ""},
-  "amount": {"value": "", "confidence": 0.0, "evidence": ""},
-  "currency": {"value": "", "confidence": 0.0},
-  "payment_method": {"value": "", "confidence": 0.0},
-  "custom_fields": {
-    "field_slug": {"value": "", "confidence": 0.0, "evidence": ""}
-  },
-  "suggested_title_base": {"value": "", "confidence": 0.0, "evidence": ""},
-  "suggested_tags": [],
-  "suggested_folder": "",
-  "search_keywords": ["search terms the user may use later"],
-  "summary": "short factual summary",
-  "entities": {
-    "people": [],
-    "organizations": [],
-    "locations": [],
-    "dates": [],
-    "amounts": []
-  },
-  "document_purpose": "why this document exists",
-  "related_search_queries": [],
-  "uncertain_fields": []
-}
+Return one valid MINIFIED JSON object only. Keep it under 700 output tokens.
+Put high-confidence core metadata first. Omit unknown optional keys instead of filling long empty structures.
+Evidence strings must be short OCR quotes, max 80 characters. No markdown, no prose.
+
+Required compact shape:
+{"sender":{"value":"","confidence":0.0,"evidence":""},"recipient":{"value":"","confidence":0.0,"evidence":""},"document_type":{"value":"","confidence":0.0,"evidence":""},"created_date":{"value":"YYYY-MM-DD","confidence":0.0,"evidence":""},"invoice_number":{"value":"","confidence":0.0,"evidence":""},"amount":{"value":"","confidence":0.0,"evidence":""},"currency":{"value":"","confidence":0.0},"payment_method":{"value":"","confidence":0.0},"custom_fields":{},"suggested_title_base":{"value":"","confidence":0.0,"evidence":""},"search_keywords":[],"summary":"","uncertain_fields":[]}
+
+Rules:
+- If the OCR has a VAT/tax line and a following gross total, use the gross total for amount.
+- If the filename contains an invoice date and OCR date labels are missing/noisy, use the filename date with evidence "filename".
+- If invoice number is absent, set invoice_number.value to "" and include "invoice_number" in uncertain_fields.
+- suggested_title_base should be the clean sender/customer name only, without invoice/date/amount.
+- search_keywords max 8 short strings; summary max 160 characters.

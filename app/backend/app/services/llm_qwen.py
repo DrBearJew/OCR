@@ -16,7 +16,7 @@ from app.services.prompt_loader import PromptLoader, RenderedPrompt
 
 logger = logging.getLogger(__name__)
 
-QWEN_METADATA_MAX_TOKENS = 512
+QWEN_METADATA_MAX_TOKENS = 1024
 
 
 QWEN_THINKING_DISABLED_SYSTEM_PROMPT = (

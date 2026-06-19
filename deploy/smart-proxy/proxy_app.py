@@ -698,7 +698,33 @@ def apply_title_rule_postprocessing(raw_title: str, original_prompt: str) -> str
 
 
 
-def unload_model(model_name: str) -> bool:
+def model_status(model_name: str) -> str | None:
+    try:
+        resp = requests.get(f"{LLAMA_ADMIN}/models", timeout=5)
+        if resp.status_code >= 300:
+            return None
+        for item in (resp.json().get("data") or []):
+            if item.get("id") == model_name or model_name in (item.get("aliases") or []):
+                status = item.get("status") or {}
+                return status.get("value")
+    except Exception as e:
+        logging.warning(f"Model status check failed for '{model_name}': {e}")
+    return None
+
+
+def wait_model_unloaded(model_name: str, timeout_seconds: float = 20.0) -> bool:
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        status = model_status(model_name)
+        if status == "unloaded":
+            logging.info(f"Model '{model_name}' confirmed unloaded")
+            return True
+        time.sleep(0.5)
+    logging.warning(f"Timed out waiting for model '{model_name}' to unload; last_status={model_status(model_name)}")
+    return False
+
+
+def unload_model(model_name: str, *, wait: bool = True) -> bool:
     model_name = (model_name or "").strip()
     if not model_name or model_name == "unknown":
         return False
@@ -712,21 +738,17 @@ def unload_model(model_name: str) -> bool:
 
         if 200 <= resp.status_code < 300:
             logging.info(f"Unload requested for model '{model_name}' via /models/unload")
-            return True
+            return wait_model_unloaded(model_name) if wait else True
+
+        if resp.status_code == 400 and "not running" in resp.text.lower():
+            logging.info(f"Model '{model_name}' was already not running")
+            return wait_model_unloaded(model_name) if wait else True
 
         logging.info(f"Unload attempt for '{model_name}' returned {resp.status_code}: {resp.text[:300]}")
     except Exception as e:
         logging.warning(f"Unload attempt failed for '{model_name}': {e}")
 
     return False
-
-
-def unload_model_async(model_name: str, reason: str) -> None:
-    def _run() -> None:
-        logging.info(f"Attempting unload of model '{model_name}' ({reason})")
-        unload_model(model_name)
-
-    threading.Thread(target=_run, daemon=True).start()
 
 
 def idle_unload_worker():
@@ -832,7 +854,7 @@ def smart_router():
             # Qwen metadata responses are compact JSON. Keep CPU-only inference
             # bounded; large output limits caused long-running requests to outlive
             # the caller and accumulate in llama.cpp.
-            data["max_tokens"] = min(int(data.get("max_tokens", 512)), 512)
+            data["max_tokens"] = min(int(data.get("max_tokens", 1024)), 1024)
             data["stop"] = ["```"]
 
             data, rewrite_ctx = maybe_rewrite_qwen_messages(data)
@@ -909,7 +931,8 @@ def smart_router():
         # OCR models are unloaded by the backend after the full document/page job,
         # not by the proxy after an individual page or batch chunk.
         if UNLOAD_AFTER_REQUEST and remaining == 0 and not is_ocr_model(requested_model):
-            unload_model_async(requested_model, "metadata request complete")
+            logging.info(f"Attempting unload of model '{requested_model}' (metadata request complete)")
+            unload_model(requested_model, wait=True)
 
 
 if __name__ == "__main__":
