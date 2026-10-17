@@ -88,6 +88,7 @@ def test_glm_ocr_adapter_uses_prompt_and_mocked_llama_response(monkeypatch, tmp_
         ocr_provider="glm",
         glm_llamacpp_base_url="http://glm-llama:8080",
         glm_model_path="/llm-models/glm.gguf",
+        glm_mmproj_path="/llm-models/glm-mmproj.gguf",
         llm_request_timeout_seconds=7,
     )
     result = GLMLlamaCppOCRProvider(settings).extract_text(str(path))
@@ -113,7 +114,7 @@ def test_paddle_vl_adapter_uses_prompt_and_mocked_llama_response(monkeypatch, tm
     Image.new("RGB", (8, 8), "white").save(path)
     settings = Settings(
         ocr_provider="paddle_vl",
-        paddle_vl_llamacpp_base_url="http://smart-proxy:8081/v1",
+        paddle_vl_llamacpp_base_url="http://model-runtime:8092/v1",
         paddle_vl_model_path="paddleocr-vl",
         paddle_vl_mmproj_path="/llm-models/paddleocr-vl-mmproj.gguf",
         llm_request_timeout_seconds=11,
@@ -122,7 +123,7 @@ def test_paddle_vl_adapter_uses_prompt_and_mocked_llama_response(monkeypatch, tm
     assert result.text == "OCR text from PaddleOCR-VL"
     assert result.prompt_name == "ocr_prompt.tmpl"
     assert result.model_role == "paddleocr_vl"
-    assert captured["url"] == "http://smart-proxy:8081/v1/chat/completions"
+    assert captured["url"] == "http://model-runtime:8092/v1/chat/completions"
     assert captured["json"]["model"] == "paddleocr-vl"
     assert captured["json"]["temperature"] == 0.0
     assert captured["json"]["max_tokens"] == 2048
@@ -147,7 +148,7 @@ def test_glm_ocr_config_reports_model_mismatch_and_missing_mmproj(monkeypatch, t
 
     missing_mmproj = Settings(
         ocr_provider="glm",
-        glm_llamacpp_base_url="http://smart-proxy:8081/v1",
+        glm_llamacpp_base_url="http://model-runtime:8092/v1",
         glm_model_path="glm",
         glm_mmproj_path="",
     )
@@ -160,9 +161,9 @@ def test_glm_ocr_config_reports_model_mismatch_and_missing_mmproj(monkeypatch, t
 
     mismatched_model = Settings(
         ocr_provider="glm",
-        glm_llamacpp_base_url="http://smart-proxy:8081/v1",
+        glm_llamacpp_base_url="http://model-runtime:8092/v1",
         glm_model_path="glm-ocr",
-        glm_mmproj_path="/root/llm-models/glm-mmproj.gguf",
+        glm_mmproj_path="/llm-models/glm-mmproj.gguf",
     )
     try:
         GLMLlamaCppOCRProvider(mismatched_model).extract_text(str(path))
@@ -186,6 +187,7 @@ def test_qwen_refinement_adapter_is_mockable(monkeypatch) -> None:
         qwen_model_path="/llm-models/qwen.gguf",
         llm_request_timeout_seconds=9,
         llm_metadata_refinement_enabled=True,
+        qwen_metadata_thinking_enabled=False,
     )
     result = QwenLlamaCppProvider(settings).refine_metadata(
         {
@@ -203,6 +205,9 @@ def test_qwen_refinement_adapter_is_mockable(monkeypatch) -> None:
     assert captured["json"]["messages"][0]["role"] == "system"
     assert "<|think_off|>" in captured["json"]["messages"][0]["content"]
     assert captured["json"]["messages"][1]["role"] == "user"
+    assert captured["json"]["temperature"] == 0.1
+    assert captured["json"]["top_p"] == 0.8
+    assert captured["json"]["chat_template_kwargs"] == {"enable_thinking": False}
 
 
 def test_qwen_metadata_candidate_adapter_requests_json_mode(monkeypatch) -> None:
@@ -228,10 +233,32 @@ def test_qwen_metadata_candidate_adapter_requests_json_mode(monkeypatch) -> None
     )
 
     assert result.raw_text == '{"summary":"ok"}'
-    assert captured["json"]["response_format"] == {"type": "json_object"}
-    assert captured["json"]["max_tokens"] == 2048
+    assert captured["json"]["response_format"]["type"] == "json_schema"
+    assert captured["json"]["response_format"]["json_schema"]["schema"]["properties"]["invoice_number"]["type"] == "object"
+    assert captured["json"]["max_tokens"] == 4096
+    assert captured["json"]["temperature"] == 0.1
+    assert captured["json"]["top_p"] == 0.8
+    assert captured["json"]["chat_template_kwargs"] == {"enable_thinking": True}
     assert "<|think_off|>" not in captured["json"]["messages"][0]["content"]
     assert "private reasoning channel" in captured["json"]["messages"][0]["content"]
+
+
+def test_qwen_metadata_candidate_extracts_reasoning_content_when_message_content_is_empty(monkeypatch) -> None:
+    def fake_post(url: str, json: dict[str, Any], timeout: float) -> FakeResponse:
+        return FakeResponse({"choices": [{"message": {"content": "", "reasoning_content": "```json\n{\"summary\":\"ok\"}\n```"}}]})
+
+    monkeypatch.setattr("app.services.llm_qwen.httpx.post", fake_post)
+    settings = Settings(
+        qwen_llamacpp_base_url="http://qwen-llama:8080",
+        qwen_model_path="/llm-models/qwen.gguf",
+        llm_request_timeout_seconds=9,
+        llm_metadata_refinement_enabled=True,
+    )
+    result = QwenLlamaCppProvider(settings).generate_metadata_candidates(
+        {"collection_name": "Eingangsrechnung", "ocr_text": "Demo Rechnung", "title": "Demo"}
+    )
+
+    assert result.raw_text == '{"summary":"ok"}'
 
 
 def test_qwen_metadata_candidate_budget_scales_with_custom_fields_and_ocr_length() -> None:
@@ -271,7 +298,7 @@ def test_qwen_json_mode_fallback_failure_is_provider_error() -> None:
         raise AssertionError("fallback HTTP error escaped without becoming QwenProviderError")
 
     assert len(calls) == 2
-    assert calls[0]["response_format"] == {"type": "json_object"}
+    assert calls[0]["response_format"]["type"] == "json_schema"
     assert "response_format" not in calls[1]
 
 
@@ -295,8 +322,13 @@ def test_qwen_metadata_brain_prompt_requires_structured_candidates() -> None:
     assert "valid MINIFIED JSON object" in rendered.text
     assert "Close the JSON object even for long documents" in rendered.text
     assert "ISO 8601 YYYY-MM-DD" in rendered.text
+    assert "use the explicitly labeled invoice/issue date" in rendered.text
+    assert "even when due dates or service dates are also present" in rendered.text
     assert "ISO 639-1 lowercase" in rendered.text
     assert "amount.value must be a JSON number" in rendered.text
+    assert 'Never translate names' in rendered.text
+    assert 'sender.value is the document issuer/supplier' in rendered.text
+    assert 'recipient.value is the billed customer named after labels' in rendered.text
     assert "Do not use scalar shortcuts" in rendered.text
     assert '"sender"' in rendered.text
     assert '"custom_fields"' in rendered.text

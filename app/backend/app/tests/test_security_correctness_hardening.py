@@ -6,13 +6,13 @@ from pathlib import Path
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.app_shell import collection_page
+from app.api.app_shell import activity_page, collection_page
 from app.api.collections import create_collection, delete_collection, update_collection
 from app.api.documents import list_documents_page, patch_document
 from app.api.folders import delete_folder, folder_contents, update_folder
 from app.api.records import list_records_page, patch_record
 from app.config import Settings
-from app.models import Batch, Collection, CustomFieldDefinition, CustomFieldType, Document, DocumentState, DocumentType, Folder, OCRMode, Record, ReviewState, StageState, StoragePathRule, Tag
+from app.models import Batch, Collection, CustomFieldDefinition, CustomFieldType, Document, DocumentEvent, DocumentState, DocumentType, Folder, OCRMode, Record, ReviewState, StageState, StoragePathRule, Tag
 from app.schemas import CollectionCreate, CollectionUpdate, DocumentPatch, FolderWrite, RecordPatch
 from app.services.collections import create_record_for_upload, ensure_collection, upsert_custom_field_value
 from app.services.folders import create_folder
@@ -256,6 +256,24 @@ def test_documents_and_records_page_endpoints_are_keyset_paginated(db_session: S
     second_records = list_records_page(q="Record", collection_slug="page-schema", limit=2, cursor=first_records["next_cursor"], db=db_session)
     assert len(second_records["items"]) == 2
     assert {row["id"] for row in first_records["items"]}.isdisjoint({row["id"] for row in second_records["items"]})
+
+    for index, doc in enumerate(docs):
+        db_session.add(DocumentEvent(
+            document_id=doc.id,
+            event_type="page_test",
+            actor="system",
+            source="automatic",
+            message=f"Activity PageNeedle {index}",
+            created_at=base_time + timedelta(hours=index),
+        ))
+    db_session.commit()
+    first_activity = activity_page(event_type="page_test", limit=2, db=db_session)
+    assert first_activity["total_estimate"] == 4
+    assert len(first_activity["items"]) == 2
+    assert first_activity["next_cursor"]
+    second_activity = activity_page(event_type="page_test", limit=2, cursor=first_activity["next_cursor"], db=db_session)
+    assert len(second_activity["items"]) == 2
+    assert {row["id"] for row in first_activity["items"]}.isdisjoint({row["id"] for row in second_activity["items"]})
 
     collection_payload = collection_page("page-schema", db=db_session)
     assert collection_payload["records"] == []

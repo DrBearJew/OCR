@@ -29,7 +29,7 @@ from app.services.llm_qwen import build_qwen_provider
 from app.services.metadata_resolver import resolve_metadata_fields, review_warnings_for_resolution
 from app.services.model_setup import settings_with_model_setup
 from app.services.model_gateway_lock import exclusive_model_gateway_lock
-from app.services.ocr_glm import OCRProvider, OCRProviderError, build_ocr_provider
+from app.services.ocr_glm import OCRProvider, OCRProviderError, OCRResult, build_ocr_provider
 from app.services.ocr_pipeline import resolve_ocr_config, store_effective_ocr_trace
 from app.services.paperless_metadata import apply_paperless_metadata
 from app.services.shared_titles import title_is_locked
@@ -905,6 +905,62 @@ def run_ocr_for_document(
 
             publish_document_task(db, document.id, extract_metadata_task, args=[str(document.id)], task_id=metadata_task_id, queue="metadata", stage="metadata")
         return document
+    if config.ocr_mode == OCRMode.redo and _is_pdf_document(document) and runtime_settings.ocr_pdf_text_layer_auto_enabled:
+        text_layer_result = _extract_pdf_text_layer_result(document, config, runtime_settings)
+        if text_layer_result is not None:
+            document.ocr_text = text_layer_result.text
+            document.raw_ocr_json = text_layer_result.raw_response
+            _write_page_fragments(db, document, text_layer_result.text, text_layer_result.raw_response)
+            document.prompt_trace_json = {
+                **(document.prompt_trace_json or {}),
+                "ocr": {
+                    "name": text_layer_result.prompt_name,
+                    "version": text_layer_result.prompt_version,
+                },
+                "ocr_config": config.as_dict(),
+            }
+            document.model_trace_json = {
+                **(document.model_trace_json or {}),
+                "ocr": {
+                    "role": text_layer_result.model_role,
+                    "endpoint": text_layer_result.model_endpoint,
+                    "model": text_layer_result.model_name,
+                },
+                "ocr_pipeline": {
+                    "engine": text_layer_result.model_role,
+                    "mode": config.ocr_mode.value,
+                    "source": "pdf_text_layer",
+                    "output_type_note": "Verified embedded PDF text layer accepted as OCR source; force mode runs model OCR.",
+                },
+            }
+            record_event(
+                db,
+                document,
+                "ocr_pdf_text_layer_used",
+                "Verified PDF text layer accepted as OCR source",
+                metadata=text_layer_result.raw_response.get("validation", {}),
+            )
+            record_event(
+                db,
+                document,
+                "ocr_done",
+                "OCR completed from verified PDF text layer",
+                metadata={"chars": len(text_layer_result.text), "source": "pdf_text_layer"},
+            )
+            document.ocr_state = StageState.done
+            document.processing_state = DocumentState.ocr_done
+            document.final_state = DocumentState.ocr_done
+            document.last_processing_heartbeat_at = datetime.now(timezone.utc)
+            metadata_task_id = str(uuid.uuid4()) if enqueue_metadata else None
+            if enqueue_metadata:
+                reserve_processing_task(document, task_id=metadata_task_id or "", stage="metadata", force=True)
+            update_batch_status(db, document.batch_id)
+            db.commit()
+            if enqueue_metadata:
+                from app.workers.tasks import extract_metadata_task, publish_document_task
+
+                publish_document_task(db, document.id, extract_metadata_task, args=[str(document.id)], task_id=metadata_task_id, queue="metadata", stage="metadata")
+            return document
     provider = provider or build_ocr_provider(runtime_settings, provider_name=config.ocr_engine)
     try:
         document.processing_state = DocumentState.ocr_processing
@@ -993,6 +1049,144 @@ def run_ocr_for_document(
 
 def _is_pdf_document(document: Document) -> bool:
     return (document.mime_type or "").lower() == "application/pdf" or document.storage_path.lower().endswith(".pdf")
+
+
+def _extract_pdf_text_layer_result(document: Document, config: Any, settings: Any) -> OCRResult | None:
+    page_limit = max(1, int(getattr(config, "page_limit", 1) or 1))
+    min_total_chars = max(1, int(getattr(settings, "ocr_pdf_text_layer_min_chars", 80) or 80))
+    min_chars_per_page = max(1, int(getattr(settings, "ocr_pdf_text_layer_min_chars_per_page", 20) or 20))
+    try:
+        import pypdfium2 as pdfium
+
+        pdf = pdfium.PdfDocument(document.storage_path)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("PDF text-layer preflight unavailable document_id=%s error=%s", document.id, exc)
+        return None
+
+    page_payloads: list[dict[str, Any]] = []
+    texts: list[str] = []
+    page_count = 0
+    try:
+        page_count = len(pdf)
+        checked_pages = min(page_count, page_limit)
+        for index in range(checked_pages):
+            page = pdf.get_page(index)
+            try:
+                textpage = page.get_textpage()
+                try:
+                    char_count = int(textpage.count_chars())
+                    raw_text = textpage.get_text_range(0, char_count) if char_count > 0 else ""
+                finally:
+                    textpage.close()
+            finally:
+                page.close()
+            text = _normalize_pdf_text_layer_text(raw_text)
+            nonspace_chars = _nonspace_char_count(text)
+            texts.append(text)
+            page_payloads.append(
+                {
+                    "page_number": index + 1,
+                    "text": text,
+                    "char_count": len(text),
+                    "nonspace_char_count": nonspace_chars,
+                }
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.info("PDF text-layer preflight failed document_id=%s error=%s", document.id, exc)
+        return None
+    finally:
+        try:
+            pdf.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    full_text = "\f".join(texts).strip()
+    validation = _validate_pdf_text_layer(full_text, page_payloads, page_count=page_count, page_limit=page_limit, min_total_chars=min_total_chars, min_chars_per_page=min_chars_per_page)
+    if not validation["accepted"]:
+        logger.info("PDF text-layer rejected document_id=%s reason=%s", document.id, validation["reason"])
+        session = object_session(document)
+        if session is not None:
+            record_event(
+                session,
+                document,
+                "ocr_pdf_text_layer_rejected",
+                "PDF text layer rejected before model OCR",
+                metadata=validation,
+            )
+        return None
+    logger.info("PDF text-layer accepted document_id=%s chars=%s pages=%s", document.id, validation["text_chars"], validation["checked_pages"])
+    return OCRResult(
+        text=full_text,
+        raw_response={
+            "source": "pdf_text_layer",
+            "pages": page_payloads,
+            "validation": validation,
+        },
+        prompt_name="pdf_text_layer",
+        prompt_version="1",
+        model_role="pdf_text_layer",
+        model_endpoint="local",
+        model_name="embedded_pdf_text",
+        model_response_text=full_text,
+    )
+
+
+def _normalize_pdf_text_layer_text(text: str) -> str:
+    text = unicodedata.normalize("NFKC", str(text or "")).replace("\x00", "")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [re.sub(r"[ \t\v\f]+", " ", line).strip() for line in text.split("\n")]
+    return "\n".join(line for line in lines if line).strip()
+
+
+def _nonspace_char_count(text: str) -> int:
+    return sum(1 for ch in text if not ch.isspace())
+
+
+def _validate_pdf_text_layer(
+    text: str,
+    pages: list[dict[str, Any]],
+    *,
+    page_count: int,
+    page_limit: int,
+    min_total_chars: int,
+    min_chars_per_page: int,
+) -> dict[str, Any]:
+    checked_pages = len(pages)
+    text_chars = len(text.strip())
+    nonspace_chars = _nonspace_char_count(text)
+    required_chars = max(min_total_chars, min_chars_per_page * max(1, checked_pages))
+    page_hits = sum(1 for page in pages if int(page.get("nonspace_char_count") or 0) >= min_chars_per_page)
+    control_chars = sum(1 for ch in text if unicodedata.category(ch).startswith("C") and ch not in "\n\t\f")
+    alnum_chars = sum(1 for ch in text if ch.isalnum())
+    validation = {
+        "accepted": False,
+        "reason": "not_checked",
+        "source": "pdf_text_layer",
+        "page_count": page_count,
+        "checked_pages": checked_pages,
+        "page_limit": page_limit,
+        "text_chars": text_chars,
+        "nonspace_chars": nonspace_chars,
+        "required_chars": required_chars,
+        "pages_with_text": page_hits,
+        "min_chars_per_page": min_chars_per_page,
+        "control_chars": control_chars,
+        "alnum_ratio": round(alnum_chars / max(1, nonspace_chars), 4),
+    }
+    if checked_pages <= 0:
+        validation["reason"] = "no_pages_checked"
+    elif text_chars < required_chars:
+        validation["reason"] = "too_little_text"
+    elif page_hits != checked_pages:
+        validation["reason"] = "too_few_text_pages"
+    elif control_chars > max(8, int(nonspace_chars * 0.02)):
+        validation["reason"] = "too_many_control_chars"
+    elif alnum_chars / max(1, nonspace_chars) < 0.25:
+        validation["reason"] = "too_few_alnum_chars"
+    else:
+        validation["accepted"] = True
+        validation["reason"] = "accepted"
+    return validation
 
 
 def _ocr_uses_shared_model_gateway(config: Any) -> bool:

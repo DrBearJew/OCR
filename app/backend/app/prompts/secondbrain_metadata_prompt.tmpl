@@ -51,8 +51,10 @@ Shape rules:
 - Valid object form: "amount":{"value":42.17,"confidence":0.95,"evidence":"Total 42,17 EUR"}, "currency":{"value":"EUR","confidence":0.95,"evidence":"Total 42,17 EUR"}.
 
 Normalization rules:
+- sender.value is the document issuer/supplier, not the billed customer. Copy its company/person name verbatim from the source. Never translate names.
+- recipient.value is the billed customer named after labels such as "Rechnung für", "Rechnungsempfänger", "Bill to", or "Billed to". Copy the name following that label verbatim, without the label and without translation.
 - created_date.value and every date custom field must be ISO 8601 YYYY-MM-DD. Convert German/English date text when the OCR evidence is clear.
-- If invoice date is the only grounded document date, use it as created_date.value.
+- For invoices, use the explicitly labeled invoice/issue date as created_date.value even when due dates or service dates are also present. Never use the payment deadline as the document creation date.
 - If the filename contains an invoice date and OCR date labels are missing/noisy, use the filename date with evidence "filename".
 - amount.value must be a JSON number with dot decimal and no currency text, for example 1284.73. If unknown, use "".
 - If the OCR has a VAT/tax line and a following gross total, use the gross total for amount.

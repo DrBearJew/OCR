@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import base64
+import json
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import require_admin
@@ -83,6 +85,65 @@ def activity(
     limit: int = 200,
     db: Session = Depends(get_db),
 ) -> list[dict]:
+    normalized_limit = max(1, min(limit, 500))
+    stmt = _activity_stmt(
+        document_id=document_id,
+        record_id=record_id,
+        event_type=event_type,
+        source=source,
+        actor=actor,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    rows = db.execute(stmt.order_by(DocumentEvent.created_at.desc(), DocumentEvent.id.desc()).limit(normalized_limit)).all()
+    return [_activity_row(event, document) for event, document in rows]
+
+
+@router.get("/activity/page")
+def activity_page(
+    document_id: uuid.UUID | None = None,
+    record_id: uuid.UUID | None = None,
+    event_type: str | None = None,
+    source: str | None = None,
+    actor: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    limit: int = 100,
+    cursor: str | None = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    normalized_limit = max(1, min(limit, 500))
+    stmt = _activity_stmt(
+        document_id=document_id,
+        record_id=record_id,
+        event_type=event_type,
+        source=source,
+        actor=actor,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    stmt = _apply_activity_cursor(stmt, cursor)
+    rows = db.execute(stmt.order_by(DocumentEvent.created_at.desc(), DocumentEvent.id.desc()).limit(normalized_limit + 1)).all()
+    page_rows = rows[:normalized_limit]
+    return {
+        "items": [_activity_row(event, document) for event, document in page_rows],
+        "limit": normalized_limit,
+        "next_cursor": _encode_activity_cursor(page_rows[-1][0]) if len(rows) > normalized_limit and page_rows else None,
+        "total_estimate": int(total),
+    }
+
+
+def _activity_stmt(
+    *,
+    document_id: uuid.UUID | None,
+    record_id: uuid.UUID | None,
+    event_type: str | None,
+    source: str | None,
+    actor: str | None,
+    date_from: date | None,
+    date_to: date | None,
+):
     stmt = select(DocumentEvent, Document).join(Document, Document.id == DocumentEvent.document_id).where(Document.deleted_at.is_(None))
     if document_id:
         stmt = stmt.where(DocumentEvent.document_id == document_id)
@@ -98,17 +159,44 @@ def activity(
         stmt = stmt.where(func.date(DocumentEvent.created_at) >= date_from)
     if date_to:
         stmt = stmt.where(func.date(DocumentEvent.created_at) <= date_to)
-    rows = db.execute(stmt.order_by(DocumentEvent.created_at.desc()).limit(min(limit, 500))).all()
-    return [
-        {
-            **DocumentEventRead.model_validate(event).model_dump(mode="json"),
-            "record_id": str(document.record_id) if document.record_id else None,
-            "document_title": document.display_title,
-            "original_filename": document.original_filename,
-            "collection_name": document.collection_name,
-        }
-        for event, document in rows
-    ]
+    return stmt
+
+
+def _activity_row(event: DocumentEvent, document: Document) -> dict:
+    return {
+        **DocumentEventRead.model_validate(event).model_dump(mode="json"),
+        "record_id": str(document.record_id) if document.record_id else None,
+        "document_title": document.display_title,
+        "original_filename": document.original_filename,
+        "collection_name": document.collection_name,
+    }
+
+
+def _apply_activity_cursor(stmt, cursor: str | None):
+    decoded = _decode_activity_cursor(cursor)
+    if decoded is None:
+        return stmt
+    created_at, row_id = decoded
+    return stmt.where(or_(DocumentEvent.created_at < created_at, and_(DocumentEvent.created_at == created_at, DocumentEvent.id < row_id)))
+
+
+def _encode_activity_cursor(event: DocumentEvent) -> str:
+    payload = {"created_at": event.created_at.isoformat(), "id": str(event.id)}
+    return base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("ascii")
+
+
+def _decode_activity_cursor(cursor: str | None) -> tuple[datetime, uuid.UUID] | None:
+    if cursor is None:
+        return None
+    try:
+        payload = json.loads(base64.b64decode(cursor.encode("ascii"), altchars=b"-_", validate=True).decode("utf-8"))
+        if not isinstance(payload, dict) or not isinstance(payload.get("created_at"), str) or not isinstance(payload.get("id"), str):
+            raise ValueError("Cursor must contain a timestamp and UUID string")
+        created_at = datetime.fromisoformat(payload["created_at"])
+        row_id = uuid.UUID(payload["id"])
+        return created_at, row_id
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid cursor") from exc
 
 
 @router.get("/processing")
@@ -222,6 +310,11 @@ def collection_page(slug: str, db: Session = Depends(get_db)) -> dict:
         "next_cursor": None,
         "total_estimate": int(record_count),
         "status_counts": _status_counts_for_collection(db, collection.name),
+        "needs_review_count": db.scalar(
+            select(func.count(Document.id))
+            .where(Document.collection_name == collection.name, Document.deleted_at.is_(None))
+            .where(Document.review_state == ReviewState.needs_review)
+        ) or 0,
     }
 
 

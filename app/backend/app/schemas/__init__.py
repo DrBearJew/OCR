@@ -538,6 +538,9 @@ class ModelSetupRead(BaseModel):
     ocr_task_paddle_vl_seconds_per_chunk: int = Field(default=180, ge=1)
     ocr_task_glm_seconds_per_page: int = Field(default=180, ge=1)
     ocr_task_ppocrv6_seconds_per_page: int = Field(default=30, ge=1)
+    ocr_pdf_text_layer_auto_enabled: bool = True
+    ocr_pdf_text_layer_min_chars: int = Field(default=80, ge=1)
+    ocr_pdf_text_layer_min_chars_per_page: int = Field(default=20, ge=1)
 
 
 class ModelSetupWrite(ModelSetupRead):

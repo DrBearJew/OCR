@@ -72,11 +72,11 @@ class Settings(BaseSettings):
     login_rate_limit_window_seconds: int = 300
 
     ocr_provider: str = Field(default="fake", pattern="^(fake|glm|paddle_vl|ppocrv6)$")
-    glm_llamacpp_base_url: str = "http://glm-llama:8080"
-    glm_model_path: str = "/llm-models/glm.gguf"
+    glm_llamacpp_base_url: str = "http://model-runtime:8092/v1"
+    glm_model_path: str = "glm"
     glm_mmproj_path: str = "/llm-models/glm-mmproj.gguf"
 
-    paddle_vl_llamacpp_base_url: str = "http://smart-proxy:8081/v1"
+    paddle_vl_llamacpp_base_url: str = "http://model-runtime:8092/v1"
     paddle_vl_model_path: str = "paddleocr-vl"
     paddle_vl_mmproj_path: str = "/llm-models/paddleocr-vl-mmproj.gguf"
 
@@ -84,7 +84,7 @@ class Settings(BaseSettings):
     ppocrv6_engine: str = "onnxruntime"
     ppocrv6_device: str = "cpu"
 
-    qwen_llamacpp_base_url: str = "http://smart-proxy:8081/v1"
+    qwen_llamacpp_base_url: str = "http://model-runtime:8092/v1"
     qwen_model_path: str = "metadata"
 
     llm_request_timeout_seconds: float = 120.0
@@ -104,6 +104,11 @@ class Settings(BaseSettings):
     ocr_rotate_threshold: float = 12.0
     ocr_output_type: str = "pdfa"
     ocr_max_image_pixels: int = 40_000_000
+    # Fast path for searchable PDFs. In redo mode, verified embedded text is
+    # accepted as the OCR source; force mode always runs the configured OCR model.
+    ocr_pdf_text_layer_auto_enabled: bool = True
+    ocr_pdf_text_layer_min_chars: int = 80
+    ocr_pdf_text_layer_min_chars_per_page: int = 20
 
     consume_path: Path = Path("/data/consume")
     ingestion_poll_interval_seconds: int = 300

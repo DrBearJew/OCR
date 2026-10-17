@@ -34,6 +34,9 @@ def default_model_setup(settings: Settings | None = None) -> dict[str, Any]:
         "ocr_task_paddle_vl_seconds_per_chunk": settings.ocr_task_paddle_vl_seconds_per_chunk,
         "ocr_task_glm_seconds_per_page": settings.ocr_task_glm_seconds_per_page,
         "ocr_task_ppocrv6_seconds_per_page": settings.ocr_task_ppocrv6_seconds_per_page,
+        "ocr_pdf_text_layer_auto_enabled": settings.ocr_pdf_text_layer_auto_enabled,
+        "ocr_pdf_text_layer_min_chars": settings.ocr_pdf_text_layer_min_chars,
+        "ocr_pdf_text_layer_min_chars_per_page": settings.ocr_pdf_text_layer_min_chars_per_page,
     }
 
 
@@ -68,6 +71,7 @@ def settings_with_model_setup(db: Session, settings: Settings | None = None) -> 
         "qwen_llamacpp_base_url": setup.get("qwen_base_url") or settings.qwen_llamacpp_base_url,
         "qwen_model_path": setup.get("qwen_model") or settings.qwen_model_path,
         "llm_metadata_refinement_enabled": bool(setup.get("qwen_enabled")),
+        "ocr_pdf_text_layer_auto_enabled": bool(setup.get("ocr_pdf_text_layer_auto_enabled")),
     }
     if setup.get("timeout_seconds"):
         updates["llm_request_timeout_seconds"] = float(setup["timeout_seconds"])
@@ -80,6 +84,8 @@ def settings_with_model_setup(db: Session, settings: Settings | None = None) -> 
         "ocr_task_paddle_vl_seconds_per_chunk",
         "ocr_task_glm_seconds_per_page",
         "ocr_task_ppocrv6_seconds_per_page",
+        "ocr_pdf_text_layer_min_chars",
+        "ocr_pdf_text_layer_min_chars_per_page",
     ):
         if setup.get(key) is not None:
             updates[key] = int(setup[key])
@@ -121,6 +127,8 @@ def _clean_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "ocr_task_hard_time_limit_grace_seconds", "ocr_task_lease_grace_seconds",
         "ocr_task_base_overhead_seconds", "ocr_task_paddle_vl_seconds_per_chunk",
         "ocr_task_glm_seconds_per_page", "ocr_task_ppocrv6_seconds_per_page",
+        "ocr_pdf_text_layer_auto_enabled", "ocr_pdf_text_layer_min_chars",
+        "ocr_pdf_text_layer_min_chars_per_page",
     }
     cleaned = {key: value for key, value in payload.items() if key in allowed}
     if cleaned.get("ocr_provider") not in {"fake", "ppocrv6", "paddle_vl", "glm", None}:
@@ -136,6 +144,8 @@ def _clean_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "ocr_task_paddle_vl_seconds_per_chunk",
         "ocr_task_glm_seconds_per_page",
         "ocr_task_ppocrv6_seconds_per_page",
+        "ocr_pdf_text_layer_min_chars",
+        "ocr_pdf_text_layer_min_chars_per_page",
     ):
         if key in cleaned:
             try:

@@ -35,7 +35,8 @@ QWEN_METADATA_THINKING_SYSTEM_PROMPT = (
     "You are a precise metadata extraction engine. You may reason internally if the runtime "
     "supports a private reasoning channel, but the final assistant message content must contain "
     "only the requested final answer. Do not include reasoning, analysis, or chain-of-thought "
-    "in assistant message content."
+    "in assistant message content. Copy company and person names exactly from the supplied "
+    "source. Never translate company or person names."
 )
 
 
@@ -172,24 +173,56 @@ class QwenLlamaCppProvider:
         return self._chat(prompt, role_name="secondbrain enrichment")
 
     def _chat(self, prompt: RenderedPrompt, *, role_name: str, json_only: bool = False, max_tokens: int | None = None) -> QwenRefinement:
+        # Dok OCR owns metadata runtime shaping here. llama-swap should only load,
+        # unload, and proxy models; app-specific JSON/metadata behavior does not
+        # belong in a separate smart proxy.
+        if self.settings.qwen_metadata_thinking_enabled:
+            max_tokens = min(int(self.settings.llm_max_tokens), QWEN_METADATA_MAX_TOKENS)
+        temperature = float(self.settings.llm_temperature)
+        if temperature == 0.0:
+            # Preserve the production metadata default. Zero-temperature
+            # Gemma/Qwen metadata calls were more prone to empty/rigid answers.
+            temperature = 0.1
         body = {
             "model": self.settings.qwen_model_name,
             "messages": [
                 {"role": "system", "content": self._system_prompt(json_only=json_only)},
                 {"role": "user", "content": prompt.text},
             ],
-            "temperature": self.settings.llm_temperature,
+            "temperature": temperature,
+            "top_p": 0.8,
             "max_tokens": max_tokens or min(int(self.settings.llm_max_tokens), QWEN_METADATA_BASE_MAX_TOKENS),
+            "chat_template_kwargs": {"enable_thinking": self.settings.qwen_metadata_thinking_enabled},
         }
         if json_only:
-            body["response_format"] = {"type": "json_object"}
+            fields = ("sender", "recipient", "document_type", "created_date", "invoice_number",
+                      "amount", "currency", "payment_method", "suggested_title_base")
+            body["response_format"] = {"type": "json_schema", "json_schema": {
+                "name": "metadata_candidates",
+                "schema": {
+                    "type": "object",
+                    "properties": {field: {
+                        "type": "object",
+                        "properties": {
+                            "value": {"type": ["number", "string"] if field == "amount" else "string"},
+                            "confidence": {"type": "number"},
+                            "evidence": {"type": "string"},
+                        },
+                        "required": ["value", "confidence", "evidence"],
+                        "additionalProperties": False,
+                    } for field in fields},
+                    "required": list(fields),
+                    "additionalProperties": True,
+                },
+            }}
         url = llama_chat_completions_url(self.settings.qwen_llamacpp_base_url)
+        request_timeout = self._request_timeout()
         try:
             with exclusive_model_gateway_lock(
                 "qwen:metadata",
                 settings=self.settings,
-                wait_timeout_seconds=max(self.settings.ocr_task_time_limit, self.settings.llm_request_timeout_seconds),
-                lease_seconds=max(self.settings.llm_request_timeout_seconds + 60, 180),
+                wait_timeout_seconds=max(self.settings.ocr_task_time_limit, request_timeout),
+                lease_seconds=max(2 * request_timeout + 60, 180),
             ):
                 raw = self._post_chat(url, body)
                 if json_only and not _chat_content(raw) and body.get("response_format"):
@@ -207,8 +240,8 @@ class QwenLlamaCppProvider:
                     with exclusive_model_gateway_lock(
                         "qwen:metadata",
                         settings=self.settings,
-                        wait_timeout_seconds=max(self.settings.ocr_task_time_limit, self.settings.llm_request_timeout_seconds),
-                        lease_seconds=max(self.settings.llm_request_timeout_seconds + 60, 180),
+                        wait_timeout_seconds=max(self.settings.ocr_task_time_limit, request_timeout),
+                        lease_seconds=max(2 * request_timeout + 60, 180),
                     ):
                         raw = self._post_chat(url, fallback_body)
                 except httpx.HTTPError as fallback_exc:
@@ -237,15 +270,20 @@ class QwenLlamaCppProvider:
         )
 
     def _system_prompt(self, *, json_only: bool) -> str:
-        if json_only and self.settings.qwen_metadata_thinking_enabled:
+        if self.settings.qwen_metadata_thinking_enabled:
             return QWEN_METADATA_THINKING_SYSTEM_PROMPT
         return QWEN_THINKING_DISABLED_SYSTEM_PROMPT
+
+    def _request_timeout(self) -> float:
+        # ponytail: 4096 CPU tokens plus cold loading can exceed 120 seconds.
+        configured = float(self.settings.llm_request_timeout_seconds)
+        return max(configured, 240.0) if self.settings.qwen_metadata_thinking_enabled else configured
 
     def _post_chat(self, url: str, body: dict[str, Any]) -> dict[str, Any]:
         response = httpx.post(
             url,
             json=body,
-            timeout=self.settings.llm_request_timeout_seconds,
+            timeout=self._request_timeout(),
         )
         response.raise_for_status()
         return response.json()
@@ -380,8 +418,61 @@ def _repair_extra_string_literals_after_evidence(text: str) -> str:
 
 def _chat_content(raw: dict[str, Any]) -> str:
     choices = raw.get("choices") or []
-    message = choices[0].get("message") if choices else {}
-    return str((message or {}).get("content") or "").strip()
+    if not choices or not isinstance(choices[0], dict):
+        return ""
+    return _strip_wrappers_keep_structure(_extract_text_from_choice(choices[0]))
+
+
+def _extract_text_from_choice(choice: dict[str, Any]) -> str:
+    message = choice.get("message")
+    if not isinstance(message, dict):
+        message = {}
+
+    content = message.get("content")
+    if isinstance(content, str) and content.strip():
+        return content.strip()
+
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text")
+            if item.get("type") in {"text", "output_text"} and isinstance(text, str) and text.strip():
+                parts.append(text.strip())
+        if parts:
+            return "\n".join(parts).strip()
+
+    for container in (message, choice):
+        for key in ("thinking_content", "reasoning_content", "thinking", "reasoning", "output_text", "text"):
+            value = container.get(key) if isinstance(container, dict) else None
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+    return ""
+
+
+def _strip_wrappers_keep_structure(text: str) -> str:
+    if not text:
+        return ""
+    text = str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
+    text = re.sub(r"^```[a-zA-Z0-9_-]*\s*\n", "", text)
+    text = re.sub(r"\n```$", "", text)
+    try:
+        json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    else:
+        # Literal markup/backticks inside JSON values are source data, not wrappers.
+        return text
+    text = re.sub(r"<(think|thinking|content|reasoning)>\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*</(think|thinking|content|reasoning)>", "", text, flags=re.IGNORECASE)
+    lines = [re.sub(r"[ \t]+$", "", line) for line in text.split("\n")]
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines).strip()
 
 
 def _extract_json_region(text: str) -> str | None:

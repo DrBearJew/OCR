@@ -1,13 +1,21 @@
 from __future__ import annotations
 
+import base64
+from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
+import uuid
 
-from fastapi import HTTPException
+import pytest
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.api.app_shell import activity, dashboard, failed_and_review, processing
+from app.api.app_shell import activity, dashboard, failed_and_review, processing, router
 from app.api.documents import bulk_documents, patch_document
-from app.models import Batch, Document, DocumentState, ReviewState, SavedView, StageState
+from app.auth import require_admin
+from app.db import get_db
+from app.models import Batch, Document, DocumentEvent, DocumentState, ReviewState, SavedView, StageState
 from app.schemas import DocumentBulkAction, DocumentPatch
 from app.services.collections import create_record_for_upload, ensure_collection
 from app.services.events import record_event
@@ -65,6 +73,128 @@ def test_dashboard_processing_failed_and_activity_shell_endpoints(db_session: Se
 
     events = activity(actor="admin", db=db_session)
     assert any(row["event_type"] == "manual_edit" and row["document_id"] == str(complete.id) for row in events)
+
+
+@pytest.fixture()
+def shell_client(db_session: Session):
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[require_admin] = lambda: "admin"
+    with TestClient(app) as client:
+        yield client
+
+
+def test_collection_page_counts_review_independently_of_processing_state(db_session: Session, tmp_path: Path, shell_client) -> None:
+    needs_review = make_shell_document(db_session, tmp_path)
+    needs_review.review_state = ReviewState.needs_review
+    reviewed = make_shell_document(db_session, tmp_path)
+    reviewed.review_state = ReviewState.reviewed
+    deleted = make_shell_document(db_session, tmp_path)
+    deleted.review_state = ReviewState.needs_review
+    deleted.deleted_at = datetime.now(timezone.utc)
+    db_session.commit()
+
+    response = shell_client.get("/api/collection-pages/dokumente")
+    assert response.status_code == 200
+    assert response.json()["status_counts"] == {"complete": 2}
+    assert response.json()["needs_review_count"] == 1
+
+
+def test_activity_legacy_and_page_default_limits(db_session: Session, tmp_path: Path, shell_client) -> None:
+    doc = make_shell_document(db_session, tmp_path)
+    db_session.add_all([
+        DocumentEvent(document_id=doc.id, event_type="limit_test", message=str(index))
+        for index in range(205)
+    ])
+    db_session.commit()
+
+    legacy = shell_client.get("/api/activity", params={"event_type": "limit_test"})
+    assert legacy.status_code == 200
+    assert len(legacy.json()) == 200
+    page = shell_client.get("/api/activity/page", params={"event_type": "limit_test"})
+    assert page.status_code == 200
+    assert len(page.json()["items"]) == page.json()["limit"] == 100
+    assert page.json()["total_estimate"] == 205
+
+
+def test_activity_pages_order_tied_timestamps_and_preserve_filters(db_session: Session, tmp_path: Path, shell_client) -> None:
+    doc = make_shell_document(db_session, tmp_path)
+    deleted = make_shell_document(db_session, tmp_path)
+    base_time = datetime(2026, 2, 1, 12, tzinfo=timezone.utc)
+    deleted.deleted_at = base_time
+    deleted.record_id = doc.record_id
+    expected = []
+    for index in [3, 1, 6, 2, 5, 0, 4]:
+        created_at = base_time + timedelta(minutes=index // 3)
+        row_id = uuid.UUID(int=index + 1)
+        db_session.add(DocumentEvent(
+            id=row_id, document_id=doc.id, event_type="cursor_test", actor="admin",
+            source="manual", message=str(index), created_at=created_at,
+        ))
+        expected.append((created_at, str(row_id)))
+    for overrides in [
+        {"document_id": deleted.id}, {"event_type": "other"},
+        {"actor": "system"}, {"source": "automatic"},
+        {"created_at": base_time - timedelta(days=1)},
+        {"created_at": base_time + timedelta(days=1)},
+    ]:
+        db_session.add(DocumentEvent(**{
+            "document_id": doc.id, "event_type": "cursor_test", "actor": "admin",
+            "source": "manual", "message": "excluded", "created_at": base_time, **overrides,
+        }))
+    db_session.commit()
+    params = {
+        "record_id": str(doc.record_id), "event_type": "cursor_test", "actor": "admin",
+        "source": "manual", "date_from": "2026-02-01", "date_to": "2026-02-01", "limit": 2,
+    }
+    seen = []
+    for page_index in range(4):
+        response = shell_client.get("/api/activity/page", params=params)
+        assert response.status_code == 200
+        page = response.json()
+        assert page["total_estimate"] == 7
+        assert len(page["items"]) == (1 if page_index == 3 else 2)
+        seen.extend(item["id"] for item in page["items"])
+        if page_index == 3:
+            assert page["next_cursor"] is None
+        else:
+            assert page["next_cursor"]
+            params["cursor"] = page["next_cursor"]
+    assert seen == [row_id for _, row_id in sorted(expected, reverse=True)]
+    legacy = shell_client.get("/api/activity", params={key: value for key, value in params.items() if key != "cursor"})
+    assert [item["id"] for item in legacy.json()] == seen[:2]
+
+
+@pytest.mark.parametrize("cursor", ["", "a", "!!!!", "not-base64", "é", "/w=="])
+def test_activity_page_rejects_malformed_base64(shell_client, cursor: str) -> None:
+    response = shell_client.get("/api/activity/page", params={"cursor": cursor})
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Invalid cursor"
+
+
+@pytest.mark.parametrize("payload", [
+    None, True, 42, "text", [], {},
+    {"created_at": "2026-02-01T12:00:00"},
+    {"created_at": [], "id": str(uuid.UUID(int=1))},
+    {"created_at": "not-a-date", "id": str(uuid.UUID(int=1))},
+    {"created_at": "2026-02-30T12:00:00", "id": str(uuid.UUID(int=1))},
+    {"created_at": "2026-02-01T12:00:00", "id": []},
+    {"created_at": "2026-02-01T12:00:00", "id": "not-a-uuid"},
+    {"created_at": "2026-02-01T12:00:00", "id": 11111111111111111111111111111111},
+])
+def test_activity_page_rejects_malformed_cursor_payload(shell_client, payload) -> None:
+    cursor = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+    response = shell_client.get("/api/activity/page", params={"cursor": cursor})
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Invalid cursor"
+
+
+def test_activity_page_rejects_invalid_characters_in_valid_cursor(shell_client) -> None:
+    payload = {"created_at": "2026-02-01T12:00:00", "id": str(uuid.UUID(int=1))}
+    cursor = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+    response = shell_client.get("/api/activity/page", params={"cursor": cursor + "!"})
+    assert response.status_code == 422
 
 
 def test_bulk_review_action_and_saved_view_model(db_session: Session, tmp_path: Path) -> None:
