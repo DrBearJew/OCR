@@ -14,12 +14,20 @@ RUN git init . && git remote add origin https://github.com/ikawrakow/ik_llama.cp
 COPY lfm-json-schema.patch /tmp/lfm-json-schema.patch
 COPY test-lfm-json-schema.cpp tests/test-lfm-json-schema.cpp
 RUN git apply --check /tmp/lfm-json-schema.patch && git apply /tmp/lfm-json-schema.patch
+# nvcc's layout handles fatbins larger than 2 GiB without dropping GPU targets.
+# Its script must be last; append to ggml's shared-link rule, not linker flags.
+RUN nvcc --host-linker-script=gen-lcs --shared --output-file /tmp/cuda-linker.ld \
+    && printf 'int link_probe() { return 0; }\n' > /tmp/cuda-link-probe.cpp \
+    && g++ -shared -fPIC -mcmodel=large /tmp/cuda-link-probe.cpp \
+        -Wl,-T,/tmp/cuda-linker.ld -o /tmp/cuda-link-probe.so \
+    && printf '\nstring(APPEND CMAKE_CXX_CREATE_SHARED_LIBRARY " -Wl,-T,/tmp/cuda-linker.ld")\n' >> ggml/src/CMakeLists.txt
 RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON \
     -DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_AVX512=OFF \
     -DGGML_AVX512_VBMI=OFF -DGGML_AVX512_VNNI=OFF -DGGML_AVX512_BF16=OFF \
     -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="${CUDA_DOCKER_ARCH}" \
     -DCMAKE_C_FLAGS="-fPIC -mcmodel=large" -DCMAKE_CXX_FLAGS="-fPIC -mcmodel=large" \
     -DGGML_CUDA_NO_VMM=ON -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=ON \
+    && python3 -c 'from pathlib import Path; assert Path("build/ggml/src/CMakeFiles/ggml.dir/link.txt").read_text().strip().endswith("-Wl,-T,/tmp/cuda-linker.ld")' \
     && cmake --build build --target llama-server test-lfm-json-schema -j2 \
     && ctest --test-dir build -R '^test-lfm-json-schema$' --output-on-failure
 
