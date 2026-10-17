@@ -4,7 +4,9 @@ FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS build
 # Two targets bound CI build cost; override only for a separately verified build.
 ARG CUDA_DOCKER_ARCH="75;86"
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates git cmake g++ make && rm -rf /var/lib/apt/lists/*
+    ca-certificates git python3-pip g++ make && rm -rf /var/lib/apt/lists/*
+# Jammy's CMake 3.22 cannot configure the pinned engine's CUDA20 requirement.
+RUN python3 -m pip install --no-cache-dir cmake==3.31.6
 WORKDIR /src
 RUN git init . && git remote add origin https://github.com/ikawrakow/ik_llama.cpp.git \
     && git fetch --depth 1 origin cea2d61ffdac38ee2958ba88d120fa07cb67703a \

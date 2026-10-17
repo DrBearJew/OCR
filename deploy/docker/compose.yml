@@ -19,8 +19,8 @@ x-app-env: &app-env
   PPOCRV6_TIER: medium
   PPOCRV6_ENGINE: onnxruntime
   PPOCRV6_DEVICE: cpu
-  QWEN_LLAMACPP_BASE_URL: http://metadata:8080/v1
-  QWEN_MODEL_PATH: metadata
+  QWEN_LLAMACPP_BASE_URL: ${DOKOCR_METADATA_URL:-http://metadata:8080/v1}
+  QWEN_MODEL_PATH: ${DOKOCR_METADATA_MODEL:-metadata}
   LLM_METADATA_REFINEMENT_ENABLED: ${DOKOCR_METADATA_ENABLED:-false}
   QWEN_METADATA_THINKING_ENABLED: "true"
   LLM_MAX_TOKENS: "4096"
@@ -82,6 +82,8 @@ services:
     image: ghcr.io/drbearjew/ocr-backend:${DOKOCR_IMAGE_TAG:-main}
     restart: unless-stopped
     environment: *app-env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - document-storage:/data/storage
       - consume-data:/data/consume
@@ -110,6 +112,8 @@ services:
     image: ghcr.io/drbearjew/ocr-backend:${DOKOCR_IMAGE_TAG:-main}
     restart: unless-stopped
     environment: *app-env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command:
       - celery
       - -A
@@ -167,6 +171,8 @@ services:
     image: ghcr.io/drbearjew/ocr-metadata:${DOKOCR_IMAGE_TAG:-main}
     profiles: [metadata]
     restart: unless-stopped
+    environment:
+      DOKOCR_METADATA_COMPUTE: cpu
     volumes:
       - metadata-models:/models
     healthcheck:

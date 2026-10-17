@@ -9,6 +9,10 @@ PORT_ARG=""
 API_PORT_ARG=""
 PROJECT_ARG=""
 METADATA_ARG=""
+METADATA_RUNTIME_ARG=""
+METADATA_RUNTIME_ARG_SET=false
+METADATA_URL_ARG=""
+METADATA_MODEL_ARG=""
 DIRECTORY_ARG_SET=false
 
 usage() {
@@ -19,7 +23,10 @@ Usage: bash install-docker.sh [options]
 
 Options:
   --directory DIR    Install files here (default: ./dokocr)
-  --metadata         Enable optional LFM2.5 metadata refinement (large model download)
+  --metadata         Enable metadata using the saved runtime (CPU on a new install)
+  --metadata-runtime MODE  Enable metadata with cpu, cuda, vulkan, or external runtime
+  --metadata-url URL  External OpenAI-compatible server URL (requires external runtime)
+  --metadata-model NAME  External served model alias (default: metadata)
   --no-metadata      Disable optional metadata refinement on an existing install
   --image-tag TAG    Use this trusted repository ref/image tag (default: main)
   --bind IPv4        Host address for the web/API ports (default: 127.0.0.1)
@@ -57,8 +64,34 @@ while (($#)); do
       METADATA_ARG=true
       shift
       ;;
+    --metadata-runtime)
+      (($# >= 2)) || fail "--metadata-runtime requires cpu, cuda, vulkan, or external"
+      [[ "$METADATA_RUNTIME_ARG_SET" == false ]] || fail "--metadata-runtime may be specified only once"
+      case "$2" in
+        cpu|cuda|vulkan|external) METADATA_RUNTIME_ARG=$2 ;;
+        *) fail "Invalid --metadata-runtime '$2'; choose cpu, cuda, vulkan, or external" ;;
+      esac
+      [[ "$METADATA_ARG" != false ]] || fail "--metadata-runtime and --no-metadata cannot be combined"
+      METADATA_RUNTIME_ARG_SET=true
+      shift 2
+      ;;
+    --metadata-url)
+      (($# >= 2)) || fail "--metadata-url requires a value"
+      [[ -n "$2" ]] || fail "--metadata-url cannot be empty"
+      [[ -z "$METADATA_URL_ARG" ]] || fail "--metadata-url may be specified only once"
+      METADATA_URL_ARG=$2
+      shift 2
+      ;;
+    --metadata-model)
+      (($# >= 2)) || fail "--metadata-model requires a value"
+      [[ -n "$2" ]] || fail "--metadata-model cannot be empty"
+      [[ -z "$METADATA_MODEL_ARG" ]] || fail "--metadata-model may be specified only once"
+      METADATA_MODEL_ARG=$2
+      shift 2
+      ;;
     --no-metadata)
       [[ -z "$METADATA_ARG" || "$METADATA_ARG" == false ]] || fail "--metadata and --no-metadata cannot be combined"
+      [[ "$METADATA_RUNTIME_ARG_SET" == false ]] || fail "--no-metadata and --metadata-runtime cannot be combined"
       METADATA_ARG=false
       shift
       ;;
@@ -138,11 +171,73 @@ validate_project() {
   [[ "$1" =~ ^[a-z0-9][a-z0-9_-]{0,62}$ ]] || fail "Project name must start with a lowercase letter or digit and contain only lowercase letters, digits, '_' or '-' (max 63 characters)"
 }
 
+validate_metadata_url() {
+  local value=$1 url_re='^https?://(\[[0-9A-Fa-f:]+\]|[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?)(:([0-9]{1,5}))?(/[A-Za-z0-9._~!&()*+,;=:@%/-]*)?$'
+  local authority host port ipv6 side group total=0
+  local -a groups
+  [[ "$value" =~ $url_re ]] || fail "Metadata URL must be an http(s) URL without credentials, query, fragment, whitespace, or shell expansion"
+  authority=${BASH_REMATCH[1]}
+  port=${BASH_REMATCH[4]:-}
+  if [[ "$authority" == \[* ]]; then
+    host=${authority%%]*}
+    host=${host#\[}
+    ipv6=$host
+    [[ "$ipv6" == *:* ]] || fail "Invalid IPv6 metadata URL host: $host"
+    if [[ "$ipv6" == *::* ]]; then
+      side=${ipv6#*::}
+      [[ "$side" != *::* ]] || fail "Invalid IPv6 metadata URL host: $host"
+      for side in "${ipv6%%::*}" "${ipv6#*::}"; do
+        [[ -n "$side" ]] || continue
+        IFS=: read -r -a groups <<< "$side"
+        for group in "${groups[@]}"; do
+          [[ "$group" =~ ^[0-9A-Fa-f]{1,4}$ ]] || fail "Invalid IPv6 metadata URL host: $host"
+          total=$((total + 1))
+        done
+      done
+      ((total < 8)) || fail "Invalid IPv6 metadata URL host: $host"
+    else
+      IFS=: read -r -a groups <<< "$ipv6"
+      ((${#groups[@]} == 8)) || fail "Invalid IPv6 metadata URL host: $host"
+      for group in "${groups[@]}"; do
+        [[ "$group" =~ ^[0-9A-Fa-f]{1,4}$ ]] || fail "Invalid IPv6 metadata URL host: $host"
+      done
+    fi
+  else
+    host=$authority
+    local label
+    local -a labels
+    IFS=. read -r -a labels <<< "$host"
+    for label in "${labels[@]}"; do
+      [[ "$label" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || fail "Invalid metadata URL host: $host"
+    done
+  fi
+  if [[ -n "${port:-}" ]]; then
+    ((10#$port >= 1 && 10#$port <= 65535)) || fail "Metadata URL port must be from 1 to 65535"
+  fi
+  local escaped_check=${value//%[[:xdigit:]][[:xdigit:]]/}
+  [[ "$escaped_check" != *%* ]] || fail "Metadata URL contains an invalid percent escape"
+}
+
+validate_metadata_model() {
+  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$ ]] || fail "Metadata model alias must be 1-128 letters, digits, '.', '_', ':', '/', or '-' with an alphanumeric first character"
+}
+
+validate_metadata_gpu_value() {
+  if [[ "$2" == DOKOCR_METADATA_GPU_LAYERS ]]; then
+    [[ "$1" =~ ^[0-9]{1,10}$ ]] || fail "$2 in $ENV_FILE must be an integer from 0 to 2147483647"
+    ((10#$1 <= 2147483647)) || fail "$2 in $ENV_FILE must be an integer from 0 to 2147483647"
+  else
+    [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]*(,[A-Za-z0-9][A-Za-z0-9._:-]*)*$ ]] || fail "$2 in $ENV_FILE must be a comma-separated list of safe device names without whitespace or shell expansion"
+  fi
+}
+
 if [[ -n "$IMAGE_TAG_ARG" ]]; then validate_image_tag "$IMAGE_TAG_ARG"; fi
 if [[ -n "$BIND_ARG" ]]; then validate_bind "$BIND_ARG"; fi
 if [[ -n "$PORT_ARG" ]]; then PORT_ARG=$(validate_port "$PORT_ARG" "--port"); fi
 if [[ -n "$API_PORT_ARG" ]]; then API_PORT_ARG=$(validate_port "$API_PORT_ARG" "--api-port"); fi
 if [[ -n "$PROJECT_ARG" ]]; then validate_project "$PROJECT_ARG"; fi
+if [[ -n "$METADATA_URL_ARG" ]]; then validate_metadata_url "$METADATA_URL_ARG"; fi
+if [[ -n "$METADATA_MODEL_ARG" ]]; then validate_metadata_model "$METADATA_MODEL_ARG"; fi
 
 # Refuse to adopt or overwrite a directory unless it is empty or carries our marker.
 INSTALL_DIR_INPUT=${INSTALL_DIR_INPUT%/}
@@ -158,7 +253,7 @@ if [[ -d "$INSTALL_DIR_INPUT" ]]; then
     [[ -f "$INSTALL_DIR_INPUT/$MARKER_NAME" ]] || fail "Invalid install marker: $INSTALL_DIR_INPUT/$MARKER_NAME"
     marker_value=$(<"$INSTALL_DIR_INPUT/$MARKER_NAME")
     [[ "$marker_value" == "$MARKER_CONTENT" ]] || fail "Unrecognized install marker in $INSTALL_DIR_INPUT"
-    for managed_file in .env compose.yml; do
+    for managed_file in .env compose.yml compose.metadata-cuda.yml compose.metadata-vulkan.yml; do
       if [[ -L "$INSTALL_DIR_INPUT/$managed_file" ]]; then fail "Managed install file must not be a symbolic link: $INSTALL_DIR_INPUT/$managed_file"; fi
       if [[ -e "$INSTALL_DIR_INPUT/$managed_file" && ! -f "$INSTALL_DIR_INPUT/$managed_file" ]]; then fail "Managed install path is not a regular file: $INSTALL_DIR_INPUT/$managed_file"; fi
     done
@@ -217,6 +312,13 @@ lookup_env_value() {
 
 lookup_env_value DOKOCR_IMAGE_TAG; SAVED_IMAGE_TAG=$ENV_VALUE
 lookup_env_value DOKOCR_METADATA_ENABLED; SAVED_METADATA=$ENV_VALUE
+lookup_env_value DOKOCR_METADATA_RUNTIME; SAVED_METADATA_RUNTIME=$ENV_VALUE
+lookup_env_value DOKOCR_METADATA_URL; SAVED_METADATA_URL=$ENV_VALUE
+lookup_env_value DOKOCR_METADATA_MODEL; SAVED_METADATA_MODEL=$ENV_VALUE
+lookup_env_value DOKOCR_METADATA_EXTERNAL_URL; SAVED_EXTERNAL_URL_KEY=$ENV_VALUE
+lookup_env_value DOKOCR_METADATA_EXTERNAL_MODEL; SAVED_EXTERNAL_MODEL_KEY=$ENV_VALUE
+lookup_env_value DOKOCR_METADATA_GPU_LAYERS; SAVED_METADATA_GPU_LAYERS=$ENV_VALUE
+lookup_env_value DOKOCR_METADATA_DEVICES; SAVED_METADATA_DEVICES=$ENV_VALUE
 lookup_env_value DOKOCR_BIND; SAVED_BIND=$ENV_VALUE
 lookup_env_value DOKOCR_PORT; SAVED_PORT=$ENV_VALUE
 lookup_env_value DOKOCR_API_PORT; SAVED_API_PORT=$ENV_VALUE
@@ -231,7 +333,16 @@ if [[ -n "$SAVED_PROJECT" && -n "$PROJECT_ARG" && "$PROJECT_ARG" != "$SAVED_PROJ
 fi
 
 IMAGE_TAG=${IMAGE_TAG_ARG:-${SAVED_IMAGE_TAG:-main}}
-METADATA_ENABLED=${METADATA_ARG:-${SAVED_METADATA:-false}}
+METADATA_RUNTIME=${METADATA_RUNTIME_ARG:-${SAVED_METADATA_RUNTIME:-cpu}}
+if [[ "$METADATA_RUNTIME_ARG_SET" == true ]]; then
+  METADATA_ENABLED=true
+else
+  METADATA_ENABLED=${METADATA_ARG:-${SAVED_METADATA:-false}}
+fi
+METADATA_EXTERNAL_URL=${METADATA_URL_ARG:-${SAVED_METADATA_URL:-${SAVED_EXTERNAL_URL_KEY:-}}}
+METADATA_EXTERNAL_MODEL=${METADATA_MODEL_ARG:-${SAVED_METADATA_MODEL:-${SAVED_EXTERNAL_MODEL_KEY:-metadata}}}
+METADATA_GPU_LAYERS=$SAVED_METADATA_GPU_LAYERS
+METADATA_DEVICES=$SAVED_METADATA_DEVICES
 BIND=${BIND_ARG:-${SAVED_BIND:-127.0.0.1}}
 PORT=${PORT_ARG:-${SAVED_PORT:-3001}}
 API_PORT=${API_PORT_ARG:-${SAVED_API_PORT:-8001}}
@@ -243,6 +354,21 @@ POSTGRES_PASSWORD=${SAVED_POSTGRES_PASSWORD:-}
 
 validate_image_tag "$IMAGE_TAG"
 [[ "$METADATA_ENABLED" == true || "$METADATA_ENABLED" == false ]] || fail "DOKOCR_METADATA_ENABLED in $ENV_FILE must be true or false"
+case "$METADATA_RUNTIME" in cpu|cuda|vulkan|external) ;; *) fail "DOKOCR_METADATA_RUNTIME in $ENV_FILE must be cpu, cuda, vulkan, or external" ;; esac
+[[ -z "$SAVED_METADATA_URL" ]] || validate_metadata_url "$SAVED_METADATA_URL"
+[[ -z "$SAVED_EXTERNAL_URL_KEY" ]] || validate_metadata_url "$SAVED_EXTERNAL_URL_KEY"
+[[ -z "$SAVED_METADATA_MODEL" ]] || validate_metadata_model "$SAVED_METADATA_MODEL"
+[[ -z "$SAVED_EXTERNAL_MODEL_KEY" ]] || validate_metadata_model "$SAVED_EXTERNAL_MODEL_KEY"
+[[ -z "$METADATA_EXTERNAL_URL" ]] || validate_metadata_url "$METADATA_EXTERNAL_URL"
+[[ -z "$METADATA_EXTERNAL_MODEL" ]] || validate_metadata_model "$METADATA_EXTERNAL_MODEL"
+[[ -z "$METADATA_GPU_LAYERS" ]] || validate_metadata_gpu_value "$METADATA_GPU_LAYERS" DOKOCR_METADATA_GPU_LAYERS
+[[ -z "$METADATA_DEVICES" ]] || validate_metadata_gpu_value "$METADATA_DEVICES" DOKOCR_METADATA_DEVICES
+if [[ -n "$METADATA_URL_ARG" || -n "$METADATA_MODEL_ARG" ]]; then
+  [[ "$METADATA_RUNTIME" == external ]] || fail "--metadata-url and --metadata-model require --metadata-runtime external (or a saved external runtime)"
+fi
+if [[ "$METADATA_RUNTIME" == external && -z "$METADATA_EXTERNAL_URL" ]]; then
+  fail "The external metadata runtime requires a server URL; use --metadata-runtime external --metadata-url URL"
+fi
 validate_bind "$BIND"
 PORT=$(validate_port "$PORT" "DOKOCR_PORT")
 API_PORT=$(validate_port "$API_PORT" "DOKOCR_API_PORT")
@@ -288,12 +414,27 @@ done
 SCRIPT_DIR=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 LOCAL_COMPOSE=$SCRIPT_DIR/../deploy/docker/compose.yml
 COMPOSE_URL="https://raw.githubusercontent.com/DrBearJew/OCR/${IMAGE_TAG}/deploy/docker/compose.yml"
+COMPOSE_OVERRIDE_NAME=""
+case "$METADATA_RUNTIME" in
+  cuda) COMPOSE_OVERRIDE_NAME=compose.metadata-cuda.yml ;;
+  vulkan) COMPOSE_OVERRIDE_NAME=compose.metadata-vulkan.yml ;;
+esac
+LOCAL_OVERRIDE=""
+OVERRIDE_URL=""
+COMPOSE_FILE_VALUE=compose.yml
+if [[ -n "$COMPOSE_OVERRIDE_NAME" ]]; then
+  LOCAL_OVERRIDE=$SCRIPT_DIR/../deploy/docker/$COMPOSE_OVERRIDE_NAME
+  OVERRIDE_URL="https://raw.githubusercontent.com/DrBearJew/OCR/${IMAGE_TAG}/deploy/docker/${COMPOSE_OVERRIDE_NAME}"
+  COMPOSE_FILE_VALUE+=:$COMPOSE_OVERRIDE_NAME
+fi
 
 COMPOSE_TMP=""
+OVERRIDE_TMP=""
 ENV_TMP=""
 MARKER_TMP=""
 cleanup() {
   [[ -z "$COMPOSE_TMP" || ! -e "$COMPOSE_TMP" ]] || rm -f -- "$COMPOSE_TMP"
+  [[ -z "$OVERRIDE_TMP" || ! -e "$OVERRIDE_TMP" ]] || rm -f -- "$OVERRIDE_TMP"
   [[ -z "$ENV_TMP" || ! -e "$ENV_TMP" ]] || rm -f -- "$ENV_TMP"
   [[ -z "$MARKER_TMP" || ! -e "$MARKER_TMP" ]] || rm -f -- "$MARKER_TMP"
 }
@@ -308,10 +449,20 @@ else
   curl --fail --silent --show-error --max-time 60 --output "$COMPOSE_TMP" "$COMPOSE_URL" || fail "Could not download Compose file from the trusted repository ref '$IMAGE_TAG'"
 fi
 [[ -s "$COMPOSE_TMP" ]] || fail "Compose file is empty"
+if [[ -n "$COMPOSE_OVERRIDE_NAME" ]]; then
+  OVERRIDE_TMP=$(mktemp "$INSTALL_DIR/.compose-override.XXXXXXXX")
+  if [[ -f "$LOCAL_COMPOSE" ]]; then
+    [[ -f "$LOCAL_OVERRIDE" ]] || fail "Compose override $COMPOSE_OVERRIDE_NAME is missing from this installer checkout"
+    cp -- "$LOCAL_OVERRIDE" "$OVERRIDE_TMP" || fail "Could not stage repository Compose override $COMPOSE_OVERRIDE_NAME"
+  else
+    curl --fail --silent --show-error --max-time 60 --output "$OVERRIDE_TMP" "$OVERRIDE_URL" || fail "Could not download Compose override $COMPOSE_OVERRIDE_NAME from the trusted repository ref '$IMAGE_TAG'"
+  fi
+  [[ -s "$OVERRIDE_TMP" ]] || fail "Compose override $COMPOSE_OVERRIDE_NAME is empty"
+fi
 
 is_managed_env_key() {
   case "$1" in
-    COMPOSE_PROJECT_NAME|COMPOSE_PROFILES|DOKOCR_IMAGE_TAG|DOKOCR_METADATA_ENABLED|DOKOCR_BIND|DOKOCR_PORT|DOKOCR_API_PORT|ADMIN_USERNAME|ADMIN_PASSWORD|SECRET_KEY|POSTGRES_PASSWORD)
+    COMPOSE_FILE|COMPOSE_PROJECT_NAME|COMPOSE_PROFILES|DOKOCR_IMAGE_TAG|DOKOCR_METADATA_ENABLED|DOKOCR_METADATA_RUNTIME|DOKOCR_METADATA_URL|DOKOCR_METADATA_MODEL|DOKOCR_METADATA_EXTERNAL_URL|DOKOCR_METADATA_EXTERNAL_MODEL|DOKOCR_METADATA_GPU_LAYERS|DOKOCR_METADATA_DEVICES|DOKOCR_BIND|DOKOCR_PORT|DOKOCR_API_PORT|ADMIN_USERNAME|ADMIN_PASSWORD|SECRET_KEY|POSTGRES_PASSWORD)
       return 0
       ;;
     *)
@@ -329,10 +480,22 @@ if [[ -f "$ENV_FILE" ]]; then
   done < "$ENV_FILE"
 fi
 {
+  printf 'COMPOSE_FILE=%s\n' "$COMPOSE_FILE_VALUE"
   printf 'COMPOSE_PROJECT_NAME=%s\n' "$PROJECT_NAME"
-  if [[ "$METADATA_ENABLED" == true ]]; then printf 'COMPOSE_PROFILES=metadata\n'; fi
+  if [[ "$METADATA_ENABLED" == true && "$METADATA_RUNTIME" != external ]]; then printf 'COMPOSE_PROFILES=metadata\n'; fi
   printf 'DOKOCR_IMAGE_TAG=%s\n' "$IMAGE_TAG"
   printf 'DOKOCR_METADATA_ENABLED=%s\n' "$METADATA_ENABLED"
+  printf 'DOKOCR_METADATA_RUNTIME=%s\n' "$METADATA_RUNTIME"
+  printf 'DOKOCR_METADATA_EXTERNAL_URL=%s\n' "$METADATA_EXTERNAL_URL"
+  printf 'DOKOCR_METADATA_EXTERNAL_MODEL=%s\n' "$METADATA_EXTERNAL_MODEL"
+  if [[ "$METADATA_RUNTIME" == external ]]; then
+    printf 'DOKOCR_METADATA_URL=%s\n' "$METADATA_EXTERNAL_URL"
+    printf 'DOKOCR_METADATA_MODEL=%s\n' "$METADATA_EXTERNAL_MODEL"
+  else
+    printf 'DOKOCR_METADATA_URL=\nDOKOCR_METADATA_MODEL=\n'
+  fi
+  [[ -z "$METADATA_GPU_LAYERS" ]] || printf 'DOKOCR_METADATA_GPU_LAYERS=%s\n' "$METADATA_GPU_LAYERS"
+  [[ -z "$METADATA_DEVICES" ]] || printf 'DOKOCR_METADATA_DEVICES=%s\n' "$METADATA_DEVICES"
   printf 'DOKOCR_BIND=%s\n' "$BIND"
   printf 'DOKOCR_PORT=%s\n' "$PORT"
   printf 'DOKOCR_API_PORT=%s\n' "$API_PORT"
@@ -343,27 +506,34 @@ fi
 } >> "$ENV_TMP"
 chmod 600 -- "$ENV_TMP"
 chmod 644 -- "$COMPOSE_TMP"
+if [[ -n "$OVERRIDE_TMP" ]]; then chmod 644 -- "$OVERRIDE_TMP"; fi
 
 # Compose parses this file as data; the installer never sources it as shell code.
 COMPOSE_CONFIG_PATH=$COMPOSE_TMP
+OVERRIDE_CONFIG_PATH=$OVERRIDE_TMP
 ENV_CONFIG_PATH=$ENV_TMP
+COMPOSE_OVERRIDE_ARGS=()
+[[ -z "$OVERRIDE_CONFIG_PATH" ]] || COMPOSE_OVERRIDE_ARGS+=(--file "$OVERRIDE_CONFIG_PATH")
 PROFILE_ARGS=()
-if [[ "$METADATA_ENABLED" == true ]]; then PROFILE_ARGS+=(--profile metadata); fi
+if [[ "$METADATA_ENABLED" == true && "$METADATA_RUNTIME" != external ]]; then PROFILE_ARGS+=(--profile metadata); fi
 compose() {
   (
     unset COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_ENV_FILES COMPOSE_PATH_SEPARATOR COMPOSE_DISABLE_ENV_FILE
-    unset DOKOCR_IMAGE_TAG DOKOCR_METADATA_ENABLED DOKOCR_BIND DOKOCR_PORT DOKOCR_API_PORT
-    unset ADMIN_USERNAME ADMIN_PASSWORD SECRET_KEY POSTGRES_PASSWORD
+    unset DOKOCR_IMAGE_TAG DOKOCR_METADATA_ENABLED DOKOCR_METADATA_RUNTIME DOKOCR_METADATA_URL DOKOCR_METADATA_MODEL
+    unset DOKOCR_METADATA_EXTERNAL_URL DOKOCR_METADATA_EXTERNAL_MODEL DOKOCR_METADATA_GPU_LAYERS DOKOCR_METADATA_DEVICES
+    unset CUDA_VISIBLE_DEVICES GGML_VK_VISIBLE_DEVICES
+    unset DOKOCR_BIND DOKOCR_PORT DOKOCR_API_PORT ADMIN_USERNAME ADMIN_PASSWORD SECRET_KEY POSTGRES_PASSWORD
     unset FRONTEND_ORIGIN PUBLIC_BASE_URL CORS_ORIGINS COOKIE_SECURE
     docker compose \
       --project-directory "$INSTALL_DIR" \
       --env-file "$ENV_CONFIG_PATH" \
       --file "$COMPOSE_CONFIG_PATH" \
+      "${COMPOSE_OVERRIDE_ARGS[@]}" \
       --project-name "$PROJECT_NAME" \
       "${PROFILE_ARGS[@]}" "$@"
   )
 }
-compose config --quiet || fail "Docker Compose rejected the downloaded configuration; the existing install was not changed"
+compose config --quiet || fail "Docker Compose rejected the staged configuration; the existing install was not changed"
 
 if [[ ! -e "$MARKER_FILE" ]]; then
   MARKER_TMP=$(mktemp "$INSTALL_DIR/.marker.XXXXXXXX")
@@ -374,24 +544,32 @@ if [[ ! -e "$MARKER_FILE" ]]; then
 fi
 mv -f -- "$COMPOSE_TMP" "$COMPOSE_YAML_PATH"
 COMPOSE_TMP=""
+if [[ -n "$OVERRIDE_TMP" ]]; then
+  COMPOSE_OVERRIDE_PATH=$INSTALL_DIR/$COMPOSE_OVERRIDE_NAME
+  mv -f -- "$OVERRIDE_TMP" "$COMPOSE_OVERRIDE_PATH"
+  OVERRIDE_TMP=""
+  OVERRIDE_CONFIG_PATH=$COMPOSE_OVERRIDE_PATH
+  COMPOSE_OVERRIDE_ARGS=(--file "$OVERRIDE_CONFIG_PATH")
+fi
 mv -f -- "$ENV_TMP" "$ENV_FILE"
 ENV_TMP=""
 COMPOSE_YAML_PATH=$INSTALL_DIR/compose.yml
 COMPOSE_CONFIG_PATH=$COMPOSE_YAML_PATH
 ENV_CONFIG_PATH=$ENV_FILE
 chmod 644 -- "$COMPOSE_YAML_PATH"
+[[ -z "$OVERRIDE_CONFIG_PATH" ]] || chmod 644 -- "$OVERRIDE_CONFIG_PATH"
 chmod 600 -- "$ENV_FILE"
 
 printf 'Pulling the selected Dok OCR images...\n'
 compose pull || fail "Image pull failed. Install files and persistent volumes are preserved; fix access or choose a published tag and retry"
-if [[ "$METADATA_ENABLED" == false ]]; then
-  PROFILE_ARGS=(--profile metadata)
-  metadata_id=$(compose ps -q metadata 2>/dev/null || true)
-  if [[ -n "$metadata_id" ]]; then
-    printf 'Stopping the previously enabled optional metadata service...\n'
-    compose stop metadata || fail "Could not stop the optional metadata service; its model volume and install files are preserved"
+if [[ "$METADATA_RUNTIME" == external || "$METADATA_ENABLED" == false ]]; then
+  metadata_ids=$(docker ps -q --filter "label=com.docker.compose.project=$PROJECT_NAME" --filter 'label=com.docker.compose.service=metadata') || fail "Could not inspect the previously enabled metadata service"
+  if [[ -n "$metadata_ids" ]]; then
+    printf 'Stopping the previously enabled internal metadata service...\n'
+    while IFS= read -r metadata_id; do
+      [[ -z "$metadata_id" ]] || docker stop "$metadata_id" >/dev/null || fail "Could not stop the optional metadata service; its model volume and install files are preserved"
+    done <<< "$metadata_ids"
   fi
-  PROFILE_ARGS=()
 fi
 printf 'Starting Dok OCR...\n'
 compose up -d || fail "Docker Compose could not start the installation. Existing credentials and persistent volumes were preserved; resolve the reported issue and retry"
@@ -412,7 +590,7 @@ READY_HOST=$BIND
 wait_for_url 'backend API readiness (/ready)' "http://${READY_HOST}:${API_PORT}/ready" 600
 wait_for_url 'frontend' "http://${READY_HOST}:${PORT}/" 300
 
-if [[ "$METADATA_ENABLED" == true ]]; then
+if [[ "$METADATA_ENABLED" == true && "$METADATA_RUNTIME" != external ]]; then
   printf 'Waiting up to 35 minutes for the optional metadata model to download and become healthy...\n'
   metadata_deadline=$((SECONDS + 2100))
   while ((SECONDS < metadata_deadline)); do
@@ -430,8 +608,10 @@ APP_HOST=$BIND
 if [[ "$APP_HOST" == 0.0.0.0 ]]; then APP_HOST=localhost; fi
 printf '\nDok OCR is ready: http://%s:%s\n' "$APP_HOST" "$PORT"
 printf 'Admin username: %s\nCredentials: %s\n' "$ADMIN_USERNAME" "$ENV_FILE"
-if [[ "$METADATA_ENABLED" == true ]]; then
-  printf 'Optional LFM2.5 metadata refinement is enabled. Its model is stored in the persistent metadata-models volume.\n'
+if [[ "$METADATA_ENABLED" == true && "$METADATA_RUNTIME" == external ]]; then
+  printf 'Optional metadata refinement is enabled with the selected external server/model.\n'
+elif [[ "$METADATA_ENABLED" == true ]]; then
+  printf 'Optional LFM2.5 metadata refinement is enabled with the %s runtime. Its model is stored in the persistent metadata-models volume.\n' "$METADATA_RUNTIME"
 else
   printf 'OCR: real PP-OCRv6 medium CPU mode; optional LFM2.5 metadata download is disabled.\n'
 fi

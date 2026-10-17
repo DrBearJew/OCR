@@ -1,0 +1,15 @@
+services:
+  metadata:
+    image: ghcr.io/drbearjew/ocr-metadata-cuda:${DOKOCR_IMAGE_TAG:-main}
+    environment:
+      DOKOCR_METADATA_COMPUTE: cuda
+      DOKOCR_METADATA_GPU_LAYERS:
+      DOKOCR_METADATA_DEVICES:
+      CUDA_VISIBLE_DEVICES:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

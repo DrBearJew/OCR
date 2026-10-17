@@ -24,6 +24,7 @@ Optional advanced settings:
 
 - `DOKOCR_METADATA_GPU_LAYERS`: integer from `0` to `2147483647`, GPU mode only. When supplied, replaces `--fit` with `--gpu-layers N`; `0` is an explicit user-requested zero-layer override.
 - `DOKOCR_METADATA_DEVICES`: nonempty comma-separated ik device names, for example `CUDA0,CUDA1` or `Vulkan0`. GPU mode only; forwarded as one `--device` argument, without a shell. Empty/control-character values and unavailable devices fail. Device numbering is ik's numbering after host/container visibility filtering, not necessarily the host's physical index.
+- `CUDA_VISIBLE_DEVICES` / `GGML_VK_VISIBLE_DEVICES`: optional backend visibility masks, passed through by their respective GPU Compose overrides. For example, `GGML_VK_VISIBLE_DEVICES=1` exposes physical Vulkan device1 as ik's `Vulkan0`. The pinned Vulkan backend otherwise defaults to its first non-CPU device.
 - `DOKOCR_METADATA_THREADS`: positive integer, default `4`.
 
 Omit unused optional variables rather than setting them to empty strings. Invalid configuration, a mismatched image/backend, or no visible GPU fails **before model provisioning**; the launcher does not silently select another backend. It queries the pinned engine's exported ggml device API before downloading. No ROCm image is provided; a separately managed OpenAI-compatible endpoint can use other backends.

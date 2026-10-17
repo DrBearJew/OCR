@@ -2,7 +2,7 @@
 
 A self-hosted app for OCR, metadata extraction, review, and search across document collections. It keeps source files, OCR text, metadata, processing history, and review state together.
 
-> **Install for use:** [Docker installation guide](docs/INSTALL.md) uses prebuilt Linux x86_64 images and real CPU PP-OCRv6 by default. Optional metadata AI is included with `--metadata`.
+> **Install for use:** [Docker installation guide](docs/INSTALL.md) uses prebuilt Linux x86_64 images and real CPU PP-OCRv6 by default. Optional metadata AI supports your choice of CPU, CUDA, Vulkan, or an external compatible server.
 
 With Docker Engine and the Compose plugin already installed:
 
@@ -10,7 +10,7 @@ With Docker Engine and the Compose plugin already installed:
 curl -fL https://raw.githubusercontent.com/DrBearJew/OCR/main/scripts/install-docker.sh -o install-docker.sh && bash install-docker.sh
 ```
 
-No source build or manual model setup is needed. The installer generates credentials and prints their private file location. See the guide for requirements, security and the optional AI download.
+No source build or manual model setup is needed for bundled runtimes. The installer generates credentials and prints their private file location. For optional AI, choose `--metadata-runtime cpu`, `cuda`, or `vulkan`; GPU modes use ik's automatic fitting. Use `--metadata-runtime external --metadata-url URL --metadata-model NAME` for your own server. These choices affect metadata inference, not the bundled CPU OCR provider. See the guide for driver requirements, privacy and verification limits.
 
 ![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)

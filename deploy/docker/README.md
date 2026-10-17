@@ -1,11 +1,21 @@
 # Published Docker install
 
-`compose.yml` runs the published `ghcr.io/drbearjew/ocr-backend`, `ocr-frontend`, and optional `ocr-metadata` images. It contains no build instructions or source-tree mounts. The installer fetches this file from the matching trusted repository ref; when run from a checkout, it uses that checkout's copy.
+Use the [installation guide](../../docs/INSTALL.md) for requirements, security, GPU drivers, and operating instructions. No source build or source-tree mount is needed.
 
-Requirements: Docker Engine, Docker Compose v2, `curl`, OpenSSL, and x86_64/amd64. From a downloaded installer, run `bash install-docker.sh`; options are `--directory`, `--image-tag`, `--bind`, `--port`, `--api-port`, `--project-name`, and `--metadata`. The defaults install to `./dokocr`, use image/ref `main`, project `dokocr`, and bind the frontend at `127.0.0.1:3001` and backend API at `127.0.0.1:8001`. To expose the ports on a LAN interface, explicitly set `--bind` to that IPv4 address (or `0.0.0.0`) and apply appropriate host firewall rules.
+```bash
+bash install-docker.sh                             # Real CPU PP-OCRv6; no model AI
+bash install-docker.sh --metadata-runtime cpu       # Optional local LFM metadata
+bash install-docker.sh --metadata-runtime cuda      # NVIDIA, automatic ik fitting
+bash install-docker.sh --metadata-runtime vulkan    # Compatible AMD/Intel Vulkan GPU
+bash install-docker.sh --metadata-runtime external --metadata-url http://inference.example.local:8080/v1 --metadata-model metadata
+```
 
-The default OCR provider is real PP-OCRv6 medium on CPU. Metadata extraction remains deterministic unless enabled; `--metadata` enables LFM2.5 refinement and may download about 6 GB before installation is ready. The model is stored in the `metadata-models` named volume. No metadata image or model is started/downloaded by the default profile.
+These switches choose metadata compute, not OCR acceleration. `--metadata` enables the saved runtime (CPU on a new install); `--no-metadata` disables it without deleting the selection or data. External mode starts/downloads no local metadata image or weights. Use a trusted, compatible endpoint: document text is sent there.
 
-The installer stores generated credentials and settings in `<directory>/.env` (directory mode 0700, file mode 0600). Re-running preserves credentials, selected tag, metadata choice, ports, project name, and Docker volumes unless an option is explicitly changed. A project name can be chosen for a new install; renaming an existing project is refused because that would select a different set of named volumes. Do not delete Docker volumes to troubleshoot; there is no automatic destructive cleanup. Persistent named volumes hold PostgreSQL, Redis, document storage, consume-folder files, and optional metadata models. PostgreSQL and Redis have no host-published ports. Container logs are bounded to 10 MB per file and three files.
+The installer fetches the base Compose file and selected GPU override from the same trusted image/repository ref, or uses its checkout's files when run from source. GPU overrides are recorded through `COMPOSE_FILE` in the private install `.env`, so ordinary `docker compose` commands retain the selection. CUDA requests NVIDIA GPUs; Vulkan maps `/dev/dri` without privileged mode. Optional GPU controls and driver/hardware limitations are in the [metadata runtime guide](../metadata/README.md).
 
-The backend migration runs as a one-shot service after PostgreSQL is healthy and before the API or workers start. API readiness is `/ready`. Backend and workers use the same tagged image; the frontend and optional metadata image use that tag as well. The Compose project name can be changed with `--project-name` to isolate another install.
+Defaults: directory `./dokocr`, image/ref `main`, project `dokocr`, frontend `127.0.0.1:3001`, API `127.0.0.1:8001`. Docker Engine, Compose v2 or newer, curl, OpenSSL, and Linux x86_64 are required. Local metadata images also require AVX2/FMA/F16C. The pinned local LFM download is 6.03 GB, checksum-verified and shared across CPU/GPU modes.
+
+Generated credentials/settings live in `<directory>/.env` (directory `0700`, file `0600`). Reruns preserve them, ports, selected runtime and named volumes unless explicitly changed. Existing project renames are refused to avoid selecting different volumes. PostgreSQL, Redis, source documents, consume files and model data persist; there is no automatic destructive cleanup. Do not use `down -v` for routine operations.
+
+PostgreSQL/Redis have no published ports. Logs rotate at 10 MB with three files retained. Successful migrations gate the API/workers; `/ready` checks API/database readiness, not inference correctness. Review extraction results before relying on AI metadata. The live deployment is separate from this installer.

@@ -1,0 +1,10 @@
+services:
+  metadata:
+    image: ghcr.io/drbearjew/ocr-metadata-vulkan:${DOKOCR_IMAGE_TAG:-main}
+    environment:
+      DOKOCR_METADATA_COMPUTE: vulkan
+      DOKOCR_METADATA_GPU_LAYERS:
+      DOKOCR_METADATA_DEVICES:
+      GGML_VK_VISIBLE_DEVICES:
+    devices:
+      - /dev/dri:/dev/dri
