@@ -123,6 +123,10 @@ def runtime_options():
     if devices is not None and any(device not in available for device in devices.split(",")):
         raise RuntimeError(f"DOKOCR_METADATA_DEVICES is unavailable for {compute}; available: {','.join(available)}")
     options = ["--fit"] if layers is None else ["--gpu-layers", str(layers)]
+    # ponytail: pinned Vulkan lacks fused weight ops; avoid CPU expert-weight round-trips.
+    # Keep fused weighted reduction: Vulkan MULTI_ADD has truncated expert-view bounds.
+    if compute == "vulkan":
+        options += ["--no-fused-moe", "--no-fused-up-gate"]
     if devices is not None:
         options += ["--device", devices]
     return threads, options

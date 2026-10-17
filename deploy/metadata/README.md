@@ -4,9 +4,9 @@ The production metadata alias is **LFM2.5-8B-A1B Q5_K_M**, not image OCR. Paddle
 
 ## Optional prebuilt Docker runtime
 
-The [one-command Docker installer](../../docs/INSTALL.md) supports `--metadata`: it runs `ghcr.io/drbearjew/ocr-metadata` and automatically downloads the pinned public LFM Q5 model into a persistent `/models` volume. Downloads resume when supported and are SHA-256 verified before activation. Existing invalid model files are preserved and reported, not silently overwritten. Model use is subject to the [official model's license](https://huggingface.co/LiquidAI/LFM2.5-8B-A1B-GGUF).
+The [one-command Docker installer](../../docs/INSTALL.md) selects CPU, CUDA, Vulkan, or an external server with `--metadata-runtime`. `--metadata` enables the saved choice (CPU on a new install). Local modes automatically download the pinned public LFM Q5 model into a persistent `/models` volume; external mode starts no local model container. Downloads resume when supported and are SHA-256 verified before activation. Existing invalid model files are preserved and reported, not silently overwritten. Model use is subject to the [official model's license](https://huggingface.co/LiquidAI/LFM2.5-8B-A1B-GGUF).
 
-This image builds the pinned schema-patched server from source with AVX2/FMA/F16C, without native/AVX512 or GPU requirements. It serves metadata on internal port 8080 and is separate from both the basic PP-OCRv6 OCR provider and the advanced Paddle runtime. Plan for at least 16 GiB RAM and 20 GiB free disk for the complete AI-enabled install; the model download alone is 6.03 GB. These are provisioning recommendations, not a throughput guarantee.
+The CPU image builds the pinned schema-patched server from source with AVX2/FMA/F16C, without native/AVX512 or GPU requirements. It serves metadata on internal port 8080 and is separate from both the basic PP-OCRv6 OCR provider and the advanced Paddle runtime. Plan for at least 16 GiB RAM and 20 GiB free disk for the complete AI-enabled install; the model download alone is 6.03 GB. These are provisioning recommendations, not a throughput guarantee.
 
 ### CPU, CUDA, or Vulkan
 
@@ -20,11 +20,13 @@ All three images use the same pinned ik revision, schema patch, checksum-verifie
 
 `DOKOCR_METADATA_COMPUTE=cpu|cuda|vulkan` defaults to **cpu**, including in GPU images. CPU mode explicitly disables GPU offload. Select both the matching GPU image and compute mode to use a GPU. GPU mode uses ik's **`--fit` automatic GPU fitting** by default; there is no required layer-count tuning. The fixed context, KV types and request/reasoning settings below are unchanged. Automatic fitting can retain work in system RAM; it is not a promise that every model/context fits entirely in VRAM.
 
+For this pinned Vulkan backend, the launcher disables fused MoE and dense up/gate weight operations, using GPU-supported matmuls instead of copying expert weights through CPU fallbacks. It deliberately **keeps fused weighted expert reduction enabled**: disabling that too reaches an incorrect Vulkan expert-view reduction path. CPU and CUDA retain their native fusion defaults. The launcher regression protects this combination.
+
 Optional advanced settings:
 
 - `DOKOCR_METADATA_GPU_LAYERS`: integer from `0` to `2147483647`, GPU mode only. When supplied, replaces `--fit` with `--gpu-layers N`; `0` is an explicit user-requested zero-layer override.
 - `DOKOCR_METADATA_DEVICES`: nonempty comma-separated ik device names, for example `CUDA0,CUDA1` or `Vulkan0`. GPU mode only; forwarded as one `--device` argument, without a shell. Empty/control-character values and unavailable devices fail. Device numbering is ik's numbering after host/container visibility filtering, not necessarily the host's physical index.
-- `CUDA_VISIBLE_DEVICES` / `GGML_VK_VISIBLE_DEVICES`: optional backend visibility masks, passed through by their respective GPU Compose overrides. For example, `GGML_VK_VISIBLE_DEVICES=1` exposes physical Vulkan device1 as ik's `Vulkan0`. The pinned Vulkan backend otherwise defaults to its first non-CPU device.
+- `CUDA_VISIBLE_DEVICES` / `GGML_VK_VISIBLE_DEVICES`: optional backend visibility masks, passed through by their respective GPU Compose overrides. For example, `GGML_VK_VISIBLE_DEVICES=1` exposes physical Vulkan device 1 as ik's `Vulkan0`. The pinned Vulkan backend otherwise defaults to its first non-CPU device.
 - `DOKOCR_METADATA_THREADS`: positive integer, default `4`.
 
 Omit unused optional variables rather than setting them to empty strings. Invalid configuration, a mismatched image/backend, or no visible GPU fails **before model provisioning**; the launcher does not silently select another backend. It queries the pinned engine's exported ggml device API before downloading. No ROCm image is provided; a separately managed OpenAI-compatible endpoint can use other backends.
@@ -48,6 +50,8 @@ docker run --rm --device /dev/dri -p 127.0.0.1:8080:8080 \
 Vulkan uses the upstream `GGML_VULKAN`/glslc build path with Ubuntu 24.04 SDK packages. The runtime includes the Vulkan loader and Ubuntu Mesa AMD/Intel ICDs; hardware newer than that Mesa version may require a newer separately verified image. The pinned engine requires Vulkan 1.2 and 16-bit storage; shader/flash-attention support still depends on the device/driver. NVIDIA Vulkan requires matching proprietary host ICD/libraries (the Mesa packages alone do not supply these). Passing `/dev/dri` alone does not configure NVIDIA's proprietary driver. Non-root containers also need render-device group access.
 
 CI runs offline launcher/downloader regressions, builds each image with the same schema regression, and checks executable startup/linkage without model weights. GPU-less CI **does not verify GPU inference**, fitting quality, throughput, or hardware compatibility. Run a real model request on the intended GPU before relying on GPU operation.
+
+Local Vulkan launch validation on one RX 7900 XTX checked automatic full layer offload and real PP-OCRv6 plus application metadata on a synthetic German invoice: structured fields preserved both company names, invoice number, date, and amount. Disabling all three fusions was fast but failed correctness; the retained weighted-reduction setting passed. This is a bounded integration check, not a claim about all documents/devices or NVIDIA hardware.
 
 The manual build and production-layout notes below remain useful for advanced operators; they are not prerequisites for the prebuilt installer.
 

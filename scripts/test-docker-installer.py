@@ -286,6 +286,7 @@ def test_optional_real_docker_config() -> str:
         cuda_service = cuda_config["services"]["metadata"]
         check(cuda_service["environment"].get("DOKOCR_METADATA_GPU_LAYERS") == "21" and cuda_service["environment"].get("DOKOCR_METADATA_DEVICES") == "CUDA0,CUDA1", "CUDA tuning values did not pass through")
         for name, service in (("CPU", cpu_service), ("CUDA", cuda_service), ("Vulkan", vulkan_config["services"]["metadata"])):
+            check(service["healthcheck"]["test"][:2] == ["CMD", "python3"], f"{name} metadata healthcheck must use the interpreter available in every image")
             check(any(volume.get("source") == "metadata-models" and volume.get("target") == "/models" for volume in service.get("volumes", [])), f"{name} metadata config does not share the named model volume")
         check(cuda_service["environment"].get("DOKOCR_METADATA_COMPUTE") == "cuda" and cuda_service.get("profiles") == ["metadata"], "CUDA config must retain local profile and compute mode")
         check(cuda_service["environment"].get("CUDA_VISIBLE_DEVICES") == "1,0", "CUDA visibility selection did not pass through")

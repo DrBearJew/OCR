@@ -47,6 +47,15 @@ class RuntimeTests(unittest.TestCase):
                 self.assertNotIn("--gpu-layers", command)
                 self.assertNotIn("--device", command)
 
+    def test_vulkan_unfuses_weight_ops_but_keeps_weighted_reduction(self):
+        flags = ("--no-fused-moe", "--no-fused-up-gate")
+        for compute in ("cpu", "cuda", "vulkan"):
+            with self.subTest(compute=compute):
+                command = self.launch({"DOKOCR_METADATA_COMPUTE": compute})
+                for flag in flags:
+                    self.assertEqual(flag in command, compute == "vulkan")
+                self.assertNotIn("--no-fused-mul-multiadd", command)
+
     def test_explicit_layers_and_devices(self):
         for compute, devices in (("cuda", "CUDA0,CUDA1"), ("vulkan", "Vulkan1")):
             for layers in ("0", "24"):
