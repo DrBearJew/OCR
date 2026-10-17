@@ -1,0 +1,11 @@
+# Published Docker install
+
+`compose.yml` runs the published `ghcr.io/drbearjew/ocr-backend`, `ocr-frontend`, and optional `ocr-metadata` images. It contains no build instructions or source-tree mounts. The installer fetches this file from the matching trusted repository ref; when run from a checkout, it uses that checkout's copy.
+
+Requirements: Docker Engine, Docker Compose v2, `curl`, OpenSSL, and x86_64/amd64. From a downloaded installer, run `bash install-docker.sh`; options are `--directory`, `--image-tag`, `--bind`, `--port`, `--api-port`, `--project-name`, and `--metadata`. The defaults install to `./dokocr`, use image/ref `main`, project `dokocr`, and bind the frontend at `127.0.0.1:3001` and backend API at `127.0.0.1:8001`. To expose the ports on a LAN interface, explicitly set `--bind` to that IPv4 address (or `0.0.0.0`) and apply appropriate host firewall rules.
+
+The default OCR provider is real PP-OCRv6 medium on CPU. Metadata extraction remains deterministic unless enabled; `--metadata` enables LFM2.5 refinement and may download about 6 GB before installation is ready. The model is stored in the `metadata-models` named volume. No metadata image or model is started/downloaded by the default profile.
+
+The installer stores generated credentials and settings in `<directory>/.env` (directory mode 0700, file mode 0600). Re-running preserves credentials, selected tag, metadata choice, ports, project name, and Docker volumes unless an option is explicitly changed. A project name can be chosen for a new install; renaming an existing project is refused because that would select a different set of named volumes. Do not delete Docker volumes to troubleshoot; there is no automatic destructive cleanup. Persistent named volumes hold PostgreSQL, Redis, document storage, consume-folder files, and optional metadata models. PostgreSQL and Redis have no host-published ports. Container logs are bounded to 10 MB per file and three files.
+
+The backend migration runs as a one-shot service after PostgreSQL is healthy and before the API or workers start. API readiness is `/ready`. Backend and workers use the same tagged image; the frontend and optional metadata image use that tag as well. The Compose project name can be changed with `--project-name` to isolate another install.

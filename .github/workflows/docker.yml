@@ -7,6 +7,9 @@ on:
       - 'app/**'
       - 'deploy/metadata/**'
       - 'scripts/smoke-docker-ocr.py'
+      - 'scripts/install-docker.sh'
+      - 'scripts/test-docker-installer.py'
+      - 'deploy/docker/**'
       - '.github/workflows/docker.yml'
   workflow_dispatch:
 
@@ -41,6 +44,9 @@ jobs:
         run: |
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           echo "image=ghcr.io/$owner/ocr-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
+      - name: Installer regressions
+        if: matrix.name == 'backend'
+        run: python3 scripts/test-docker-installer.py
       - name: Model download regressions
         if: matrix.name == 'metadata'
         run: python3 scripts/test-metadata-download.py
@@ -70,6 +76,29 @@ jobs:
             -e OCR_PROVIDER=fake -e CELERY_BROKER_URL=memory:// \
             -e CELERY_RESULT_BACKEND=cache+memory:// \
             -e PYTHONPATH=/app dokocr-test:backend pytest app/tests -q
+      - name: Fresh and existing PostgreSQL migrations
+        if: matrix.name == 'backend'
+        run: |
+          docker network create migrations
+          docker run -d --name migrations-db --network migrations \
+            -e POSTGRES_USER=dokocr -e POSTGRES_PASSWORD=ci-only -e POSTGRES_DB=dokocr postgres:16-alpine
+          for attempt in $(seq 1 60); do
+            docker exec migrations-db pg_isready -U dokocr -d dokocr && break
+            sleep 2
+          done
+          migrate() {
+            docker run --rm --network migrations \
+              -e DATABASE_URL="postgresql+psycopg://dokocr:ci-only@migrations-db:5432/$1" \
+              dokocr-test:backend alembic upgrade "$2"
+          }
+          migrate dokocr head
+          docker exec migrations-db createdb -U dokocr existing
+          migrate existing 0003_operational_hardening
+          docker exec migrations-db psql -U dokocr -d existing -v ON_ERROR_STOP=1 \
+            -c 'ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(32)'
+          migrate existing head
+          migrate existing head
+          docker stop migrations-db
       - name: Frontend serves built application
         if: matrix.name == 'frontend'
         run: |

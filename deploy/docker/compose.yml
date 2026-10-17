@@ -1,0 +1,189 @@
+name: ${COMPOSE_PROJECT_NAME:-dokocr}
+
+x-app-env: &app-env
+  APP_NAME: Dok OCR
+  ENVIRONMENT: production
+  DEBUG: "false"
+  DATABASE_URL: postgresql+psycopg://dokocr:${POSTGRES_PASSWORD}@postgres:5432/dokocr
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/1
+  CELERY_WORKER_PREFETCH_MULTIPLIER: "1"
+  OCR_WORKER_CONCURRENCY: "1"
+  STORAGE_PATH: /data/storage
+  CONSUME_PATH: /data/consume
+  ADMIN_USERNAME: ${ADMIN_USERNAME}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+  SECRET_KEY: ${SECRET_KEY}
+  OCR_PROVIDER: ppocrv6
+  PPOCRV6_TIER: medium
+  PPOCRV6_ENGINE: onnxruntime
+  PPOCRV6_DEVICE: cpu
+  QWEN_LLAMACPP_BASE_URL: http://metadata:8080/v1
+  QWEN_MODEL_PATH: metadata
+  LLM_METADATA_REFINEMENT_ENABLED: ${DOKOCR_METADATA_ENABLED:-false}
+  QWEN_METADATA_THINKING_ENABLED: "true"
+  LLM_MAX_TOKENS: "4096"
+  LLM_REQUEST_TIMEOUT_SECONDS: "240"
+  FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://frontend}
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://frontend}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://frontend}
+  COOKIE_SECURE: ${COOKIE_SECURE:-false}
+  TRUSTED_PROXY_HEADERS: "true"
+  COMMAND_HOOKS_ENABLED: "false"
+
+x-json-logging: &json-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: dokocr
+      POSTGRES_USER: dokocr
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dokocr -d dokocr"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging: *json-logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *json-logging
+
+  migrate:
+    image: ghcr.io/drbearjew/ocr-backend:${DOKOCR_IMAGE_TAG:-main}
+    restart: "no"
+    environment: *app-env
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *json-logging
+
+  backend:
+    image: ghcr.io/drbearjew/ocr-backend:${DOKOCR_IMAGE_TAG:-main}
+    restart: unless-stopped
+    environment: *app-env
+    volumes:
+      - document-storage:/data/storage
+      - consume-data:/data/consume
+    ports:
+      - "${DOKOCR_BIND:-127.0.0.1}:${DOKOCR_API_PORT:-8001}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5)"
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 60s
+    logging: *json-logging
+
+  worker:
+    image: ghcr.io/drbearjew/ocr-backend:${DOKOCR_IMAGE_TAG:-main}
+    restart: unless-stopped
+    environment: *app-env
+    command:
+      - celery
+      - -A
+      - app.workers.celery_app.celery_app
+      - worker
+      - --loglevel=INFO
+      - --queues=ocr,metadata,maintenance
+      - --concurrency=1
+      - --prefetch-multiplier=1
+    volumes:
+      - document-storage:/data/storage
+      - consume-data:/data/consume
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    logging: *json-logging
+
+  worker-beat:
+    image: ghcr.io/drbearjew/ocr-backend:${DOKOCR_IMAGE_TAG:-main}
+    restart: unless-stopped
+    environment: *app-env
+    command:
+      - celery
+      - -A
+      - app.workers.celery_app.celery_app
+      - beat
+      - --loglevel=INFO
+    volumes:
+      - document-storage:/data/storage
+      - consume-data:/data/consume
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    logging: *json-logging
+
+  frontend:
+    image: ghcr.io/drbearjew/ocr-frontend:${DOKOCR_IMAGE_TAG:-main}
+    restart: unless-stopped
+    ports:
+      - "${DOKOCR_BIND:-127.0.0.1}:${DOKOCR_PORT:-3001}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    logging: *json-logging
+
+  metadata:
+    image: ghcr.io/drbearjew/ocr-metadata:${DOKOCR_IMAGE_TAG:-main}
+    profiles: [metadata]
+    restart: unless-stopped
+    volumes:
+      - metadata-models:/models
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4)"
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30m
+    logging: *json-logging
+
+volumes:
+  postgres-data:
+  redis-data:
+  document-storage:
+  consume-data:
+  metadata-models:

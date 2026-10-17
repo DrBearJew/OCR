@@ -4,7 +4,8 @@ from logging.config import fileConfig
 import os
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import Table, engine_from_config, event, pool, text
+from sqlalchemy.dialects.postgresql import ENUM
 
 from app.db import Base
 from app import models  # noqa: F401
@@ -15,6 +16,15 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+
+
+def reuse_existing_enums(table, connection, **kwargs) -> None:
+    # Older migrations explicitly create enums before referencing them in tables.
+    # SQLAlchemy must not issue CREATE TYPE a second time for those references.
+    for column in table.columns:
+        enum = column.type
+        if isinstance(enum, ENUM) and connection.dialect.has_type(connection, enum.name, schema=enum.schema):
+            enum.create_type = False
 
 
 def get_url() -> str:
@@ -45,8 +55,25 @@ def run_migrations_online() -> None:
     )
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata)
-        with context.begin_transaction():
-            context.run_migrations()
+        postgres = connection.dialect.name == "postgresql"
+        if postgres:
+            event.listen(Table, "before_create", reuse_existing_enums, insert=True)
+        try:
+            with context.begin_transaction():
+                if postgres:
+                    # Shipped revision IDs exceed Alembic 1.13's VARCHAR(32) default.
+                    # Preserve existing values and applied migration files.
+                    connection.execute(text(
+                        "CREATE TABLE IF NOT EXISTS alembic_version "
+                        "(version_num TEXT NOT NULL PRIMARY KEY)"
+                    ))
+                    connection.execute(text(
+                        "ALTER TABLE alembic_version ALTER COLUMN version_num TYPE TEXT"
+                    ))
+                context.run_migrations()
+        finally:
+            if postgres:
+                event.remove(Table, "before_create", reuse_existing_enums)
 
 
 if context.is_offline_mode():

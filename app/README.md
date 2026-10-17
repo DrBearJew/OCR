@@ -2,7 +2,7 @@
 
 This directory contains the runnable Dok OCR application: backend API, workers, frontend, database migrations, reference implementations, and local Docker Compose files.
 
-For the project overview and runtime boundaries, start with the repository-level [`../README.md`](../README.md). This file is the implementation and operations guide for the app.
+For the prebuilt Linux Docker install, use [`../docs/INSTALL.md`](../docs/INSTALL.md). This file is the source-based development and operations guide: its Compose setup builds local images, and `.env.example` defaults to fake OCR. For the project overview and runtime boundaries, see the repository-level [`../README.md`](../README.md).
 
 ---
 
@@ -110,7 +110,9 @@ Metadata refinement is separate from OCR. The production runtime route uses LFM2
 
 ---
 
-## 5. First-time local setup
+## 5. Development setup (source build, fake OCR by default)
+
+This developer setup is not the prebuilt user install. The sample environment uses `OCR_PROVIDER=fake`; select `ppocrv6` manually if you want to exercise local CPU OCR. For the installer-based deployment, see [`../docs/INSTALL.md`](../docs/INSTALL.md).
 
 From this directory:
 

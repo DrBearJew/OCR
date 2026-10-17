@@ -2,6 +2,14 @@
 
 The production metadata alias is **LFM2.5-8B-A1B Q5_K_M**, not image OCR. Paddle/OpenVINO remains a separate, unchanged OCR build. Gemma is retained as `metadata-gemma` for rollback; legacy `qwen` settings and aliases are compatibility names.
 
+## Optional prebuilt Docker runtime
+
+The [one-command Docker installer](../../docs/INSTALL.md) supports `--metadata`: it runs `ghcr.io/drbearjew/ocr-metadata` and automatically downloads the pinned public LFM Q5 model into a persistent `/models` volume. Downloads resume when supported and are SHA-256 verified before activation. Existing invalid model files are preserved and reported, not silently overwritten. Model use is subject to the [official model's license](https://huggingface.co/LiquidAI/LFM2.5-8B-A1B-GGUF).
+
+This image builds the pinned schema-patched server from source with AVX2/FMA/F16C, without native/AVX512 or GPU requirements. It serves metadata on internal port 8080 and is separate from both the basic PP-OCRv6 OCR provider and the advanced Paddle runtime. Plan for at least 16 GiB RAM and 20 GiB free disk for the complete AI-enabled install; the model download alone is 6.03 GB. These are provisioning recommendations, not a throughput guarantee.
+
+The manual build and production-layout notes below remain useful for advanced operators; they are not prerequisites for the prebuilt installer.
+
 ## Engine fix and provenance
 
 The pinned [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) revision is `cea2d61ffdac38ee2958ba88d120fa07cb67703a`. At that revision, the LFM2.5 chat handler accepted API `response_format` requests but did not enforce their JSON/schema grammar. [The local patch](lfm-json-schema.patch) adds schema parsing, reference resolution and immediate grammar enforcement while retaining ordinary chat/reasoning behavior.
@@ -43,7 +51,7 @@ Official weights: [LiquidAI/LFM2.5-8B-A1B-GGUF](https://huggingface.co/LiquidAI/
 | Thinking budget | `3072`, reserving up to `1024` tokens for final JSON |
 | Speculation | `--spec-type none`; no DSpark weights/flags |
 
-Provision the weights separately and verify their checksum before serving. The [reference llama-swap config](../model-runtime/llama-swap.config.yaml) shows portable asset paths and the retained Gemma route. It requires prepared binaries/models; it is not a released runtime image.
+For a manual build, provision the weights separately and verify their checksum before serving; the prebuilt Docker runtime handles this automatically. The [reference llama-swap config](../model-runtime/llama-swap.config.yaml) shows portable asset paths and the retained Gemma route. It requires prepared binaries/models; it is not a released runtime image.
 
 The backend honors `QWEN_METADATA_THINKING_ENABLED`. Reasoning metadata HTTP requests have a minimum timeout of 240 seconds, preserving larger configured timeouts; non-reasoning calls and OCR keep their configured timeout. Redis leases cover both possible metadata HTTP attempts. This does not raise the 4096-token generation ceiling.
 
