@@ -1,0 +1,126 @@
+# Maintainer/reference layout. Provision binaries and models before startup.
+# These are container paths, not paths from a production host.
+listen: "0.0.0.0:8092"
+includeAliasesInList: true
+healthCheckTimeout: 1800
+startPort: 18100
+
+macros:
+  "models_dir": "/models"
+  "paddle_server": "/opt/dokocr/ik-paddle/bin/llama-server"
+  "metadata_server": "/opt/dokocr/ik-lfm/bin/llama-server"
+  "gemma_server": "/opt/dokocr/ik/bin/llama-server"
+  "glm_server": "/opt/dokocr/glm/bin/llama-server"
+  "paddle_model": "${models_dir}/paddleocr-vl/paddleocr-vl-q8_0.gguf"
+  "paddle_mmproj": "${models_dir}/paddleocr-vl/paddleocr-vl-mmproj.gguf"
+  "paddle_template": "${models_dir}/paddleocr-vl/paddleocr-vl-chat_template.jinja"
+  "paddle_ov_model": "${models_dir}/paddleocr-vl-openvino-direct-pos-0049/model"
+  "paddle_env": >-
+    IK_PADDLEOCR_D72_ATTN_GGML=1
+    IK_PADDLEOCR_OPENVINO_SIDECAR_REPLACE=1
+    IK_PADDLEOCR_OPENVINO_SIDECAR_FORCE_REPLACE=1
+    IK_PADDLEOCR_OPENVINO_MODEL_DIR=${paddle_ov_model}
+    IK_PADDLEOCR_OPENVINO_SIDECAR_STARTUP_MS=120000
+    IK_PADDLEOCR_OPENVINO_SIDECAR_LOG=/var/log/dokocr/paddle-openvino-sidecar.log
+  "metadata_model": "${models_dir}/lfm2.5-8b-a1b/LFM2.5-8B-A1B-Q5_K_M.gguf"
+  "gemma_model": "${models_dir}/gemma-4-E2B-it-qat-q4_0-gguf/gemma-4-E2B_q4_0-it.gguf"
+  "gemma_template": "${models_dir}/gemma-4-E2B-it-qat-q4_0-gguf/google-gemma4-E2B-chat_template-main.jinja"
+  "glm_model": "${models_dir}/glm/glm.gguf"
+  "glm_mmproj": "${models_dir}/glm/glm-mmproj.gguf"
+
+models:
+  "paddleocr-vl":
+    name: "Dok OCR PaddleOCR-VL ik/OpenVINO sidecar"
+    cmd: |
+      env ${paddle_env} ${paddle_server} --port ${PORT}
+      --host 127.0.0.1 --webui none --jinja
+      --model ${paddle_model}
+      --mmproj ${paddle_mmproj}
+      --chat-template-file ${paddle_template}
+      --alias paddleocr-vl
+      --ctx-size 4096
+      --batch-size 1024
+      --ubatch-size 512
+      --threads 4
+      --threads-batch 4
+      --threads-mtmd 4
+      --temp 0
+    aliases:
+      - "paddleocr-vl"
+    concurrencyLimit: 1
+    ttl: 0
+
+  # ponytail: leave 1024 of the app's 4096 output tokens for final JSON.
+  "metadata":
+    name: "Dok OCR metadata LFM2.5 Q5"
+    cmd: |
+      ${metadata_server} --port ${PORT}
+      --host 127.0.0.1 --webui none --jinja
+      --model ${metadata_model}
+      --alias metadata
+      --ctx-size 128000
+      --parallel 1
+      --batch-size 1024
+      --ubatch-size 512
+      --threads 4
+      --threads-batch 4
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      --ctx-checkpoints 0
+      --ctx-checkpoints-interval 0
+      --no-warmup
+      --spec-type none
+      --reasoning-budget 3072
+      --flash-attn on
+    aliases:
+      - "metadata-model"
+      - "qwen-mtp"
+      - "qwen3.5-2b"
+      - "qwen"
+    concurrencyLimit: 1
+    ttl: 180
+
+  "metadata-gemma":
+    name: "Dok OCR metadata Gemma rollback"
+    cmd: |
+      ${gemma_server} --port ${PORT}
+      --host 127.0.0.1 --webui none --jinja
+      --model ${gemma_model}
+      --chat-template-file ${gemma_template}
+      --alias metadata-gemma
+      --ctx-size 131072
+      --batch-size 1024
+      --ubatch-size 512
+      --threads 4
+      --threads-batch 4
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      --spec-type ngram-mod:n_max=16,n_min=0,ngram_size_n=40
+      --override-kv tokenizer.ggml.add_bos_token=bool:false
+      --flash-attn on
+      --merge-qkv
+    aliases:
+      - "gemma-4-e2b-it-qat-q4_0"
+      - "gemma-e2b"
+    concurrencyLimit: 1
+    ttl: 180
+
+  "glm":
+    name: "Dok OCR GLM fallback OCR"
+    cmd: |
+      ${glm_server} --port ${PORT}
+      --host 127.0.0.1 --webui none
+      --model ${glm_model}
+      --mmproj ${glm_mmproj}
+      --alias glm
+      --ctx-size 4096
+      --batch-size 1024
+      --ubatch-size 512
+      --threads 4
+      --threads-batch 4
+      --temp 0
+    aliases:
+      - "glm-ocr"
+      - "zai-org/glm-ocr"
+    concurrencyLimit: 1
+    ttl: 180

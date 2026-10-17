@@ -1,0 +1,20 @@
+[Unit]
+Description=Dok OCR PaddleOCR-VL llama-swap managed ik/OpenVINO sidecar
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ocr
+# Provision this host-specific config with valid local binary/model paths.
+# Container /opt/dokocr and /models paths must be adapted to the host.
+# Set User/Group to your provisioned service account before enabling.
+# Docker clients need a trusted reachable bind address instead of loopback.
+ExecStart=/usr/local/bin/llama-swap -config /etc/dokocr/llama-swap.config.yaml -listen 127.0.0.1:8092
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

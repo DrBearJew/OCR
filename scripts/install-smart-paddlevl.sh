@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Optional installer for a local Dok OCR PaddleOCR-VL OCR endpoint.
-# Supports two backends:
+# LEGACY host-level installer for old local Dok OCR PaddleOCR-VL OCR endpoints.
+#
+# New installs may configure an existing compatible endpoint in Admin.
+# app/docker-compose.smart.yml is a reference overlay requiring a prepared image.
+#
+# This legacy installer supports two backends:
 #   - openvino-cpu: tested CPU OpenVINO 2025.2 gateway with /v1/ocr/batch for up to 4 pages.
 #   - llamacpp: legacy GGUF + smart-proxy gateway for llama.cpp/LM Studio style OCR.
 #
-# Skip this installer if you already have a GPU/native/remote PaddleOCR-VL endpoint.
-# This script does not install the optional Gemma/Qwen metadata model sidecar;
-# the CPU metadata sidecar lives under deploy/qwen-ik-router/.
+# Skip this installer if you already have a GPU/native/remote PaddleOCR-VL endpoint
+# or an operator-prepared model-runtime Compose overlay. This script does
+# not install the current model-runtime container.
 # The installer is intentionally idempotent. It writes helper assets/services and
 # prints Admin -> Model Setup values; it does not edit Dok OCR .env or
 # docker-compose.yml.
@@ -52,14 +56,16 @@ usage() {
   cat <<USAGE
 Usage: $0 [--backend llamacpp|openvino-cpu] [--openvino-cpu] [--llamacpp] [--dry-run] [--skip-download] [--no-start]
 
+LEGACY: configure an existing compatible endpoint in Admin for new installs.
+  app/docker-compose.smart.yml requires an operator-prepared/tested runtime image.
+
 Backends:
   openvino-cpu   Tested CPU OpenVINO 2025.2 gateway with /v1/ocr/batch up to 4 pages. Default.
   llamacpp       Legacy GGUF OCR gateway. Requires compatible llama-server and PaddleOCR-VL GGUF files.
 
-Use this only if you need to provision a local PaddleOCR-VL OCR endpoint. If you already
-have a GPU/native/remote PaddleOCR-VL endpoint, configure that URL in Admin instead.
-Metadata refinement models are configured separately; this script does not install Gemma/Qwen.
-For CPU metadata refinement, use the ik_llama.cpp sidecar under deploy/qwen-ik-router/.
+Use this only if you need to maintain an old host-level PaddleOCR-VL OCR endpoint.
+If you already have a GPU/native/remote PaddleOCR-VL endpoint, configure that URL in Admin instead.
+For prepared Paddle/LFM/Gemma/GLM runtime images, see app/docker-compose.smart.yml.
 
 Common environment overrides:
   DOKOCR_PADDLE_BACKEND          default: openvino-cpu

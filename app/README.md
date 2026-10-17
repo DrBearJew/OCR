@@ -2,7 +2,7 @@
 
 This directory contains the runnable Dok OCR application: backend API, workers, frontend, database migrations, reference implementations, and local Docker Compose files.
 
-For the product overview, screenshots, and one-click smart PaddleOCR-VL stack installer, start with the repository-level [`../README.md`](../README.md). This file is the implementation and operations guide for the app itself.
+For the project overview and runtime boundaries, start with the repository-level [`../README.md`](../README.md). This file is the implementation and operations guide for the app.
 
 ---
 
@@ -17,7 +17,7 @@ File input
   -> validation and storage
   -> OCR / text extraction
   -> deterministic metadata extraction
-  -> optional Gemma/Qwen metadata/search enrichment
+  -> optional metadata/search enrichment
   -> title generation and validation
   -> review state assignment
   -> PostgreSQL search indexing
@@ -33,7 +33,7 @@ The main user-facing objects are:
 | `Document` | One physical uploaded/imported file, its OCR text, metadata, review state, events, pages, and retry path. |
 | `Batch` | Upload grouping and migration compatibility layer. It is not the primary user mental model. |
 
-A document is considered complete only when file storage, OCR, metadata extraction, title persistence, required-field validation, and search indexing are done. Optional Gemma/Qwen enrichment can improve search metadata, but deterministic extraction remains the safe baseline.
+A document is considered complete only when file storage, OCR, metadata extraction, title persistence, required-field validation, and search indexing are done. Optional metadata enrichment can add candidates and search hints; deterministic extraction remains the baseline.
 
 ---
 
@@ -91,7 +91,7 @@ Storage is mounted as Docker volumes:
 | `redis-data` | Redis persistence. |
 | `document-storage` | Stored uploaded/imported documents, previews, thumbnails. |
 
-The app can talk to model servers, but it does not require them for basic development. Model services can be external, deployed by the smart installer, or started from examples.
+The app can talk to model servers, but it does not require them for basic development. Model services can be external, or deployed through the optional `docker-compose.smart.yml` model-runtime overlay.
 
 ---
 
@@ -103,10 +103,10 @@ Choose a mode before configuring `.env` or the Admin model setup page.
 | --- | --- | --- |
 | Basic dev/test | `fake` | Fast UI/backend development with no model server. |
 | Fast local OCR | `ppocrv6` | CPU/local OCR for ordinary text extraction. |
-| Smart document OCR | `paddle_vl` | Strict PaddleOCR-VL via any real PaddleOCR-VL-compatible endpoint. OpenVINO is the tested CPU gateway; GPU/native/remote endpoints are valid. Best default for rich documents/diagrams. |
-| GLM OCR | `glm` | GLM multimodal OCR through a compatible endpoint. Kept as a selectable OCR provider. |
+| Smart document OCR | `paddle_vl` | Strict PaddleOCR-VL through a compatible endpoint. The optional Compose overlay needs an operator-prepared image and model assets. |
+| GLM OCR | `glm` | GLM multimodal OCR through a compatible endpoint. Kept as a selectable fallback provider. |
 
-Gemma/Qwen metadata refinement is separate from OCR. It is optional text reasoning for metadata candidates, search hints, tags/folders, and summaries; it does not replace the PaddleOCR-VL endpoint. Runtime choices are configurable: CPU/low-RAM installs can use the bundled `deploy/qwen-ik-router/` ik_llama.cpp + Gemma E2B QAT Q4 sidecar with 128k context, strong-GPU installs can use a larger local text model, and remote OpenAI-compatible text models can be configured instead. For long PDFs, metadata prompts use stored page OCR rows when available so the model sees ordered page snippets instead of only a naive head/tail excerpt.
+Metadata refinement is separate from OCR. The production runtime route uses LFM2.5-8B-A1B Q5_K_M behind model id `metadata`; optional Gemma rollback uses `metadata-gemma`. Existing `QWEN_*` settings and old `qwen` model aliases remain for app/runtime compatibility and do not identify the production model. For long PDFs, metadata prompts use stored page OCR rows when available so the model sees ordered page snippets instead of only a naive head/tail excerpt. See [`../deploy/metadata/README.md`](../deploy/metadata/README.md) for the pinned ik build, local JSON-schema fix, and runtime flags.
 
 ---
 
@@ -167,39 +167,23 @@ docker compose run --rm backend alembic upgrade head
 
 ## 6. Model and OCR configuration
 
-### Smart OCR setup
+### Basic app setup
 
-If you already have a GPU/native/remote PaddleOCR-VL-compatible endpoint, skip the installer and configure that endpoint in **Admin → Model Setup**.
+The default app stack does not need a model server. The example environment defaults to `OCR_PROVIDER=fake`, and the local quickstart above is the recommended first run. For local OCR, select `ppocrv6` in `.env` or **Admin → Model Setup**.
 
-For CPU-only smart OCR that needs a local endpoint, use the optional OpenVINO PaddleOCR-VL gateway from the repository root:
+### Advanced smart runtime
 
-```bash
-../scripts/install-smart-paddlevl.sh --backend openvino-cpu --dry-run
-sudo ../scripts/install-smart-paddlevl.sh --backend openvino-cpu
-```
-
-The OpenVINO path serves both single-image OpenAI-compatible OCR and a Dok OCR batch endpoint:
-
-```text
-GET  /health
-GET  /v1/models
-POST /v1/chat/completions
-POST /v1/ocr/batch       # up to 4 rendered PDF pages, one loaded model
-```
-
-For legacy PaddleOCR-VL GGUF OCR deployments only, use:
+The optional Compose overlay is not a turnkey public install. Before starting it, configure `DOKOCR_MODEL_RUNTIME_IMAGE` in `app/.env` with an operator-supplied prepared and tested image, and provision the model files expected by that image. The repository's `deploy/model-runtime/` directory is maintainer/reference scaffolding; there is no released default image tag, and the entrypoint requires existing model files rather than downloading them on first start.
 
 ```bash
-sudo ../scripts/install-smart-paddlevl.sh --backend llamacpp
+# From app/, after setting DOKOCR_MODEL_RUNTIME_IMAGE and preparing its model volume:
+docker compose -f docker-compose.yml -f docker-compose.smart.yml up -d
+python ../scripts/doctor-smart-runtime.py --base-url http://localhost:8092/v1
 ```
 
-Then open:
+The app uses `http://model-runtime:8092/v1` inside Compose. The model ids are `paddleocr-vl`, `metadata`, and optional `glm`. `metadata` is LFM2.5-8B-A1B Q5_K_M; `metadata-gemma` is an optional Gemma rollback route. The detailed metadata runtime requirements are in [`../deploy/metadata/README.md`](../deploy/metadata/README.md). The PaddleOCR-VL sidecar guide is an advanced operator reference: [`../deploy/paddlevl/README-llama-swap-openvino-sidecar.md`](../deploy/paddlevl/README-llama-swap-openvino-sidecar.md).
 
-```text
-Admin -> Model Setup
-```
-
-Set the PaddleOCR-VL endpoint printed by the installer, or paste your GPU/native/remote PaddleOCR-VL endpoint. Test PaddleOCR-VL, adjust the OCR time budget if needed, and save. The Admin setup stores model endpoint and timeout-policy configuration in the app settings database so the API and workers see the same model config.
+If you already operate a compatible GPU/native/remote OpenAI-compatible endpoint, configure it in **Admin → Model Setup** and skip the overlay.
 
 ### `.env` provider keys
 
@@ -209,10 +193,9 @@ The important model settings are:
 # OCR provider: fake, ppocrv6, paddle_vl, glm
 OCR_PROVIDER=paddle_vl
 
-# PaddleOCR-VL through any real compatible endpoint.
-# For OpenVINO host-level service, use the Docker network gateway printed by the installer.
-# For GPU/native/remote PaddleOCR-VL, use that endpoint URL instead.
-PADDLE_VL_LLAMACPP_BASE_URL=http://172.19.0.1:8091/v1
+# PaddleOCR-VL through the Dok OCR model-runtime llama-swap endpoint.
+# llama-swap only loads/unloads/proxies models; backend code owns OCR prompts and response cleanup.
+PADDLE_VL_LLAMACPP_BASE_URL=http://model-runtime:8092/v1
 PADDLE_VL_MODEL_PATH=paddleocr-vl
 PADDLE_VL_MMPROJ_PATH=/llm-models/paddleocr-vl-mmproj.gguf
 
@@ -221,23 +204,23 @@ PPOCRV6_TIER=medium
 PPOCRV6_ENGINE=onnxruntime
 PPOCRV6_DEVICE=cpu
 
-# GLM fallback
-GLM_LLAMACPP_BASE_URL=http://glm-llama:8080
-GLM_MODEL_PATH=/llm-models/glm.gguf
+# GLM fallback through the same Dok OCR model-runtime endpoint
+GLM_LLAMACPP_BASE_URL=http://model-runtime:8092/v1
+GLM_MODEL_PATH=glm
 GLM_MMPROJ_PATH=/llm-models/glm-mmproj.gguf
 
-# Optional metadata refinement endpoint.
-# CPU/low-RAM default: ik_llama.cpp sidecar serving Gemma 4 E2B QAT Q4_0 behind legacy qwen aliases.
-# Strong-GPU or remote installs can point this at a larger OpenAI-compatible text model instead.
-QWEN_LLAMACPP_BASE_URL=http://smart-proxy:8081/v1
+# Optional metadata refinement. QWEN_* names are retained for app compatibility;
+# model id `metadata` is the production LFM2.5-8B-A1B Q5_K_M route.
+QWEN_LLAMACPP_BASE_URL=http://model-runtime:8092/v1
 QWEN_MODEL_PATH=metadata
-LLM_METADATA_REFINEMENT_ENABLED=false
+LLM_METADATA_REFINEMENT_ENABLED=true
 LLM_REQUEST_TIMEOUT_SECONDS=120
 LLM_MAX_TOKENS=4096
 LLM_TEMPERATURE=0
 QWEN_METADATA_THINKING_ENABLED=true
 ```
 
+With metadata thinking enabled, the completion cap is 4096 tokens and the runtime uses `--reasoning-budget 3072`, reserving 1024 tokens for final JSON. The metadata request timeout is at least 240 seconds; the OCR request timeout remains 120 seconds. Metadata calls ask for schema-constrained objects with `value`, `confidence`, and `evidence`; the prompt preserves company/person names verbatim and selects an invoice/issue date rather than a due date. See the metadata runtime guide for the pinned ik commit `cea2d61ffdac` and its local JSON-schema fix.
 
 ### OCR time budgets for large documents
 
@@ -269,7 +252,7 @@ Expected endpoint shape:
 POST /v1/chat/completions
 ```
 
-For PaddleOCR-VL and GLM image OCR, the request includes multimodal `image_url` content with a data URL. For Gemma/Qwen metadata refinement, the request is text-only and expects compact JSON metadata candidates.
+For PaddleOCR-VL and GLM image OCR, the request includes multimodal `image_url` content with a data URL. For metadata refinement, the request is text-only and expects schema-constrained JSON metadata candidates.
 
 ### Provider behavior
 
@@ -278,9 +261,10 @@ The OCR path is deliberately conservative and explicit:
 - PaddleOCR-VL is the strict smart OCR path when `ocr_engine = paddle_vl`.
 - PP-OCRv6 is available as a separate fast/local OCR provider.
 - GLM remains available as a separate multimodal OCR provider.
-- Strict PaddleOCR-VL PDFs are rendered to page images and processed by PaddleOCR-VL; embedded PDF text is not silently substituted.
+- In redo mode, searchable PDFs may use a verified embedded text layer first; every selected page must meet the usable-text check, and accepted runs are traced as `pdf_text_layer`.
+- Force mode always ignores the PDF text-layer fast path and runs the selected OCR provider.
 - Strict PaddleOCR-VL failures are surfaced for retry/review instead of silently switching to PP-OCRv6.
-- Gemma/Qwen metadata failures should not erase deterministic metadata. Empty metadata-model output is treated as no candidate; malformed non-empty JSON is recorded for review/diagnostics.
+- Metadata model failures should not erase deterministic metadata. Empty model output is treated as no candidate; malformed non-empty JSON is recorded for review/diagnostics.
 
 ---
 
@@ -406,7 +390,7 @@ Manual edits and locks are respected:
 - `metadata_locked` protects current metadata from normal reprocessing.
 - Field-level locks protect individual fields.
 - Forced processing can overwrite where explicitly allowed.
-- Gemma/Qwen metadata refinement can fill missing fields or search metadata, but deterministic extraction and manual locks remain authoritative.
+- Metadata refinement can propose fields or search metadata, but deterministic extraction and manual locks remain authoritative.
 
 Review warnings are generated for missing required fields, weak/invalid title schema, OCR/model failures, duplicate signals, or other pipeline concerns. They are stored on the document and surfaced in the UI, filters, diagnostics, and activity trail.
 
@@ -434,6 +418,8 @@ Search covers:
 
 The pipeline records a `search_indexed` marker after OCR and metadata are available. Diagnostics treat OCR text with completed/skipped OCR as implicitly searchable even if an older row lacks the marker.
 
+Searchable PDF fast path: `OCR_PDF_TEXT_LAYER_AUTO_ENABLED=true` lets redo-mode OCR accept an embedded PDF text layer only when the text is usable across every selected page. It rejects suspicious/control-heavy text, records `ocr_pdf_text_layer_used`, and falls back to the selected OCR provider when rejected. Use OCR force mode to run the selected model regardless of embedded text.
+
 ---
 
 ## 12. Admin areas
@@ -449,7 +435,7 @@ The Admin UI is the technical configuration area for:
 - failed jobs and retries
 - reconciliation tasks
 
-Normal users should see model setup as an internal model gateway, not as raw smart-proxy or Gemma/Qwen sidecar internals.
+The backend owns prompts, decode parameters, PDF text-layer checks, and response cleanup; llama-swap only handles model load/unload/proxying. Legacy `QWEN_*` setting names and `qwen` aliases are compatibility plumbing, not the identity of the production LFM2.5 metadata model.
 
 ---
 
@@ -602,8 +588,8 @@ Keep external links and integrations on the public base URL. Avoid hardcoding lo
 | --- | --- |
 | Upload fails before backend logs appear | Nginx body limit or proxy timeout. Inspect `frontend/nginx.conf` and `nginx -T`. |
 | Upload accepted but document never processes | Worker/Redis health, Celery queue logs, `processing_task_id`, `lease_until`, reconciliation status. |
-| OCR returns empty text | Check selected OCR provider, model endpoint, PaddleOCR-VL template/image support, rendered page images, and provider error events. |
-| Metadata looks wrong | Check OCR text first, then deterministic extraction, then Gemma/Qwen candidates/sources. |
+| OCR returns empty or noisy text | Check the selected provider, endpoint, rendered page images, and provider error events. A known limitation is that the single-image PaddleOCR-VL adapter can append instruction text on very short synthetic images; this was reproduced on both the original and new deployment. A raw native task-cue smoke returned the expected test text, but that does not prove the full adapter/pipeline path is flawless. |
+| Metadata looks wrong | Check OCR text first, then deterministic extraction, then metadata candidates/sources. |
 | Status says `needs_review` after action | Compare `processing_state` and `review_state`; review-only states should promote to `complete` when marked reviewed. |
 | Metadata sidecar shows failed but document is complete | Inspect diagnostics. Empty model output is optional/no-candidate; malformed non-empty JSON is a real metadata candidate failure. |
 | Office/email files are rejected | Enable Tika/Gotenberg converters and set `CONVERTERS_ENABLED=true`. |

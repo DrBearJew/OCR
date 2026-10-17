@@ -1,0 +1,61 @@
+diff --git a/common/chat.cpp b/common/chat.cpp
+index 08dbf15..02b6181 100644
+--- a/common/chat.cpp
++++ b/common/chat.cpp
+@@ -1669,9 +1669,10 @@ static common_chat_params common_chat_params_init_lfm2_5(const common_chat_templ
+         "</think>",
+     };
+
+-    auto has_tools         = inputs.tools.is_array() && !inputs.tools.empty();
+-    auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
+-    auto include_grammar   = has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE;
++    auto has_tools           = inputs.tools.is_array() && !inputs.tools.empty();
++    auto has_response_format = !inputs.json_schema.is_null() && inputs.json_schema.is_object();
++    auto extract_reasoning   = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
++    auto include_grammar     = has_response_format || (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE);
+
+     const std::string THINK_START     = "<think>";
+     const std::string THINK_END       = "</think>";
+@@ -1690,6 +1691,11 @@ static common_chat_params common_chat_params_init_lfm2_5(const common_chat_templ
+             reasoning = p.optional(THINK_START + p.reasoning(p.until(THINK_END)) + THINK_END);
+         }
+
++        if (has_response_format) {
++            auto content = p.content(p.schema(p.json(), "response-format-schema", inputs.json_schema));
++            return generation_prompt + reasoning + p.space() + content + p.space() + end;
++        }
++
+         if (!has_tools || inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_NONE) {
+             return generation_prompt + reasoning + p.content(p.rest()) + end;
+         }
+@@ -1709,13 +1715,17 @@ static common_chat_params common_chat_params_init_lfm2_5(const common_chat_templ
+     data.parser = parser.save();
+
+     if (include_grammar) {
+-        data.grammar_lazy = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
++        data.grammar_lazy = !has_response_format && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
+         data.grammar      = build_grammar([&](const common_grammar_builder & builder) {
+             foreach_function(inputs.tools, [&](const json & tool) {
+                 const auto & function = tool.at("function");
+                 auto         schema   = function.at("parameters");
+                 builder.resolve_refs(schema);
+             });
++            if (has_response_format) {
++                auto schema = inputs.json_schema;
++                builder.resolve_refs(schema);
++            }
+             parser.build_grammar(builder, data.grammar_lazy);
+         });
+         foreach_function(inputs.tools, [&](const json & tool) {
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index a0f93a3..f69f5b6 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -189,6 +189,7 @@ endif()
+ llama_build_and_test(test-jinja.cpp)
+ llama_test(test-jinja NAME test-jinja-py ARGS -py LABEL python)
+ llama_build_and_test(test-chat-auto-parser.cpp WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
++llama_build_and_test(test-lfm-json-schema.cpp WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+ llama_build_and_test(test-chat-template.cpp )
+ llama_build_and_test(test-json-partial.cpp )
+ llama_build_and_test(test-cpu-affinity.cpp )

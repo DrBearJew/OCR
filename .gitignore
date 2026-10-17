@@ -1,3 +1,20 @@
 app.zip
 *.zip
 *.bundle
+
+# Local configuration, retained backups, logs, and generated artifacts.
+.env
+.env.*
+!.env.example
+*.bak
+*.bak-*
+*.log
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Model weights belong in operator-managed storage, not Git.
+*.gguf
+*.safetensors

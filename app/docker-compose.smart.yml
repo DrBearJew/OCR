@@ -1,0 +1,75 @@
+# Optional smart model runtime overlay for Dok OCR.
+#
+# Maintainer/reference overlay for prepared PaddleOCR-VL/LFM/Gemma/GLM runtimes.
+# Supply a tested image and provision its models first; no release image is assumed.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.smart.yml up -d
+#
+# The model-runtime service exposes one OpenAI-compatible endpoint inside the
+# Compose network: http://model-runtime:8092/v1
+
+x-dokocr-smart-model-env: &dokocr-smart-model-env
+  OCR_PROVIDER: paddle_vl
+  PADDLE_VL_LLAMACPP_BASE_URL: http://model-runtime:8092/v1
+  PADDLE_VL_MODEL_PATH: paddleocr-vl
+  PADDLE_VL_MMPROJ_PATH: /llm-models/paddleocr-vl-mmproj.gguf
+  GLM_LLAMACPP_BASE_URL: http://model-runtime:8092/v1
+  GLM_MODEL_PATH: glm
+  GLM_MMPROJ_PATH: /llm-models/glm-mmproj.gguf
+  QWEN_LLAMACPP_BASE_URL: http://model-runtime:8092/v1
+  QWEN_MODEL_PATH: metadata
+  LLM_METADATA_REFINEMENT_ENABLED: "true"
+  QWEN_METADATA_THINKING_ENABLED: "true"
+
+services:
+  model-runtime:
+    image: ${DOKOCR_MODEL_RUNTIME_IMAGE:?Set DOKOCR_MODEL_RUNTIME_IMAGE to your prepared and tested runtime image}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${DOKOCR_MODEL_RUNTIME_PORT:-8092}:8092"
+    environment:
+      DOKOCR_MODEL_RUNTIME_LISTEN: 0.0.0.0:8092
+    volumes:
+      - model-runtime-models:/models
+      - model-runtime-logs:/var/log/dokocr
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8092/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  backend:
+    environment: *dokocr-smart-model-env
+    depends_on:
+      model-runtime:
+        condition: service_healthy
+
+  worker:
+    environment: *dokocr-smart-model-env
+    depends_on:
+      model-runtime:
+        condition: service_healthy
+
+  worker-metadata:
+    environment: *dokocr-smart-model-env
+    depends_on:
+      model-runtime:
+        condition: service_healthy
+
+  worker-maintenance:
+    environment: *dokocr-smart-model-env
+    depends_on:
+      model-runtime:
+        condition: service_healthy
+
+  worker-beat:
+    environment: *dokocr-smart-model-env
+    depends_on:
+      model-runtime:
+        condition: service_healthy
+
+volumes:
+  model-runtime-models:
+  model-runtime-logs:
