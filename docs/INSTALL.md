@@ -46,6 +46,8 @@ bash install-docker.sh --metadata
 
 On first startup, the metadata container downloads the pinned, SHA-256-verified model into persistent storage. No manual weights preparation or inference-Python engine is needed. This adds metadata reasoning; it does not change the default PP-OCRv6 OCR provider.
 
+AI metadata is not guaranteed correct. A document can finish OCR and metadata extraction but enter **Needs review** because fields are missing or low-confidence. Inspect and correct those fields before marking it reviewed; this is different from an installation or processing failure.
+
 ### Installer options
 
 Use `bash install-docker.sh --help` for the installer interface and current defaults. Supported options:
