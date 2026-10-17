@@ -8,6 +8,7 @@ import type { Document, DocumentEvent, DocumentPage } from '../types'
 import { useI18n } from '../i18n'
 
 const DOCUMENT_PAGE_LIMIT = 50
+const DOCUMENT_PAGE_LIMIT_OPTIONS = [25, 50, 100]
 const DOCUMENT_BULK_FILTER_LIMIT = 1000
 
 export default function DocumentsPage({ onOpenDocument }: { onOpenDocument: (id: string) => void }) {
@@ -25,13 +26,14 @@ export default function DocumentsPage({ onOpenDocument }: { onOpenDocument: (id:
   const [detailLoading, setDetailLoading] = useState(false)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [totalEstimate, setTotalEstimate] = useState(0)
+  const [pageLimit, setPageLimit] = useState(DOCUMENT_PAGE_LIMIT)
   const [loadingMore, setLoadingMore] = useState(false)
   const [bulkAllMatching, setBulkAllMatching] = useState(false)
 
-  async function load(nextFilters = filters, append = false, cursor: string | null = null) {
+  async function load(nextFilters = filters, append = false, cursor: string | null = null, limit = pageLimit) {
     setError('')
     try {
-      const params: Record<string, string> = { ...nextFilters, limit: String(DOCUMENT_PAGE_LIMIT) }
+      const params: Record<string, string> = { ...nextFilters, limit: String(limit) }
       if (cursor) params.cursor = cursor
       const page = await api.documentsPage(params)
       setDocuments((current) => append ? [...current, ...page.items] : page.items)
@@ -134,6 +136,11 @@ export default function DocumentsPage({ onOpenDocument }: { onOpenDocument: (id:
     if (!value) delete next[key]
     setFilters(next)
     void load(next, false, null)
+  }
+
+  function updatePageLimit(value: number) {
+    setPageLimit(value)
+    void load(filters, false, null, value)
   }
 
   function selectedDocumentIdsForActions() {
@@ -345,7 +352,12 @@ export default function DocumentsPage({ onOpenDocument }: { onOpenDocument: (id:
             ))}
           </div>
           <div className="pagination-footer">
-            <span>{documents.length} / {totalEstimate || documents.length} {t('common.documents')}</span>
+            <span>{t('common.showing', 'Showing')} {documents.length} / {totalEstimate || documents.length} {t('common.documents')}</span>
+            <label className="list-limit-control">{t('common.rowsPerPage', 'Rows per page')}
+              <select value={pageLimit} onChange={(event) => updatePageLimit(Number(event.target.value) || DOCUMENT_PAGE_LIMIT)}>
+                {DOCUMENT_PAGE_LIMIT_OPTIONS.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </label>
             {nextCursor && <button type="button" className="primary" disabled={loadingMore} onClick={() => void loadMoreDocuments()}>{t('common.loadMore', 'Load more')}</button>}
           </div>
         </section>

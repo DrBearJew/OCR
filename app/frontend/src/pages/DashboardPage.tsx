@@ -79,78 +79,21 @@ interface SharedTitleState {
 type QwenStatus = 'checking' | 'available' | 'unavailable'
 
 const sampleMetadata: MetadataFormState = {
-  collection: 'Eingangsrechnung',
-  documentType: 'Rechnung',
+  collection: 'Dokumente',
+  documentType: '',
   status: 'New',
-  title: 'Demo_PR400000005_12/10/2020_205,25',
-  correspondent: 'Demo Ges.mbh',
-  recipient: 'UniTech Technische Produkte',
-  date: '12/10/2020',
-  invoiceNo: 'PR400000005',
-  amount: '205,25',
-  taxAmount: '28,05',
+  title: '',
+  correspondent: '',
+  recipient: '',
+  date: '',
+  invoiceNo: '',
+  amount: '',
+  taxAmount: '',
   currency: 'EUR',
-  tags: ['invoice', '2020', 'supplier:demo'],
+  tags: [],
   notes: '',
   customFields: {}
 }
-
-const seededFiles: UploadDraftFile[] = [
-  {
-    id: 'seed-1',
-    documentId: null,
-    recordId: null,
-    file: null,
-    filename: 'Rechnung_PR400000005_12-10-2020_20525.pdf',
-    sizeLabel: '205 KB',
-    previewUrl: null,
-    thumbnailUrl: null,
-    serverPreviewUrl: null,
-    mimeType: 'application/pdf',
-    kind: 'pdf',
-    ocrStatus: 'completed',
-    extractedTitle: 'Demo_PR400000005_12/10/2020_205,25',
-    ocrSnippet: 'Rechnung\nRechnungs-Nr.: PR400000005\nRechnungsdatum: 12.10.2020\nGesamtbetrag Brutto 205,25 EUR',
-    confidence: 98,
-    metadata: sampleMetadata,
-    qwenRunStatus: 'succeeded',
-    qwenMessage: 'Metadata model suggested recipient and amount with evidence.',
-    qwenSuggestedFolder: 'Eingangsrechnung/Demo/2020',
-    metadataSources: {
-      title: { source: 'deterministic', confidence: 98 },
-      invoiceNo: { source: 'deterministic', confidence: 97 },
-      date: { source: 'deterministic', confidence: 96 },
-      amount: { source: 'qwen', confidence: 92 },
-      correspondent: { source: 'deterministic', confidence: 91 },
-      recipient: { source: 'qwen', confidence: 88 }
-    }
-  },
-  {
-    id: 'seed-2',
-    documentId: null,
-    recordId: null,
-    file: null,
-    filename: 'Beleg_Reise_Muc_2020-10-05_45,30.jpg',
-    sizeLabel: '120 KB',
-    previewUrl: null,
-    thumbnailUrl: null,
-    serverPreviewUrl: null,
-    mimeType: 'image/jpeg',
-    kind: 'image',
-    ocrStatus: 'completed',
-    extractedTitle: 'CommerceBank_B_04/26_NA_NA',
-    ocrSnippet: 'Beleg Reise München\nDatum 05.10.2020\nBetrag 45,30 EUR',
-    confidence: 96,
-    metadata: { ...sampleMetadata, collection: 'Belege', documentType: 'Beleg', title: 'CommerceBank_B_04/26_NA_NA', correspondent: 'CommerceBank', recipient: '', invoiceNo: '', amount: '', taxAmount: '' },
-    qwenRunStatus: 'not_run',
-    qwenMessage: 'Metadata model has not run for this sample.',
-    qwenSuggestedFolder: '',
-    metadataSources: {
-      title: { source: 'deterministic', confidence: 93 },
-      correspondent: { source: 'deterministic', confidence: 90 }
-    }
-  }
-]
 
 const defaultProcessingOptions: ProcessingOptionsState = {
   autoProcess: true,
@@ -169,8 +112,8 @@ const defaultProcessingOptions: ProcessingOptionsState = {
 
 export default function DashboardPage({ onOpenDocument }: DashboardPageProps) {
   const { t } = useI18n()
-  const [files, setFiles] = useState<UploadDraftFile[]>(seededFiles)
-  const [selectedId, setSelectedId] = useState(seededFiles[0].id)
+  const [files, setFiles] = useState<UploadDraftFile[]>([])
+  const [selectedId, setSelectedId] = useState('')
   const [collections, setCollections] = useState<Collection[]>([])
   const [customFieldDefinitions, setCustomFieldDefinitions] = useState<CustomFieldDefinition[]>([])
   const [collectionName, setCollectionNameState] = useState(sampleMetadata.collection)
@@ -262,7 +205,7 @@ export default function DashboardPage({ onOpenDocument }: DashboardPageProps) {
       }
     })
     if (!next.length) return
-    setFiles((current) => [...current.filter((file) => !file.id.startsWith('seed-')), ...next])
+    setFiles((current) => [...current, ...next])
     setUploadedRecordId(null)
     setSelectedId(next[0].id)
   }
@@ -343,8 +286,8 @@ export default function DashboardPage({ onOpenDocument }: DashboardPageProps) {
     if (!selected?.documentId) {
       setFiles((current) => {
         const remaining = current.filter((file) => file.id !== selectedId)
-        if (remaining[0]) setSelectedId(remaining[0].id)
-        return remaining.length ? remaining : seededFiles
+        setSelectedId(remaining[0]?.id || '')
+        return remaining
       })
       return
     }
@@ -354,8 +297,8 @@ export default function DashboardPage({ onOpenDocument }: DashboardPageProps) {
       await api.deleteDocument(selected.documentId)
       setFiles((current) => {
         const remaining = current.filter((file) => file.documentId !== selected.documentId)
-        if (remaining[0]) setSelectedId(remaining[0].id)
-        return remaining.length ? remaining : seededFiles
+        setSelectedId(remaining[0]?.id || '')
+        return remaining
       })
       setMessage(t('dashboard.message.documentDeleted'))
     } catch (err) {
@@ -408,7 +351,7 @@ export default function DashboardPage({ onOpenDocument }: DashboardPageProps) {
         </div>
         <div className="upload-header-actions">
           <button type="button" disabled={!selected?.documentId} onClick={() => selected?.documentId && onOpenDocument(selected.documentId)}>{t('dashboard.openSelectedDocument')}</button>
-          <button type="button" disabled={actionBusy === 'delete'} onClick={() => void deleteSelected()}><Trash2 size={15} /> {t('dashboard.deleteSelected')}</button>
+          <button type="button" disabled={!selected || actionBusy === 'delete'} onClick={() => void deleteSelected()}><Trash2 size={15} /> {t('dashboard.deleteSelected')}</button>
         </div>
       </header>
       {message && <p className={message.toLowerCase().includes('failed') || message.toLowerCase().includes(t('dashboard.message.addFiles').toLowerCase().slice(0, 8)) ? 'error' : 'success-message'}>{message}</p>}
@@ -470,12 +413,17 @@ function UploadDropzone({ inputRef, files, busy, onFiles }: { inputRef: MutableR
         <div className="recent-uploads">
           <div className="mini-heading">
             <strong>{t('dashboard.recentUploads')}</strong>
-            <span>{files.length} {files.length === 1 ? t('dashboard.file') : t('dashboard.files')}</span>
+            <span>{files.length ? `${files.length} ${files.length === 1 ? t('dashboard.file') : t('dashboard.files')}` : t('dashboard.noFilesSelected')}</span>
           </div>
-          {files.slice(0, 3).map((file) => (
+          {files.length === 0 ? (
+            <div className="recent-upload-empty">
+              <FileText size={20} />
+              <span>{t('dashboard.noUploadsYet')}</span>
+            </div>
+          ) : files.slice(0, 3).map((file) => (
             <div className="recent-upload-row" key={file.id}>
               <FileKindIcon kind={file.kind} />
-              <span><strong>{file.filename}</strong><small>{file.sizeLabel} · {file.extractedTitle}</small></span>
+              <span><strong>{file.filename}</strong><small>{file.sizeLabel} · {file.extractedTitle || t('dashboard.titleGeneratedAfterUpload')}</small></span>
               <Check size={18} />
             </div>
           ))}
@@ -763,16 +711,26 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
     setZoomAround(zoom >= 220 ? 100 : Math.max(220, zoom + 80), { x, y })
   }
 
-  const preview = nativePdfPreviewUrl ? (
-    <iframe className="upload-zoomable-preview-media upload-native-pdf-preview" style={pdfMediaStyle} src={nativePdfPreviewUrl} title={selected?.filename || 'PDF preview'} />
-  ) : selected?.serverPreviewUrl && selected.kind === 'image' ? (
-    <img className="upload-zoomable-preview-media" src={selected.serverPreviewUrl} alt={selected?.filename || 'PDF preview'} />
-  ) : selected?.previewUrl && selected.kind === 'image' ? (
-    <img className="upload-zoomable-preview-media" src={selected.previewUrl} alt={selected?.filename || 'PDF preview'} />
-  ) : selected?.kind === 'pdf' ? (
+  const preview = !selected ? (
+    <div className="empty-preview-state">
+      <UploadCloud size={42} />
+      <strong>{t('dashboard.noFileSelected')}</strong>
+      <span>{t('dashboard.noFileSelectedCopy')}</span>
+    </div>
+  ) : nativePdfPreviewUrl ? (
+    <iframe className="upload-zoomable-preview-media upload-native-pdf-preview" style={pdfMediaStyle} src={nativePdfPreviewUrl} title={selected.filename || 'PDF preview'} />
+  ) : selected.serverPreviewUrl && selected.kind === 'image' ? (
+    <img className="upload-zoomable-preview-media" src={selected.serverPreviewUrl} alt={selected.filename || 'PDF preview'} />
+  ) : selected.previewUrl && selected.kind === 'image' ? (
+    <img className="upload-zoomable-preview-media" src={selected.previewUrl} alt={selected.filename || 'PDF preview'} />
+  ) : selected.kind === 'pdf' ? (
     <PdfMockup />
   ) : (
-    <InvoiceMockup />
+    <div className="empty-preview-state">
+      <FileText size={42} />
+      <strong>{selected.filename}</strong>
+      <span>{t('dashboard.previewAfterUpload')}</span>
+    </div>
   )
 
   return (
@@ -781,26 +739,28 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
         <h2>{t('dashboard.filePreview')}</h2>
         <span>{selected?.filename || t('dashboard.noFileSelected')}</span>
       </div>
-      <div className="document-preview-toolbar upload-preview-toolbar">
-        {usesNativePdfViewer ? (
-          <>
-            <span><Maximize2 size={16} /> PDF viewer</span>
-            <small className="native-pdf-toolbar-note">Use the PDF toolbar for pages and zoom.</small>
-            <i />
-          </>
-        ) : (
-          <>
-            <span><Maximize2 size={16} /> Zoom</span>
-            <button type="button" onClick={() => setZoomAround(zoom - 25)} aria-label={t('common.zoomOut')}><Minus size={15} /></button>
-            <button type="button" className="zoom-value" onClick={() => setZoomAround(100, { x: 0.5, y: 0.5 })} aria-label={t('common.resetZoom')}>{zoom}%</button>
-            <button type="button" onClick={() => setZoomAround(zoom + 25)} aria-label={t('common.zoomIn')}><Plus size={15} /></button>
-            <i />
-            <button type="button" onClick={() => setRotation((value) => (value + 90) % 360)}><RefreshCw size={16} /> {t('dashboard.rotate')}</button>
-            <i />
-          </>
-        )}
-        <label>{t('dashboard.showOcr')}<input type="checkbox" checked={showOcr} onChange={(event) => setShowOcr(event.target.checked)} /></label>
-      </div>
+      {selected && (
+        <div className="document-preview-toolbar upload-preview-toolbar">
+          {usesNativePdfViewer ? (
+            <>
+              <span><Maximize2 size={16} /> PDF viewer</span>
+              <small className="native-pdf-toolbar-note">Use the PDF toolbar for pages and zoom.</small>
+              <i />
+            </>
+          ) : (
+            <>
+              <span><Maximize2 size={16} /> Zoom</span>
+              <button type="button" onClick={() => setZoomAround(zoom - 25)} aria-label={t('common.zoomOut')}><Minus size={15} /></button>
+              <button type="button" className="zoom-value" onClick={() => setZoomAround(100, { x: 0.5, y: 0.5 })} aria-label={t('common.resetZoom')}>{zoom}%</button>
+              <button type="button" onClick={() => setZoomAround(zoom + 25)} aria-label={t('common.zoomIn')}><Plus size={15} /></button>
+              <i />
+              <button type="button" className="rotate-preview-button" onClick={() => setRotation((value) => (value + 90) % 360)} aria-label={t('dashboard.rotate')}><RefreshCw size={16} /> <span className="button-label">{t('dashboard.rotate')}</span></button>
+              <i />
+            </>
+          )}
+          <label>{t('dashboard.showOcr')}<input type="checkbox" checked={showOcr} onChange={(event) => setShowOcr(event.target.checked)} /></label>
+        </div>
+      )}
       <div className="document-preview-layout">
         <AttachmentStrip files={files} selectedId={selectedId} onSelect={setSelectedId} onAddMore={onAddMore} />
         <div ref={previewSurfaceRef} className={`document-preview-surface upload-zoomable-preview ${effectiveZoom <= 100 ? 'fit-preview' : 'zoomed-preview'} ${showOcr ? 'show-ocr-overlay' : ''}`} onClick={handlePreviewClick}>
@@ -877,8 +837,7 @@ function ExtractedMetadataPreview({ metadata, sources }: { metadata: MetadataFor
     [t('fields.recipient'), metadata.recipient, sources.recipient],
     [t('fields.amountGross'), `${metadata.amount} ${metadata.currency}`, sources.amount],
     [t('fields.taxAmount'), `${metadata.taxAmount} ${metadata.currency}`, sources.taxAmount],
-    [t('fields.currency'), metadata.currency, sources.currency],
-    [t('fields.dueDate'), '26/10/2020', undefined]
+    [t('fields.currency'), metadata.currency, sources.currency]
   ]
   return <InspectorCard title={t('dashboard.extractedMetadataPreview')}><div className="extracted-list">{fields.map(([label, value, source]) => <div key={label}><span>{label}</span><strong>{value || 'NA'}{source && <SourceBadge info={source} />}</strong><Check size={15} /></div>)}</div><button type="button" className="link-button">{t('dashboard.showMoreFields')}</button></InspectorCard>
 }
@@ -888,9 +847,9 @@ function OCRTextPreview({ selected }: { selected?: UploadDraftFile }) {
   const copyOcrText = () => navigator.clipboard?.writeText(selected?.ocrSnippet || '')
   return (
     <details className="workflow-card inspector-card collapsed-side-panel ocr-side-panel">
-      <summary><span><ChevronDown size={16} /> {t('dashboard.ocrTextPreview')}</span><small>{t('fields.confidence')}: {selected?.confidence || 0}%</small></summary>
-      <pre className="ocr-preview">{selected?.ocrSnippet || ''}</pre>
-      <div className="ocr-footer"><strong>{t('fields.confidence')}: {selected?.confidence || 0}%</strong><button type="button" className="ocr-copy-button" onClick={copyOcrText}><Copy size={16} /> {t('common.copyText')}</button></div>
+      <summary><span><ChevronDown size={16} /> {t('dashboard.ocrTextPreview')}</span><small>{selected ? `${t('fields.confidence')}: ${selected.confidence || 0}%` : t('dashboard.noOcrYet')}</small></summary>
+      <pre className="ocr-preview">{selected?.ocrSnippet || t('dashboard.noOcrTextYet')}</pre>
+      <div className="ocr-footer"><strong>{selected ? `${t('fields.confidence')}: ${selected.confidence || 0}%` : t('dashboard.noOcrYet')}</strong><button type="button" className="ocr-copy-button" disabled={!selected?.ocrSnippet} onClick={copyOcrText}><Copy size={16} /> {t('common.copyText')}</button></div>
     </details>
   )
 }
@@ -1005,7 +964,7 @@ function draftFromDocument(document: Document, index: number, previous?: UploadD
     ocrStatus: document.processing_state === 'failed' ? 'failed' : document.ocr_state === 'done' || document.ocr_state === 'skipped' ? 'completed' : document.processing_state === 'queued_for_ocr' ? 'queued' : 'running',
     extractedTitle: document.manual_title_override || document.extracted_title || document.original_filename,
     ocrSnippet: document.ocr_text || document.error_message || 'OCR has been queued for this file.',
-    confidence: confidenceFromSources(sources, index),
+    confidence: confidenceFromSources(sources),
     metadata: fromDocumentMetadata(document),
     metadataSources: sources,
     qwenRunStatus: qwenRunStatusFromDocument(document),
@@ -1014,9 +973,9 @@ function draftFromDocument(document: Document, index: number, previous?: UploadD
   }
 }
 
-function confidenceFromSources(sources: Record<string, FieldSourceInfo>, index: number) {
+function confidenceFromSources(sources: Record<string, FieldSourceInfo>) {
   const values = Object.values(sources).map((source) => source.confidence).filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
-  if (!values.length) return index === 0 ? 98 : 94
+  if (!values.length) return 0
   return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)
 }
 

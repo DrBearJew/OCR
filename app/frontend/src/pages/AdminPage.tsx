@@ -31,18 +31,18 @@ const engineLabels: Record<string, { title: string; detail: string }> = {
   fake: { title: 'Demo OCR runtime', detail: 'Development/test stub only.' }
 }
 
-const INTERNAL_MODEL_GATEWAY_URL = 'http://smart-proxy:8081/v1'
-const DIRECT_MODEL_ENDPOINT_PLACEHOLDER = 'http://host.docker.internal:1234/v1'
+const DOKOCR_LLAMA_SWAP_URL = 'http://model-runtime:8092/v1'
+const DIRECT_MODEL_ENDPOINT_PLACEHOLDER = DOKOCR_LLAMA_SWAP_URL
 
 const defaultRuntimeSetup: ModelSetup = {
-  mode: 'fake',
-  ocr_provider: 'fake',
-  paddle_vl_base_url: INTERNAL_MODEL_GATEWAY_URL,
+  mode: 'smart',
+  ocr_provider: 'paddle_vl',
+  paddle_vl_base_url: DOKOCR_LLAMA_SWAP_URL,
   paddle_vl_model: 'paddleocr-vl',
-  glm_base_url: INTERNAL_MODEL_GATEWAY_URL,
+  glm_base_url: DOKOCR_LLAMA_SWAP_URL,
   glm_model: 'glm',
-  qwen_enabled: false,
-  qwen_base_url: INTERNAL_MODEL_GATEWAY_URL,
+  qwen_enabled: true,
+  qwen_base_url: DOKOCR_LLAMA_SWAP_URL,
   qwen_model: 'metadata',
   timeout_seconds: 120,
   ocr_task_soft_time_limit: 600,
@@ -52,7 +52,10 @@ const defaultRuntimeSetup: ModelSetup = {
   ocr_task_base_overhead_seconds: 300,
   ocr_task_paddle_vl_seconds_per_chunk: 180,
   ocr_task_glm_seconds_per_page: 180,
-  ocr_task_ppocrv6_seconds_per_page: 30
+  ocr_task_ppocrv6_seconds_per_page: 30,
+  ocr_pdf_text_layer_auto_enabled: true,
+  ocr_pdf_text_layer_min_chars: 80,
+  ocr_pdf_text_layer_min_chars_per_page: 20
 }
 
 export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: string) => void }) {
@@ -161,9 +164,9 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
       ...runtimeSetup,
       mode: 'smart',
       ocr_provider: runtimeSetup.ocr_provider === 'fake' ? 'paddle_vl' : runtimeSetup.ocr_provider,
-      paddle_vl_base_url: INTERNAL_MODEL_GATEWAY_URL,
-      glm_base_url: INTERNAL_MODEL_GATEWAY_URL,
-      qwen_base_url: INTERNAL_MODEL_GATEWAY_URL
+      paddle_vl_base_url: DOKOCR_LLAMA_SWAP_URL,
+      glm_base_url: DOKOCR_LLAMA_SWAP_URL,
+      qwen_base_url: DOKOCR_LLAMA_SWAP_URL
     })
     setEndpointTest(null)
   }
@@ -354,6 +357,25 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
                 <input type="number" min="1" value={runtimeSetup.ocr_task_ppocrv6_seconds_per_page} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_ppocrv6_seconds_per_page: Number(event.target.value) || 30 })} />
               </label>
             </div>
+          </details>
+
+          <details className="runtime-budget-section">
+            <summary>
+              <span>
+                <strong>{t('admin.pdfTextLayerFastPath')}</strong>
+                <small>{t('admin.pdfTextLayerFastPathCopy')}</small>
+              </span>
+            </summary>
+            <div className="runtime-budget-grid">
+              <label className="check"><input type="checkbox" checked={runtimeSetup.ocr_pdf_text_layer_auto_enabled} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_pdf_text_layer_auto_enabled: event.target.checked })} /> {t('admin.pdfTextLayerAutoEnabled')}</label>
+              <label>{t('admin.pdfTextLayerMinChars')}
+                <input type="number" min="1" value={runtimeSetup.ocr_pdf_text_layer_min_chars} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_pdf_text_layer_min_chars: Number(event.target.value) || 80 })} />
+              </label>
+              <label>{t('admin.pdfTextLayerMinCharsPerPage')}
+                <input type="number" min="1" value={runtimeSetup.ocr_pdf_text_layer_min_chars_per_page} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_pdf_text_layer_min_chars_per_page: Number(event.target.value) || 20 })} />
+              </label>
+            </div>
+            <p className="form-help runtime-field-help">{t('admin.pdfTextLayerHelp')}</p>
           </details>
         </div>
         <p className="form-help">{t('admin.internalGatewayHelp')}</p>
@@ -627,7 +649,7 @@ function translateEndpointDetail(detail: string, t: (key: string, fallback?: str
   if (detail === 'reachable') return t('admin.detailReachable')
   if (detail.startsWith('reachable via ')) {
     const url = detail.replace('reachable via ', '')
-    if (url.includes('smart-proxy')) return t('admin.detailInternalGatewayReachable')
+    if (url.includes('smart-proxy') || url.includes('model-runtime:8092') || url.includes('172.19.0.1:8092') || url.includes('127.0.0.1:8092') || url.includes('localhost:8092')) return t('admin.detailInternalGatewayReachable')
     return `${t('admin.detailReachableVia')} ${url}`
   }
   return detail

@@ -83,7 +83,7 @@ export default function App() {
     <AppShell active={route.name} onNavigate={navigate} onLogout={() => { setToken(null); setAuthed(false) }}>
         {route.name === 'dashboard' && <DashboardPage onOpenDocument={(id) => navigate(`/documents/${id}`)} onSearch={() => navigate('/search')} />}
         {route.name === 'collections' && <CollectionsPage onOpenCollection={(slug) => navigate(`/collections/${slug}`)} onSchemas={() => navigate('/schemas')} />}
-        {route.name === 'collection' && <CollectionDetailPage slug={route.slug} onOpenDocument={(id) => navigate(`/documents/${id}`)} />}
+        {route.name === 'collection' && <CollectionDetailPage slug={route.slug} onOpenDocument={(id) => navigate(`/documents/${id}`)} onOpenSchemas={() => navigate('/schemas')} />}
         {route.name === 'folders' && <FoldersPage onOpenDocument={(id) => navigate(`/documents/${id}`)} />}
         {route.name === 'batches' && <BatchListPage onOpenBatch={(id) => navigate(`/batches/${id}`)} />}
         {route.name === 'batch' && <BatchDetailPage id={route.id} onOpenDocument={(id) => navigate(`/documents/${id}`)} />}

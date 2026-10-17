@@ -285,6 +285,9 @@ export interface ModelSetup {
   ocr_task_paddle_vl_seconds_per_chunk: number
   ocr_task_glm_seconds_per_page: number
   ocr_task_ppocrv6_seconds_per_page: number
+  ocr_pdf_text_layer_auto_enabled: boolean
+  ocr_pdf_text_layer_min_chars: number
+  ocr_pdf_text_layer_min_chars_per_page: number
 }
 
 export interface ModelEndpointTestResult {
@@ -419,6 +422,13 @@ export interface ActivityItem extends DocumentEvent {
   collection_name: string
 }
 
+export interface ActivityListPage {
+  items: ActivityItem[]
+  limit: number
+  next_cursor: string | null
+  total_estimate: number
+}
+
 export interface ProcessingSummary {
   documents: Document[]
   stuck_documents: Document[]
@@ -443,6 +453,7 @@ export interface CollectionPageData {
   collection: Pick<Collection, 'id' | 'name' | 'slug' | 'icon' | 'color' | 'display_config'>
   records: RecordRow[]
   status_counts: Record<string, number>
+  needs_review_count: number
   limit?: number
   next_cursor?: string | null
   total_estimate?: number

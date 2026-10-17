@@ -1,4 +1,4 @@
-import type { ActivityItem, AdminActionResult, Batch, BatchDetail, Collection, CollectionPageData, CollectionSummary, CustomFieldDefinition, DashboardSummary, Document, DocumentListPage, DocumentCustomFieldValue, DocumentEvent, DocumentPage, FailedReviewSummary, Folder, FolderContentsPage, IngestionJob, IngestionSource, IntegrationSummary, ModelEndpointTestResult, ModelSetup, JobInfo, PaperlessMetadata, ProcessingHook, ProcessingSummary, RecordListPage, RecordRow, SavedView, SearchResult, SearchResultPage } from '../types'
+import type { ActivityItem, ActivityListPage, AdminActionResult, Batch, BatchDetail, Collection, CollectionPageData, CollectionSummary, CustomFieldDefinition, DashboardSummary, Document, DocumentListPage, DocumentCustomFieldValue, DocumentEvent, DocumentPage, FailedReviewSummary, Folder, FolderContentsPage, IngestionJob, IngestionSource, IntegrationSummary, ModelEndpointTestResult, ModelSetup, JobInfo, PaperlessMetadata, ProcessingHook, ProcessingSummary, RecordListPage, RecordRow, SavedView, SearchResult, SearchResultPage } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 const TOKEN_KEY = 'dokocr_token'
@@ -147,6 +147,10 @@ export const api = {
   deleteCollection: (id: string) => request<Collection>(`/api/collections/${id}`, { method: 'DELETE' }),
   dashboard: () => request<DashboardSummary>('/api/dashboard'),
   activity: (params: Record<string, string> = {}) => request<ActivityItem[]>(`/api/activity?${new URLSearchParams(params).toString()}`),
+  activityPage: (params: Record<string, string> = {}) => {
+    const query = new URLSearchParams(params)
+    return request<ActivityListPage>(`/api/activity/page${query.toString() ? `?${query.toString()}` : ''}`)
+  },
   processing: () => request<ProcessingSummary>('/api/processing'),
   failedReview: () => request<FailedReviewSummary>('/api/failed'),
   collectionSummaries: () => request<CollectionSummary[]>('/api/collection-summaries'),

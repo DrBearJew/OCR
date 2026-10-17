@@ -50,7 +50,7 @@ function Sidebar({ active, onNavigate, onLogout }: { active: NavKey; onNavigate:
   const { t } = useI18n()
   return (
     <aside className="sidebar">
-      <button className="brand-button" onClick={() => onNavigate('/dashboard')}>
+      <button className="brand-button" aria-label={t('nav.dashboard')} onClick={() => onNavigate('/dashboard')}>
         <span className="brand-mark"><FileSearch size={18} /></span>
         <span>Dok OCR</span>
       </button>
@@ -58,7 +58,7 @@ function Sidebar({ active, onNavigate, onLogout }: { active: NavKey; onNavigate:
         {navItems.map((item) => {
           const Icon = item.icon
           return (
-            <button key={item.labelKey} className={item.keys.includes(active) ? 'active' : ''} onClick={() => onNavigate(item.path)}>
+            <button key={item.labelKey} className={item.keys.includes(active) ? 'active' : ''} aria-label={t(item.labelKey)} onClick={() => onNavigate(item.path)}>
               <Icon size={17} />
               <span>{t(item.labelKey)}</span>
               {item.count && <em>{item.count}</em>}

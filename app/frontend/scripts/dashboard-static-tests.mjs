@@ -11,6 +11,7 @@ const documentsPage = readFileSync(resolve(root, 'src/pages/DocumentsPage.tsx'),
 const foldersPage = readFileSync(resolve(root, 'src/pages/FoldersPage.tsx'), 'utf8')
 const collectionsPage = readFileSync(resolve(root, 'src/pages/CollectionsPage.tsx'), 'utf8')
 const collectionDetailPage = readFileSync(resolve(root, 'src/pages/CollectionDetailPage.tsx'), 'utf8')
+const activityPage = readFileSync(resolve(root, 'src/pages/ActivityPage.tsx'), 'utf8')
 const schemaPage = readFileSync(resolve(root, 'src/pages/SchemaPage.tsx'), 'utf8')
 const adminPage = readFileSync(resolve(root, 'src/pages/AdminPage.tsx'), 'utf8')
 const processingPage = readFileSync(resolve(root, 'src/pages/ProcessingPage.tsx'), 'utf8')
@@ -22,11 +23,18 @@ const deTranslations = readFileSync(resolve(root, 'src/i18n/de.ts'), 'utf8')
 
 const checks = [
   ['Records are hidden from main navigation', appShell, "labelKey: 'nav.records'", true],
+  ['Icon-only mobile navigation retains accessible names', appShell, 'aria-label={t(item.labelKey)}'],
+  ['Icon-only mobile brand retains its dashboard label', appShell, 'aria-label={t(\'nav.dashboard\')}'],
   ['Records route redirects to documents', app, "if (name === 'records') return { name: 'documents' }"],
   ['App does not render RecordListPage', app, 'RecordListPage', true],
   ['App does not render RecordDetailPage', app, 'RecordDetailPage', true],
   ['Documents inspector does not expose Record action', documentsPage, 'onOpenRecord', true],
-  ['Activity page does not expose Record action', readFileSync(resolve(root, 'src/pages/ActivityPage.tsx'), 'utf8'), 'onOpenRecord', true],
+  ['Activity page does not expose Record action', activityPage, 'onOpenRecord', true],
+  ['Activity page uses the cursor-paginated API', activityPage, 'api.activityPage(params)'],
+  ['Activity page consumes the paginated item and cursor shape', activityPage, 'page.items'],
+  ['Activity page consumes the total estimate', activityPage, 'page.total_estimate'],
+  ['Activity page consumes the next cursor', activityPage, 'page.next_cursor'],
+  ['Activity API keeps the legacy list method available', client, "request<ActivityItem[]>(`/api/activity?${new URLSearchParams(params).toString()}`)"],
   ['collection_name comes from record-level collectionName', dashboard, "form.set('collection_name', collectionName || 'Dokumente')"],
   ['record metadata contains shared title base', dashboard, 'shared_title_base: sharedTitle.sharedTitleBase'],
   ['record metadata contains shared title toggle', dashboard, 'apply_shared_title_to_documents: sharedTitle.applySharedTitleToDocuments'],
@@ -108,7 +116,29 @@ const checks = [
   ['Collections page calls createCollection API', collectionsPage, 'api.createCollection'],
   ['Schemas page exposes create collection action', schemaPage, 'collections.create'],
   ['Collection detail uses paginated documents API', collectionDetailPage, 'api.documentsPage'],
-  ['Collection detail exposes Load more document pagination', collectionDetailPage, 'loadMoreCollectionDocuments'],
+  ['Collection detail uses independent review counts', collectionDetailPage, 'data?.needs_review_count'],
+  ['Collection table exposes header semantics', collectionDetailPage, 'role="columnheader"'],
+  ['Collection table exposes cell semantics', collectionDetailPage, 'role="cell"'],
+  ['Collection detail Schema action uses its route callback', collectionDetailPage, 'onClick={onOpenSchemas}'],
+  ['App routes collection Schema action to the schemas page', app, "onOpenSchemas={() => navigate('/schemas')}"],
+  ['Collection detail exposes next cursor pagination', collectionDetailPage, 'loadNextCollectionPage'],
+  ['Collection detail next button uses cursor pagination handler', collectionDetailPage, 'onClick={loadNextCollectionPage}'],
+  ['Collection detail exposes previous cursor pagination', collectionDetailPage, 'loadPreviousCollectionPage'],
+  ['Collection detail previous button uses cursor history handler', collectionDetailPage, 'onClick={loadPreviousCollectionPage}'],
+  ['Collection detail exports selected documents through the existing API', collectionDetailPage, "action: 'export', document_ids: selectedActionIds"],
+  ['Collection detail bulk export button invokes its handler', collectionDetailPage, 'onClick={() => void exportSelectedDocuments()}'],
+  ['Collection detail validates and downloads API export documents as JSON', collectionDetailPage, "JSON.stringify(result.documents, null, 2)"],
+  ['Collection detail bulk review uses the existing review-state action', collectionDetailPage, "action: 'set_review_state', document_ids: selectedActionIds"],
+  ['Collection detail bulk review button invokes its handler', collectionDetailPage, 'onClick={() => void markSelectedReviewed()}'],
+  ['Collection detail bulk delete confirms before soft-deleting selected documents', collectionDetailPage, 'collectionDetail.deleteSelectedConfirm'],
+  ['Collection detail bulk delete stops when confirmation is declined', collectionDetailPage, 'if (!window.confirm(confirmation)) return'],
+  ['Collection detail bulk delete uses existing per-document API', collectionDetailPage, 'api.deleteDocument(id)'],
+  ['Collection detail bulk delete button invokes its handler', collectionDetailPage, 'onClick={() => void deleteSelectedDocuments()}'],
+  ['Collection detail preserves failed delete selections', collectionDetailPage, 'setSelectedIds(new Set(failedIds))'],
+  ['Collection detail peek review action uses its parent handler', collectionDetailPage, 'onMarkReviewed={markDocumentReviewed}'],
+  ['Collection detail peek re-extract action uses its parent handler', collectionDetailPage, 'onReextract={reextractDocument}'],
+  ['Collection detail review action marks the document reviewed', collectionDetailPage, "api.patchDocument(document.id, { review_state: 'reviewed', review_reason: null })"],
+  ['Collection detail re-extract action uses the existing document API', collectionDetailPage, 'api.reextractDocument(document.id, false)'],
   ['Collection detail hover preview uses high-res PDF page preview', collectionDetailPage, 'previewPageUrl(document.id, 1)'],
   ['Document detail PDF preview uses native viewer', documentDetailPage, 'document-native-pdf-preview'],
   ['Document detail PDF preview explains native toolbar', documentDetailPage, 'Use the PDF toolbar for pages and zoom.'],

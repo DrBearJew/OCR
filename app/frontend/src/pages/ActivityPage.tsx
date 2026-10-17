@@ -4,18 +4,34 @@ import { api } from '../api/client'
 import type { ActivityItem } from '../types'
 import { useI18n } from '../i18n'
 
+const ACTIVITY_PAGE_LIMIT_OPTIONS = [50, 100, 200]
+
 export default function ActivityPage({ onOpenDocument }: { onOpenDocument: (id: string) => void }) {
   const { t, language } = useI18n()
   const [rows, setRows] = useState<ActivityItem[]>([])
   const [filters, setFilters] = useState<Record<string, string>>({})
+  const [pageLimit, setPageLimit] = useState(100)
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [totalEstimate, setTotalEstimate] = useState(0)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState('')
 
-  async function load(next = filters) {
+  async function load(next = filters, append = false, cursor: string | null = null, limit = pageLimit) {
     setError('')
     try {
-      setRows(await api.activity(next))
+      const params: Record<string, string> = { ...next, limit: String(limit) }
+      if (cursor) params.cursor = cursor
+      const page = await api.activityPage(params)
+      setRows((current) => append ? [...current, ...page.items] : page.items)
+      setNextCursor(page.next_cursor)
+      setTotalEstimate(page.total_estimate)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('activity.loadError'))
+      if (!append) {
+        setRows([])
+        setNextCursor(null)
+        setTotalEstimate(0)
+      }
     }
   }
 
@@ -25,7 +41,22 @@ export default function ActivityPage({ onOpenDocument }: { onOpenDocument: (id: 
     const next = { ...filters, [key]: value }
     if (!value) delete next[key]
     setFilters(next)
-    void load(next)
+    void load(next, false, null)
+  }
+
+  function updatePageLimit(value: number) {
+    setPageLimit(value)
+    void load(filters, false, null, value)
+  }
+
+  async function loadMoreActivity() {
+    if (!nextCursor || loadingMore) return
+    setLoadingMore(true)
+    try {
+      await load(filters, true, nextCursor)
+    } finally {
+      setLoadingMore(false)
+    }
   }
 
   return (
@@ -38,14 +69,19 @@ export default function ActivityPage({ onOpenDocument }: { onOpenDocument: (id: 
         <button className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={18} /></button>
       </header>
       {error && <p className="error">{error}</p>}
-      <section className="filter-row">
+      <section className="filter-row activity-filter-row">
         <input placeholder={t('activity.eventType')} value={filters.event_type || ''} onChange={(event) => updateFilter('event_type', event.target.value)} />
         <input placeholder={t('activity.source')} value={filters.source || ''} onChange={(event) => updateFilter('source', event.target.value)} />
         <input placeholder={t('activity.actor')} value={filters.actor || ''} onChange={(event) => updateFilter('actor', event.target.value)} />
         <input type="date" value={filters.date_from || ''} onChange={(event) => updateFilter('date_from', event.target.value)} />
         <input type="date" value={filters.date_to || ''} onChange={(event) => updateFilter('date_to', event.target.value)} />
+        <label className="list-limit-control">{t('common.rowsPerPage', 'Rows per page')}
+          <select value={pageLimit} onChange={(event) => updatePageLimit(Number(event.target.value) || 100)}>
+            {ACTIVITY_PAGE_LIMIT_OPTIONS.map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
+        </label>
       </section>
-      <section className="timeline">
+      <section className="timeline capped-list">
         {rows.map((row) => (
           <div className="timeline-row" key={row.id}>
             <strong>{translateActivityEvent(row.event_type, t)}</strong>
@@ -56,7 +92,12 @@ export default function ActivityPage({ onOpenDocument }: { onOpenDocument: (id: 
             </div>
           </div>
         ))}
+        {!rows.length && !error && <p className="tab-empty">{t('activity.noEvents', 'No activity events match the current filters.')}</p>}
       </section>
+      <div className="pagination-footer">
+        <span>{t('common.showing', 'Showing')} {rows.length} / {totalEstimate || rows.length} {t('nav.activity').toLowerCase()}</span>
+        {nextCursor && <button type="button" className="primary" disabled={loadingMore} onClick={() => void loadMoreActivity()}>{t('common.loadMore', 'Load more')}</button>}
+      </div>
     </main>
   )
 }
