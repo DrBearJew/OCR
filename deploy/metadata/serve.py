@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""Provision the pinned public LFM model, then exec the schema-patched CPU server."""
+import fcntl
+import hashlib
+import os
+from pathlib import Path
+import shutil
+import urllib.request
+
+NAME = "LFM2.5-8B-A1B-Q5_K_M.gguf"
+REVISION = "49c14831707011e64d70b2ebd8462ba08d608434"
+URL = f"https://huggingface.co/LiquidAI/LFM2.5-8B-A1B-GGUF/resolve/{REVISION}/{NAME}"
+SIZE = 6030339296
+SHA256 = "eb8bd10148ea21e195502d6d6a205983ba40815302068ce72eb160684df92b3e"
+CHUNK = 4 * 1024 * 1024
+
+
+def digest(path):
+    result = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(CHUNK):
+            result.update(chunk)
+    return result.hexdigest()
+
+
+def ensure_model(directory, url=URL, size=SIZE, sha256=SHA256):
+    """Resume our partial download; never overwrite an existing invalid model."""
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    model = directory / NAME
+    partial = directory / (NAME + ".partial")
+    lock = directory / (NAME + ".lock")
+    for path in (model, partial, lock):
+        if path.is_symlink():
+            raise RuntimeError(f"Refusing symlink at model-managed path: {path}")
+    with lock.open("a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        if model.exists():
+            if model.stat().st_size != size or digest(model) != sha256:
+                raise RuntimeError(f"Existing model checksum mismatch: {model}; preserved, not overwritten")
+            return model
+        offset = partial.stat().st_size if partial.exists() else 0
+        if offset > size:
+            raise RuntimeError(f"Oversized partial model: {partial}; move it aside before retrying")
+        if offset == size:
+            if digest(partial) != sha256:
+                raise RuntimeError(f"Partial model checksum mismatch: {partial}; move it aside before retrying")
+        else:
+            if shutil.disk_usage(directory).free < size - offset + 128 * 1024 * 1024:
+                raise RuntimeError("Not enough disk space for LFM model download (6.1 GB plus working space)")
+            print(f"Downloading {NAME} ({size} bytes; resuming at {offset}); first start can take several minutes", flush=True)
+            headers = {"User-Agent": "DokOCR-model-setup"}
+            if offset:
+                headers["Range"] = f"bytes={offset}-"
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=120) as response:
+                if response.status == 206:
+                    expected_range = f"bytes {offset}-{size - 1}/{size}"
+                    if response.headers.get("Content-Range") != expected_range:
+                        raise RuntimeError("Unexpected model download Content-Range; partial download preserved")
+                elif response.status == 200:
+                    # Some mirrors ignore Range. Restart only our incomplete download.
+                    offset = 0
+                    if shutil.disk_usage(directory).free < size + 128 * 1024 * 1024:
+                        raise RuntimeError("Mirror cannot resume; not enough disk space to restart download")
+                else:
+                    raise RuntimeError(f"Unexpected model download status: {response.status}")
+                with partial.open("ab" if offset else "wb") as output:
+                    received = offset
+                    while chunk := response.read(CHUNK):
+                        received += len(chunk)
+                        if received > size:
+                            raise RuntimeError("Model download exceeded expected size")
+                        output.write(chunk)
+                    output.flush()
+                    os.fsync(output.fileno())
+            if partial.stat().st_size != size or digest(partial) != sha256:
+                raise RuntimeError(f"Incomplete or checksum-mismatched model download: {partial}; no model activated")
+        os.replace(partial, model)
+        print("LFM model checksum verified", flush=True)
+        return model
+
+
+def main():
+    model = ensure_model("/models")
+    threads = int(os.environ.get("DOKOCR_METADATA_THREADS", "4"))
+    if threads < 1:
+        raise ValueError("DOKOCR_METADATA_THREADS must be positive")
+    command = ["/usr/local/bin/llama-server", "--model", str(model),
+               "--alias", "metadata", "--host", "0.0.0.0", "--port", "8080",
+               "--jinja", "--ctx-size", "128000", "--parallel", "1",
+               "--batch-size", "1024", "--ubatch-size", "512",
+               "--threads", str(threads), "--threads-batch", str(threads),
+               "--cache-type-k", "q8_0", "--cache-type-v", "q8_0",
+               "--ctx-checkpoints", "0", "--ctx-checkpoints-interval", "0",
+               "--no-warmup", "--spec-type", "none", "--reasoning-budget", "3072",
+               "--flash-attn", "on", "--webui", "none"]
+    os.execv(command[0], command)
+
+
+if __name__ == "__main__":
+    main()

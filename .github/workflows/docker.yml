@@ -1,0 +1,93 @@
+name: Docker images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'deploy/metadata/**'
+      - 'scripts/smoke-docker-ocr.py'
+      - '.github/workflows/docker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            context: app/backend
+          - name: frontend
+            context: app/frontend
+          - name: metadata
+            context: deploy/metadata
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Image names
+        id: names
+        shell: bash
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "image=ghcr.io/$owner/ocr-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
+      - name: Model download regressions
+        if: matrix.name == 'metadata'
+        run: python3 scripts/test-metadata-download.py
+      - name: Build candidate
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          load: true
+          tags: dokocr-test:${{ matrix.name }}
+          platforms: linux/amd64
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+      - name: Real OCR without network access
+        if: matrix.name == 'backend'
+        run: |
+          docker run --rm --network none \
+            -v "$PWD/scripts/smoke-docker-ocr.py:/tmp/smoke-docker-ocr.py:ro" \
+            -e PYTHONPATH=/app dokocr-test:backend python /tmp/smoke-docker-ocr.py
+      - name: Application regressions
+        if: matrix.name == 'backend'
+        run: |
+          docker run --rm --network none \
+            -e DATABASE_URL=sqlite+pysqlite:///:memory: \
+            -e OCR_PROVIDER=fake -e CELERY_BROKER_URL=memory:// \
+            -e CELERY_RESULT_BACKEND=cache+memory:// \
+            -e PYTHONPATH=/app dokocr-test:backend pytest app/tests -q
+      - name: Frontend serves built application
+        if: matrix.name == 'frontend'
+        run: |
+          docker run -d --name frontend-smoke --add-host backend:127.0.0.1 dokocr-test:frontend
+          docker exec frontend-smoke nginx -t
+          docker exec frontend-smoke wget -qO- http://127.0.0.1/ | grep '<div id="root">'
+          docker stop frontend-smoke
+      - name: Registry login
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish checked image
+        env:
+          IMAGE: ${{ steps.names.outputs.image }}
+        run: |
+          docker tag dokocr-test:${{ matrix.name }} "$IMAGE:${GITHUB_SHA}"
+          docker tag dokocr-test:${{ matrix.name }} "$IMAGE:main"
+          docker push "$IMAGE:${GITHUB_SHA}"
+          docker push "$IMAGE:main"

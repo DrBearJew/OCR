@@ -1,4 +1,5 @@
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
+LABEL org.opencontainers.image.source="https://github.com/DrBearJew/OCR"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
