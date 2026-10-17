@@ -1,0 +1,1018 @@
+diff --git a/examples/mtmd/CMakeLists.txt b/examples/mtmd/CMakeLists.txt
+index 2381012a..75f6d1ef 100644
+--- a/examples/mtmd/CMakeLists.txt
++++ b/examples/mtmd/CMakeLists.txt
+@@ -60,3 +60,11 @@ if(LLAMA_TOOLS_INSTALL)
+ endif()
+ target_link_libraries  (${TARGET} PRIVATE common mtmd Threads::Threads)
+ target_compile_features(${TARGET} PRIVATE cxx_std_17)
++
++if (LLAMA_BUILD_TESTS)
++    add_executable(test-mtmd-pos test-mtmd-pos.cpp)
++    target_link_libraries(test-mtmd-pos PRIVATE mtmd)
++    target_include_directories(test-mtmd-pos PRIVATE ../../vendor)
++    target_compile_features(test-mtmd-pos PRIVATE cxx_std_17)
++    add_test(NAME test-mtmd-pos COMMAND test-mtmd-pos)
++endif()
+diff --git a/examples/mtmd/README.md b/examples/mtmd/README.md
+index ef31d195..be631520 100644
+--- a/examples/mtmd/README.md
++++ b/examples/mtmd/README.md
+@@ -28,6 +28,32 @@ Consequently, running a multimodal model typically requires two GGUF files:
+ 1.  The standard language model file.
+ 2.  A corresponding **multimodal projector (`mmproj`)** file, which handles the image encoding and projection.
+
++## GLM-OCR (experimental native CPU)
++
++Native CPU image-chat is verified against the upstream reference on synthetic
++text, German invoice and table pages. This is not production OCR accuracy validation.
++
++GLM-OCR uses a `glm4` text GGUF with M-RoPE metadata and a `glm4v` projector GGUF.
++Both run natively; no Python inference engine or OpenVINO is needed. The appended
++NextN head is ignored (MTP inference is not implemented for GLM-OCR).
++
++```sh
++build/bin/llama-server -m glm.gguf --mmproj glm-mmproj.gguf -ngl 0 --no-mmproj-offload --jinja
++```
++
++For a local synthetic image-chat regression (Pillow required):
++
++```sh
++python3 examples/mtmd/test-glm-ocr.py --server build/bin/llama-server \
++    --model /path/to/glm.gguf --mmproj /path/to/glm-mmproj.gguf --output /path/to/results
++```
++
++The regression generates non-square text, German invoice and table images, checks
++OCR fields, and records responses, wall latency and Linux RSS high-water marks.
++Use `--reference-results /path/to/reference/results.json` to compare an upstream
++reference run with identical inputs and rendered prompts. This is port verification,
++not a production accuracy or target-hardware performance benchmark.
++
+ ## What is `libmtmd`?
+
+ As outlined in the history, `libmtmd` is the modern library designed to replace the original `llava.cpp` implementation for handling multimodal inputs.
+diff --git a/examples/mtmd/clip-impl.h b/examples/mtmd/clip-impl.h
+index 958a0d03..ad6ccf76 100644
+--- a/examples/mtmd/clip-impl.h
++++ b/examples/mtmd/clip-impl.h
+@@ -167,6 +167,7 @@ enum projector_type {
+     PROJECTOR_TYPE_LDPV2,
+     PROJECTOR_TYPE_MINICPMV,
+     PROJECTOR_TYPE_GLM_EDGE,
++    PROJECTOR_TYPE_GLM4V,
+     PROJECTOR_TYPE_QWEN2VL,
+     PROJECTOR_TYPE_QWEN3VL,
+     PROJECTOR_TYPE_LING3VL,
+@@ -201,6 +202,7 @@ static std::map<projector_type, std::string> PROJECTOR_TYPE_NAMES = {
+     { PROJECTOR_TYPE_LDPV2,     "ldpv2"},
+     { PROJECTOR_TYPE_MINICPMV,  "resampler"},
+     { PROJECTOR_TYPE_GLM_EDGE,  "adapter"},
++    { PROJECTOR_TYPE_GLM4V,     "glm4v"},
+     { PROJECTOR_TYPE_QWEN2VL,   "qwen2vl_merger"},
+     { PROJECTOR_TYPE_QWEN25VL,  "qwen2.5vl_merger"},
+     { PROJECTOR_TYPE_QWEN3VL,   "qwen3vl_merger"},
+diff --git a/examples/mtmd/clip.cpp b/examples/mtmd/clip.cpp
+index 37ea4f48..88b3546d 100644
+--- a/examples/mtmd/clip.cpp
++++ b/examples/mtmd/clip.cpp
+@@ -317,6 +317,8 @@ struct clip_model {
+
+     ggml_tensor * pre_ln_w = nullptr;
+     ggml_tensor * pre_ln_b = nullptr;
++    ggml_tensor * norm_embd_w = nullptr;
++    ggml_tensor * norm_embd_b = nullptr;
+
+     std::vector<clip_layer> layers;
+
+@@ -409,9 +411,20 @@ struct clip_model {
+     ggml_tensor * mm_input_proj_w = nullptr;
+     ggml_tensor * mm_soft_emb_norm_w = nullptr;
+
+-    // pixtral
++    // pixtral / glm4v
+     ggml_tensor * token_embd_img_break = nullptr;
+     ggml_tensor * mm_patch_merger_w = nullptr;
++    ggml_tensor * mm_patch_merger_b = nullptr;
++
++    // glm4v
++    ggml_tensor * mm_post_norm_w = nullptr;
++    ggml_tensor * mm_post_norm_b = nullptr;
++    ggml_tensor * mm_ffn_up_w = nullptr;
++    ggml_tensor * mm_ffn_up_b = nullptr;
++    ggml_tensor * mm_ffn_gate_w = nullptr;
++    ggml_tensor * mm_ffn_gate_b = nullptr;
++    ggml_tensor * mm_ffn_down_w = nullptr;
++    ggml_tensor * mm_ffn_down_b = nullptr;
+
+     // deepseek4v sentinel embeddings (image_newline is reused for IMAGE_NEW_LINE)
+     ggml_tensor * token_embd_img_start = nullptr;
+@@ -679,6 +692,127 @@ struct clip_graph {
+         return gf;
+     }
+
++    // Adapted from ggml-org/llama.cpp 7dad2f1a1, tools/mtmd/models/glm4v.cpp.
++    // Copyright (c) 2023-2026 The ggml authors. MIT license; see LICENSE.
++    ggml_cgraph * build_glm4v() {
++        GGML_ASSERT(model.patch_bias != nullptr);
++        GGML_ASSERT(model.class_embedding == nullptr);
++
++        const int batch_size = 1;
++
++        norm_type norm_t = NORM_TYPE_RMS;
++
++        ggml_tensor * inp_raw = build_inp_raw();
++        ggml_tensor * inp = ggml_conv_2d(ctx0, model.patch_embeddings_0, inp_raw, patch_size, patch_size, 0, 0, 1, 1);
++
++        int mrope_sections[4] = {d_head/4, d_head/4, d_head/4, d_head/4};
++        ggml_tensor * positions = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_patches * 4);
++        ggml_set_name(positions, "positions");
++        ggml_set_input(positions);
++
++        GGML_ASSERT(img.nx % (patch_size * 2) == 0);
++        GGML_ASSERT(img.ny % (patch_size * 2) == 0);
++
++        // second conv dimension
++        {
++            auto inp_1 = ggml_conv_2d(ctx0, model.patch_embeddings_1, inp_raw, patch_size, patch_size, 0, 0, 1, 1);
++            inp = ggml_add(ctx0, inp, inp_1);
++
++            inp = ggml_permute(ctx0, inp, 1, 2, 0, 3);  // [w, h, c, b] -> [c, w, h, b]
++            inp = ggml_cont_4d(
++                ctx0, inp,
++                n_embd * 2, n_patches_x / 2, n_patches_y, batch_size);
++            inp = ggml_reshape_4d(
++                ctx0, inp,
++                n_embd * 2, n_patches_x / 2, 2, batch_size * (n_patches_y / 2));
++            inp = ggml_permute(ctx0, inp, 0, 2, 1, 3);
++            inp = ggml_cont_3d(
++                ctx0, inp,
++                n_embd, n_patches_x * n_patches_y, batch_size);
++        }
++
++        // add patch bias
++        inp = ggml_add(ctx0, inp, model.patch_bias);
++        cb(inp, "patch_bias", -1);
++
++        // pos-conv norm
++        inp = build_norm(inp, model.norm_embd_w, model.norm_embd_b, norm_t, eps, -1);
++
++        ggml_tensor * learned_pos_embd = nullptr;
++        // Note: GLM-OCR does not have learned position embeddings
++        if (model.position_embeddings != nullptr) {
++            learned_pos_embd = resize_position_embeddings(GGML_SCALE_MODE_BICUBIC);
++            learned_pos_embd = ggml_cont_4d(
++                ctx0, learned_pos_embd,
++                n_embd * 2, n_patches_x / 2, n_patches_y, batch_size);
++            learned_pos_embd = ggml_reshape_4d(
++                ctx0, learned_pos_embd,
++                n_embd * 2, n_patches_x / 2, 2, batch_size * (n_patches_y / 2));
++            learned_pos_embd = ggml_permute(ctx0, learned_pos_embd, 0, 2, 1, 3);
++            learned_pos_embd = ggml_cont_3d(
++                ctx0, learned_pos_embd,
++                n_embd, n_patches_x * n_patches_y, batch_size);
++            cb(learned_pos_embd, "learned_pos_embd", -1);
++        }
++
++        auto add_pos = [&](ggml_tensor * cur, const clip_layer &) {
++            return ggml_rope_multi(
++                        ctx0, cur, positions, nullptr,
++                        d_head/2, mrope_sections, GGML_ROPE_TYPE_VISION,
++                        32768, hparams.rope_theta, 1, 0, 1, 32, 1);
++        };
++
++        ggml_tensor * cur = build_vit(
++                                inp, n_patches,
++                                norm_t,
++                                hparams.ffn_op,
++                                learned_pos_embd,
++                                add_pos);
++
++        cb(cur, "vit_out", -1);
++
++        // GLM4V projector
++        // ref: https://github.com/huggingface/transformers/blob/40dc11cd3eb4126652aa41ef8272525affd4a636/src/transformers/models/glm4v/modeling_glm4v.py#L116-L130
++
++        // patch merger (downsample)
++        {
++            int n_merge = hparams.n_merge;
++            GGML_ASSERT(n_merge > 0);
++
++            int n_token_out = n_patches / n_merge / n_merge;
++            cur = ggml_reshape_4d(ctx0, cur, n_embd, n_merge, n_merge, n_token_out);
++            cur = ggml_cont(ctx0, ggml_permute(ctx0, cur, 2, 0, 1, 3)); // [n_merge, n_merge, n_embd, n_token_out]
++            cur = ggml_conv_2d(ctx0, model.mm_patch_merger_w, cur, n_merge, n_merge, 0, 0, 1, 1);
++            cur = ggml_reshape_2d(ctx0, cur, cur->ne[2], n_token_out); // [n_embd_out, n_token_out]
++
++            cur = ggml_add(ctx0, cur, model.mm_patch_merger_b);
++        }
++
++        // FC projector
++        {
++            cur = ggml_mul_mat(ctx0, model.mm_fc_w, cur);
++            // default LayerNorm (post_projection_norm)
++            cur = build_norm(cur, model.mm_post_norm_w, model.mm_post_norm_b, NORM_TYPE_NORMAL, 1e-5, -1);
++            cur = ggml_gelu_erf(ctx0, cur);
++            cb(cur, "after_fc_proj", -1);
++        }
++
++        // FFN projector
++        {
++            cur = build_ffn(cur,
++                model.mm_ffn_up_w, model.mm_ffn_up_b,
++                model.mm_ffn_gate_w, model.mm_ffn_gate_b,
++                model.mm_ffn_down_w, model.mm_ffn_down_b,
++                hparams.ffn_op, -1);
++            cb(cur, "after_ffn_proj", -1);
++        }
++
++        // build the graph
++        ggml_build_forward_expand(gf, cur);
++
++        return gf;
++    }
++
+     ggml_cgraph * build_pixtral() {
+         const int n_merge = hparams.n_merge;
+
+@@ -2776,9 +2910,7 @@ private:
+                         /* nb2    */ cur->nb[1],
+                         /* offset */ ggml_row_size(cur->type, 2 * n_embd));
+
+-                    // TODO: q/k norm requires row size == n_embd, while here it's d_head
+-                    // we can add support in the future if needed
+-                    GGML_ASSERT(layer.q_norm == nullptr && layer.k_norm == nullptr);
++                    // Fused QKV is already split into heads (GLM-OCR normalizes per head).
+                     if (layer.q_norm) {
+                         GGML_ASSERT(layer.q_norm->ne[0] == Qcur->ne[0]);
+                         Qcur = build_norm(Qcur, layer.q_norm, NULL, norm_t, eps, il);
+@@ -3329,6 +3461,10 @@ static ggml_cgraph * clip_image_build_graph(clip_ctx * ctx, const clip_image_f32
+             {
+                 res = graph.build_siglip();
+             } break;
++        case PROJECTOR_TYPE_GLM4V:
++            {
++                res = graph.build_glm4v();
++            } break;
+         case PROJECTOR_TYPE_PIXTRAL:
+         case PROJECTOR_TYPE_LIGHTONOCR:
+             {
+@@ -3733,6 +3869,17 @@ struct clip_model_loader {
+                         // ref: https://huggingface.co/LiquidAI/LFM2-VL-3B/blob/main/preprocessor_config.json
+                         hparams.set_limit_image_tokens(64, 256);
+                     } break;
++                case PROJECTOR_TYPE_GLM4V:
++                    {
++                        hparams.rope_theta = 10000.0f;
++                        hparams.n_merge = 2;
++                        get_u32(KEY_SPATIAL_MERGE_SIZE, hparams.n_merge, false);
++                        if (hparams.n_merge != 2) {
++                            throw std::runtime_error("glm4v requires spatial_merge_size = 2");
++                        }
++                        hparams.set_limit_image_tokens(8, 4096);
++                        hparams.set_warmup_n_tokens(46*46);
++                    } break;
+                 case PROJECTOR_TYPE_PIXTRAL:
+                 case PROJECTOR_TYPE_LIGHTONOCR:
+                     {
+@@ -4009,6 +4156,10 @@ struct clip_model_loader {
+         model.patch_embeddings_1 = get_tensor(TN_PATCH_EMBD_1, false);
+
+         model.position_embeddings = get_tensor(string_format(TN_POS_EMBD, prefix), false);
++        if (model.proj_type == PROJECTOR_TYPE_GLM4V) {
++            model.norm_embd_w = get_tensor("v.norm_embd.weight", false);
++            model.norm_embd_b = get_tensor("v.norm_embd.bias", false);
++        }
+
+         // layers
+         model.layers.resize(hparams.n_layer);
+@@ -4171,6 +4322,20 @@ struct clip_model_loader {
+                     model.mm_model_ln_post_w = get_tensor(string_format(TN_MINICPMV_LN, "post", "weight"));
+                     model.mm_model_ln_post_b = get_tensor(string_format(TN_MINICPMV_LN, "post", "bias"));
+                 } break;
++            case PROJECTOR_TYPE_GLM4V:
++                {
++                    model.mm_fc_w = get_tensor(TN_MM_PROJECTOR);
++                    model.mm_patch_merger_w = get_tensor("mm.patch_merger.weight");
++                    model.mm_patch_merger_b = get_tensor("mm.patch_merger.bias");
++                    model.mm_post_norm_w = get_tensor("mm.post_norm.weight");
++                    model.mm_post_norm_b = get_tensor("mm.post_norm.bias", false);
++                    model.mm_ffn_up_w = get_tensor("mm.up.weight");
++                    model.mm_ffn_up_b = get_tensor("mm.up.bias", false);
++                    model.mm_ffn_gate_w = get_tensor("mm.gate.weight");
++                    model.mm_ffn_gate_b = get_tensor("mm.gate.bias", false);
++                    model.mm_ffn_down_w = get_tensor("mm.down.weight");
++                    model.mm_ffn_down_b = get_tensor("mm.down.bias", false);
++                } break;
+             case PROJECTOR_TYPE_GLM_EDGE:
+                 {
+                     model.mm_model_adapter_conv_w = get_tensor(string_format(TN_GLM_ADAPER_CONV, "weight"));
+@@ -4923,6 +5088,33 @@ struct img_tool {
+         }
+     }
+
++    // GLM4V uses endpoint-aligned bilinear sampling, not stb's half-pixel/antialiased resize.
++    // Adapted from ggml-org/llama.cpp 7dad2f1a1, tools/mtmd/mtmd-image.cpp.
++    // Copyright (c) 2023-2026 The ggml authors. MIT license; see LICENSE.
++    static void resize_glm4v(const clip_image_u8 & src, clip_image_u8 & dst, clip_image_size size) {
++        GGML_ASSERT(src.nx > 0 && src.ny > 0 && size.width > 0 && size.height > 0);
++        dst.nx = size.width;
++        dst.ny = size.height;
++        dst.buf.resize(3 * (size_t) dst.nx * dst.ny);
++        const float xr = dst.nx > 1 ? float(src.nx - 1) / (dst.nx - 1) : 0.0f;
++        const float yr = dst.ny > 1 ? float(src.ny - 1) / (dst.ny - 1) : 0.0f;
++        auto lerp = [](float a, float b, float t) { return a + (b - a) * t; };
++        for (int y = 0; y < dst.ny; ++y) {
++            for (int x = 0; x < dst.nx; ++x) {
++                const float px = x * xr, py = y * yr;
++                const int x0 = std::min(int(px), src.nx - 1), y0 = std::min(int(py), src.ny - 1);
++                const int x1 = std::min(x0 + 1, src.nx - 1), y1 = std::min(y0 + 1, src.ny - 1);
++                for (int c = 0; c < 3; ++c) {
++                    const float top = lerp(src.buf[3 * ((size_t) y0 * src.nx + x0) + c],
++                                           src.buf[3 * ((size_t) y0 * src.nx + x1) + c], px - x0);
++                    const float bot = lerp(src.buf[3 * ((size_t) y1 * src.nx + x0) + c],
++                                           src.buf[3 * ((size_t) y1 * src.nx + x1) + c], px - x0);
++                    dst.buf[3 * ((size_t) y * dst.nx + x) + c] = uint8_t(lerp(top, bot, py - y0));
++                }
++            }
++        }
++    }
++
+ private:
+     // Bilinear resize function
+     static void resize_bilinear(const clip_image_u8 & src, clip_image_u8 & dst, int target_width, int target_height) {
+@@ -5273,6 +5465,7 @@ bool clip_image_preprocess(struct clip_ctx * ctx, const clip_image_u8 * img, str
+                 res_imgs->grid_y = inst.grid_size.height;
+             } break;
+
++        case PROJECTOR_TYPE_GLM4V:
+         case PROJECTOR_TYPE_QWEN2VL:
+         case PROJECTOR_TYPE_QWEN25VL:
+         case PROJECTOR_TYPE_QWEN3VL:
+@@ -5288,7 +5481,11 @@ bool clip_image_preprocess(struct clip_ctx * ctx, const clip_image_u8 * img, str
+                     params.patch_size * cur_merge,
+                     params.image_min_pixels,
+                     params.image_max_pixels);
+-                img_tool::resize(*img, resized, new_size, img_tool::RESIZE_ALGO_BICUBIC, false);
++                if (ctx->proj_type() == PROJECTOR_TYPE_GLM4V) {
++                    img_tool::resize_glm4v(*img, resized, new_size);
++                } else {
++                    img_tool::resize(*img, resized, new_size, img_tool::RESIZE_ALGO_BICUBIC, false);
++                }
+                 // clip_image_save_to_bmp(resized, "preproc.bmp");
+                 clip_image_f32_ptr img_f32(clip_image_f32_init());
+                 // clip_image_f32_ptr res(clip_image_f32_init());
+@@ -5723,7 +5920,7 @@ const char * clip_patch_merge_type(const struct clip_ctx * ctx) {
+ int clip_n_output_tokens_x(const struct clip_ctx * ctx, struct clip_image_f32 * img) {
+     const auto & params = ctx->model.hparams;
+     const int n_total = clip_n_output_tokens(ctx, img);
+-    if (ctx->proj_type() == PROJECTOR_TYPE_QWEN2VL || ctx->proj_type() == PROJECTOR_TYPE_QWEN25VL || ctx->proj_type() == PROJECTOR_TYPE_QWEN3VL || ctx->proj_type() == PROJECTOR_TYPE_LING3VL || ctx->proj_type() == PROJECTOR_TYPE_MINIMAX_M3_VL) {
++    if (ctx->proj_type() == PROJECTOR_TYPE_QWEN2VL || ctx->proj_type() == PROJECTOR_TYPE_QWEN25VL || ctx->proj_type() == PROJECTOR_TYPE_QWEN3VL || ctx->proj_type() == PROJECTOR_TYPE_LING3VL || ctx->proj_type() == PROJECTOR_TYPE_MINIMAX_M3_VL || ctx->proj_type() == PROJECTOR_TYPE_GLM4V) {
+         return img->nx / (params.patch_size * 2);
+     }
+     return n_total;
+@@ -5731,7 +5928,7 @@ int clip_n_output_tokens_x(const struct clip_ctx * ctx, struct clip_image_f32 *
+
+ int clip_n_output_tokens_y(const struct clip_ctx * ctx, struct clip_image_f32 * img) {
+     const auto & params = ctx->model.hparams;
+-    if (ctx->proj_type() == PROJECTOR_TYPE_QWEN2VL || ctx->proj_type() == PROJECTOR_TYPE_QWEN25VL || ctx->proj_type() == PROJECTOR_TYPE_QWEN3VL || ctx->proj_type() == PROJECTOR_TYPE_LING3VL || ctx->proj_type() == PROJECTOR_TYPE_MINIMAX_M3_VL) {
++    if (ctx->proj_type() == PROJECTOR_TYPE_QWEN2VL || ctx->proj_type() == PROJECTOR_TYPE_QWEN25VL || ctx->proj_type() == PROJECTOR_TYPE_QWEN3VL || ctx->proj_type() == PROJECTOR_TYPE_LING3VL || ctx->proj_type() == PROJECTOR_TYPE_MINIMAX_M3_VL || ctx->proj_type() == PROJECTOR_TYPE_GLM4V) {
+         return img->ny / (params.patch_size * 2);
+     }
+     return 1;
+@@ -5786,6 +5983,7 @@ int clip_n_output_tokens(const struct clip_ctx * ctx, struct clip_image_f32 * im
+                     }
+                 }
+             } break;
++        case PROJECTOR_TYPE_GLM4V:
+         case PROJECTOR_TYPE_QWEN2VL:
+         case PROJECTOR_TYPE_QWEN25VL:
+         case PROJECTOR_TYPE_QWEN3VL:
+@@ -6116,6 +6314,7 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
+
+                 set_input_f32("pos_embed", pos_embed);
+             } break;
++        case PROJECTOR_TYPE_GLM4V:
+         case PROJECTOR_TYPE_QWEN2VL:
+         case PROJECTOR_TYPE_QWEN3VL:
+         case PROJECTOR_TYPE_LING3VL:
+@@ -6468,6 +6667,8 @@ int clip_n_mmproj_embd(const struct clip_ctx * ctx) {
+             return ctx->model.mm_model_proj->ne[0];
+         case PROJECTOR_TYPE_GLM_EDGE:
+             return ctx->model.mm_model_mlp_3_w->ne[1];
++        case PROJECTOR_TYPE_GLM4V:
++            return ctx->model.mm_ffn_down_w->ne[1];
+         case PROJECTOR_TYPE_QWEN2VL:
+         case PROJECTOR_TYPE_QWEN25VL:
+         case PROJECTOR_TYPE_JANUS_PRO:
+diff --git a/examples/mtmd/mtmd.cpp b/examples/mtmd/mtmd.cpp
+index f0c9caf5..93f78d18 100644
+--- a/examples/mtmd/mtmd.cpp
++++ b/examples/mtmd/mtmd.cpp
+@@ -25,10 +25,11 @@ struct mtmd_bitmap {
+ struct mtmd_image_tokens {
+     uint32_t nx; // number of tokens in x direction
+     uint32_t ny; // number of tokens in y direction
+-    bool use_mrope_pos = false; // use M-RoPE position counting (the whole image is 1 temporal position)
++    bool use_mrope_pos = false; // use M-RoPE spatial/temporal positions
+     uint32_t n_tokens() const { return nx * ny; }
+     clip_image_f32_batch batch_f32; // preprocessed image patches
+     std::string id; // optional user-defined ID, useful for KV cache tracking
++    uint32_t mrope_pos_span = 1; // GLM text resumes after the largest spatial coordinate
+
+     mtmd_image_tokens clone() {
+         return mtmd_image_tokens{
+@@ -36,7 +37,8 @@ struct mtmd_image_tokens {
+             ny,
+             use_mrope_pos,
+             batch_f32.clone(),
+-            id
++            id,
++            mrope_pos_span
+         };
+     }
+ };
+@@ -211,7 +213,9 @@ struct mtmd_context {
+
+     void init_vision() {
+         GGML_ASSERT(ctx_v != nullptr);
+-        use_mrope = clip_is_qwen2vl(ctx_v);
++        use_mrope = clip_is_qwen2vl(ctx_v)
++            || (clip_get_projector_type(ctx_v) == PROJECTOR_TYPE_GLM4V
++                && llama_rope_type(text_model) == LLAMA_ROPE_TYPE_MROPE);
+
+         projector_type proj = clip_get_projector_type(ctx_v);
+         int minicpmv_version = clip_is_minicpmv(ctx_v);
+@@ -283,6 +287,10 @@ struct mtmd_context {
+             img_beg = "<|vision_start|>";
+             img_end = "<|vision_end|>";
+
++        } else if (proj == PROJECTOR_TYPE_GLM4V) {
++            img_beg = "<|begin_of_image|>";
++            img_end = "<|end_of_image|>";
++
+         } else if (proj == PROJECTOR_TYPE_MINIMAX_M3_VL) {
+             // ]<]start of image[>[ ... (image embeddings) ... ]<]end of image[>[
+             img_beg = "]<]start of image[>[";
+@@ -651,6 +659,9 @@ struct mtmd_tokenizer {
+                     image_tokens->nx = clip_n_output_tokens_x(ctx->ctx_v, batch_f32.entries[0].get());
+                     image_tokens->ny = clip_n_output_tokens_y(ctx->ctx_v, batch_f32.entries[0].get());
+                     image_tokens->use_mrope_pos = true;
++                    if (ctx->proj_type_v() == PROJECTOR_TYPE_GLM4V) {
++                        image_tokens->mrope_pos_span = std::max(image_tokens->nx, image_tokens->ny);
++                    }
+                 } else {
+                     // other models, we only need the total number of tokens
+                     image_tokens->nx = n_tokens;
+@@ -1123,7 +1134,7 @@ const char * mtmd_image_tokens_get_id(const mtmd_image_tokens * image_tokens) {
+
+ llama_pos mtmd_image_tokens_get_n_pos(const mtmd_image_tokens * image_tokens) {
+     if (image_tokens->use_mrope_pos) {
+-        return 1; // for M-RoPE, the whole image is 1 in temporal dimension
++        return image_tokens->mrope_pos_span;
+     }
+     return image_tokens->n_tokens();
+ }
+@@ -1189,7 +1200,8 @@ static mtmd_image_tokens mtmd_image_tokens_from_json(json & j) {
+         j.value<uint32_t>("ny", 0),
+         j.value("use_mrope_pos",false),
+         clip_image_f32_batch {},
+-        j.value("id","")
++        j.value("id",""),
++        j.value<uint32_t>("mrope_pos_span", 1)
+     };
+ }
+
+@@ -1208,6 +1220,7 @@ static json mtmd_image_tokens_to_json(mtmd_image_tokens * chunk) {
+         j["nx"] = chunk->nx;
+         j["ny"] = chunk->ny;
+         j["use_mrope_pos"] = chunk->use_mrope_pos;
++        j["mrope_pos_span"] = chunk->mrope_pos_span;
+         j["id"] = chunk->id;
+     }
+     return j;
+diff --git a/examples/mtmd/mtmd.h b/examples/mtmd/mtmd.h
+index 5c1141fb..8cefa700 100644
+--- a/examples/mtmd/mtmd.h
++++ b/examples/mtmd/mtmd.h
+@@ -162,7 +162,8 @@ MTMD_API const mtmd_image_tokens *  mtmd_input_chunk_get_tokens_image(const mtmd
+ MTMD_API size_t                     mtmd_input_chunk_get_n_tokens    (const mtmd_input_chunk * chunk);
+ // returns nullptr for ID on text chunk
+ MTMD_API const char *               mtmd_input_chunk_get_id          (const mtmd_input_chunk * chunk);
+-// number of temporal positions (always 1 for M-RoPE, n_tokens otherwise)
++// Position span before following text: max(nx, ny) for GLM M-RoPE,
++// 1 for existing Qwen M-RoPE, n_tokens for ordinary images.
+ MTMD_API llama_pos                  mtmd_input_chunk_get_n_pos       (const mtmd_input_chunk * chunk);
+
+ // in case you want to use custom logic to handle the chunk (i.e. KV cache management)
+@@ -183,7 +184,7 @@ MTMD_API size_t       mtmd_image_tokens_get_n_tokens(const mtmd_image_tokens * i
+ MTMD_API size_t       mtmd_image_tokens_get_nx      (const mtmd_image_tokens * image_tokens);
+ MTMD_API size_t       mtmd_image_tokens_get_ny      (const mtmd_image_tokens * image_tokens);
+ MTMD_API const char * mtmd_image_tokens_get_id      (const mtmd_image_tokens * image_tokens); // TODO: deprecate
+-// number of temporal positions (always 1 for M-RoPE, n_tokens otherwise)
++// Position span before following text; see mtmd_input_chunk_get_n_pos.
+ MTMD_API llama_pos    mtmd_image_tokens_get_n_pos   (const mtmd_image_tokens * image_tokens); // TODO: deprecate
+
+ // tokenize an input text prompt and a list of bitmaps (images/audio)
+diff --git a/ggml/src/ggml.c b/ggml/src/ggml.c
+index c5fd7ec2..1248addd 100644
+--- a/ggml/src/ggml.c
++++ b/ggml/src/ggml.c
+@@ -21656,7 +21656,8 @@ static void ggml_compute_forward_rope_f32(
+                     }
+                 }
+
+-                if (is_inplace) {
++                // Vision RoPE still has a disjoint second half to rotate in-place.
++                if (is_inplace && !is_vision) {
+                     continue;
+                 }
+
+diff --git a/src/graphs/build_glm4.cpp b/src/graphs/build_glm4.cpp
+index 03bff724..8df71841 100644
+--- a/src/graphs/build_glm4.cpp
++++ b/src/graphs/build_glm4.cpp
+@@ -155,6 +155,10 @@ ggml_cgraph * llm_build_context::build_glm4() {
+
+     GGML_ASSERT(n_embd_head == hparams.n_embd_head_k(0));
+
++    const int n_layer_main = n_layer - hparams.nextn_predict_layers;
++    int sections[4];
++    std::copy(std::begin(hparams.rope_sections), std::end(hparams.rope_sections), sections);
++
+     struct ggml_tensor * cur;
+     struct ggml_tensor * inpL;
+
+@@ -166,7 +170,7 @@ ggml_cgraph * llm_build_context::build_glm4() {
+     // KQ_mask (mask for 1 head, it will be broadcasted to all heads)
+     struct ggml_tensor * KQ_mask     = build_inp_KQ_mask();
+
+-    for (int il = 0; il < n_layer; ++il) {
++    for (int il = 0; il < n_layer_main; ++il) {
+         struct ggml_tensor * inpSA = inpL;
+
+         // Pre-attention norm
+@@ -199,25 +203,34 @@ ggml_cgraph * llm_build_context::build_glm4() {
+                     cur = ggml_add(ctx0, cur, model.layers[il].bqkv);
+                     cb(cur, "bqkv", il);
+                 }
+-                Qcur = ggml_cont(ctx0, ggml_view_2d(ctx0, cur, n_embd,     n_tokens, cur->nb[1], 0*sizeof(float)*(n_embd)));
+-                Kcur = ggml_cont(ctx0, ggml_view_2d(ctx0, cur, n_embd_gqa, n_tokens, cur->nb[1], 1*sizeof(float)*(n_embd)));
+-                Vcur = ggml_cont(ctx0, ggml_view_2d(ctx0, cur, n_embd_gqa, n_tokens, cur->nb[1], 1*sizeof(float)*(n_embd + n_embd_gqa)));
++                Qcur = ggml_cont(ctx0, ggml_view_2d(ctx0, cur, n_embd_head * n_head, n_tokens, cur->nb[1], 0));
++                Kcur = ggml_cont(ctx0, ggml_view_2d(ctx0, cur, n_embd_gqa, n_tokens, cur->nb[1], sizeof(float)*(n_embd_head * n_head)));
++                Vcur = ggml_cont(ctx0, ggml_view_2d(ctx0, cur, n_embd_gqa, n_tokens, cur->nb[1], sizeof(float)*(n_embd_head * n_head + n_embd_gqa)));
+             }
+
+             Qcur = ggml_reshape_3d(ctx0, Qcur, n_embd_head, n_head,    n_tokens);
+             Kcur = ggml_reshape_3d(ctx0, Kcur, n_embd_head, n_head_kv, n_tokens);
+
+-            Qcur = ggml_rope_ext(
+-                    ctx0, Qcur, inp_pos, nullptr,
+-                    n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
+-                    ext_factor, attn_factor, beta_fast, beta_slow
+-                    );
+-
+-            Kcur = ggml_rope_ext(
+-                    ctx0, Kcur, inp_pos, nullptr,
+-                    n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
+-                    ext_factor, attn_factor, beta_fast, beta_slow
+-                    );
++            if (hparams.use_mrope()) {
++                Qcur = ggml_rope_multi(ctx0, Qcur, inp_pos, nullptr,
++                    n_rot, sections, rope_type, n_ctx_orig, freq_base, freq_scale,
++                    ext_factor, attn_factor, beta_fast, beta_slow);
++                Kcur = ggml_rope_multi(ctx0, Kcur, inp_pos, nullptr,
++                    n_rot, sections, rope_type, n_ctx_orig, freq_base, freq_scale,
++                    ext_factor, attn_factor, beta_fast, beta_slow);
++            } else {
++                Qcur = ggml_rope_ext(
++                        ctx0, Qcur, inp_pos, nullptr,
++                        n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
++                        ext_factor, attn_factor, beta_fast, beta_slow
++                        );
++
++                Kcur = ggml_rope_ext(
++                        ctx0, Kcur, inp_pos, nullptr,
++                        n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
++                        ext_factor, attn_factor, beta_fast, beta_slow
++                        );
++            }
+
+             cb(Qcur, "Qcur", il);
+             cb(Kcur, "Kcur", il);
+@@ -228,7 +241,7 @@ ggml_cgraph * llm_build_context::build_glm4() {
+                     Kcur, Vcur, Qcur, KQ_mask, n_tokens, kv_head, n_kv, 1.0f / sqrtf(float(n_embd_head)), cb, il);
+         }
+
+-        if (il == n_layer - 1) {
++        if (il == n_layer_main - 1) {
+             // skip computing output for unused tokens
+             struct ggml_tensor * inp_out_ids = build_inp_out_ids();
+             cur   = ggml_get_rows(ctx0,   cur, inp_out_ids);
+diff --git a/src/llama-hparams.cpp b/src/llama-hparams.cpp
+index 10f1605f..4a9e523f 100644
+--- a/src/llama-hparams.cpp
++++ b/src/llama-hparams.cpp
+@@ -1491,6 +1491,12 @@ void llm_load_hparams(
+         case LLM_ARCH_GLM4:
+             {
+                 ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS, hparams.f_norm_rms_eps);
++                ml.get_key_or_arr(LLM_KV_ROPE_DIMENSION_SECTIONS, hparams.rope_sections, 4, false);
++                ml.get_key(LLM_KV_NEXTN_PREDICT_LAYERS, hparams.nextn_predict_layers, false);
++                if (hparams.nextn_predict_layers >= hparams.n_layer) {
++                    throw std::runtime_error("glm4.nextn_predict_layers must be less than block_count");
++                }
++                hparams.n_layer_kv_from_start = hparams.n_layer - hparams.nextn_predict_layers;
+                 switch (hparams.n_layer) {
+                     case 40: model.type = e_model::MODEL_9B; break;
+                     case 61: model.type = e_model::MODEL_32B; break;
+diff --git a/src/llama-load-tensors.cpp b/src/llama-load-tensors.cpp
+index 3db48836..457692f8 100644
+--- a/src/llama-load-tensors.cpp
++++ b/src/llama-load-tensors.cpp
+@@ -4450,29 +4450,40 @@ bool create_tensors_helper::create_glm4_tensors(const LLM_TN & tn) {
+         ggml_context * ctx_split = ctx_for_layer_split(i);
+
+         auto & layer = model.layers[i];
++        // GLM-OCR appends an unused NextN head; validate and account for its tensors.
++        const int flags = i >= n_layer - hparams.nextn_predict_layers ? llama_model_loader::TENSOR_SKIP : 0;
++        const int optional = flags | llama_model_loader::TENSOR_NOT_REQUIRED;
+
+-        layer.attn_norm = create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_NORM, "weight", i), {n_embd}, 0);
+-        layer.wqkv = create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_QKV, "weight", i), {n_embd, n_embd + 2*n_embd_gqa}, llama_model_loader::TENSOR_NOT_REQUIRED);
+-        layer.bqkv = create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_QKV, "bias", i),   {n_embd + 2*n_embd_gqa}, llama_model_loader::TENSOR_NOT_REQUIRED);
++        layer.attn_norm = create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_NORM, "weight", i), {n_embd}, flags);
++        layer.wqkv = create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_QKV, "weight", i), {n_embd, n_embd_head_k * n_head + n_embd_k_gqa + n_embd_v_gqa}, optional);
++        layer.bqkv = create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_QKV, "bias", i),   {n_embd_head_k * n_head + n_embd_k_gqa + n_embd_v_gqa}, optional);
+
+-        if (layer.wqkv == nullptr) {
+-            layer.wq = create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_Q,   "weight", i), {n_embd, n_embd_head_k * n_head}, 0);
+-            layer.wk = create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_K,   "weight", i), {n_embd, n_embd_k_gqa}, 0);
+-            layer.wv = create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_V,   "weight", i), {n_embd, n_embd_v_gqa}, 0);
+-            layer.bq = create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_Q,   "bias", i), {n_embd}, llama_model_loader::TENSOR_NOT_REQUIRED);
+-            layer.bk = create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_K,   "bias", i), {n_embd_gqa}, llama_model_loader::TENSOR_NOT_REQUIRED);
+-            layer.bv = create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_V,   "bias", i), {n_embd_gqa}, llama_model_loader::TENSOR_NOT_REQUIRED);
++        if (ml.get_tensor_meta(tn(LLM_TENSOR_ATTN_QKV, "weight", i).c_str()) == nullptr) {
++            layer.wq = create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_Q,   "weight", i), {n_embd, n_embd_head_k * n_head}, flags);
++            layer.wk = create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_K,   "weight", i), {n_embd, n_embd_k_gqa}, flags);
++            layer.wv = create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_V,   "weight", i), {n_embd, n_embd_v_gqa}, flags);
++            layer.bq = create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_Q,   "bias", i), {n_embd_head_k * n_head}, optional);
++            layer.bk = create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_K,   "bias", i), {n_embd_gqa}, optional);
++            layer.bv = create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_V,   "bias", i), {n_embd_gqa}, optional);
+         }
+
+-        layer.wo   = create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_OUT, "weight", i), {n_embd, n_embd}, 0);
+-
+-        layer.attn_post_norm = create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_POST_NORM, "weight", i), {n_embd}, 0);
++        layer.wo   = create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_OUT, "weight", i), {n_embd_head_k * n_head, n_embd}, flags);
+
+-        layer.ffn_norm = create_tensor(ctx_layer, tn(LLM_TENSOR_FFN_NORM, "weight", i), {n_embd}, 0);
+-        layer.ffn_down = create_tensor(ctx_split, tn(LLM_TENSOR_FFN_DOWN, "weight", i), {n_ff, n_embd}, 0);
+-        layer.ffn_up   = create_tensor(ctx_split, tn(LLM_TENSOR_FFN_UP,   "weight", i), {n_embd, n_ff * 2}, 0);
++        layer.attn_post_norm = create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_POST_NORM, "weight", i), {n_embd}, flags);
+
+-        layer.ffn_post_norm  = create_tensor(ctx_layer, tn(LLM_TENSOR_FFN_POST_NORM, "weight", i), {n_embd}, 0);
++        layer.ffn_norm = create_tensor(ctx_layer, tn(LLM_TENSOR_FFN_NORM, "weight", i), {n_embd}, flags);
++        layer.ffn_down = create_tensor(ctx_split, tn(LLM_TENSOR_FFN_DOWN, "weight", i), {n_ff, n_embd}, flags);
++        layer.ffn_up   = create_tensor(ctx_split, tn(LLM_TENSOR_FFN_UP,   "weight", i), {n_embd, n_ff * 2}, flags);
++
++        layer.ffn_post_norm  = create_tensor(ctx_layer, tn(LLM_TENSOR_FFN_POST_NORM, "weight", i), {n_embd}, flags);
++        if (flags & llama_model_loader::TENSOR_SKIP) {
++            create_tensor(ctx_layer, tn(LLM_TENSOR_NEXTN_EH_PROJ, "weight", i), {2 * n_embd, n_embd}, flags);
++            create_tensor(ctx_layer, tn(LLM_TENSOR_NEXTN_ENORM, "weight", i), {n_embd}, flags);
++            create_tensor(ctx_layer, tn(LLM_TENSOR_NEXTN_HNORM, "weight", i), {n_embd}, flags);
++            create_tensor(ctx_layer, tn(LLM_TENSOR_NEXTN_EMBED_TOKENS, "weight", i), {n_embd, n_vocab}, optional);
++            create_tensor(ctx_layer, tn(LLM_TENSOR_NEXTN_SHARED_HEAD_HEAD, "weight", i), {n_embd, n_vocab}, optional);
++            create_tensor(ctx_layer, tn(LLM_TENSOR_NEXTN_SHARED_HEAD_NORM, "weight", i), {n_embd}, optional);
++        }
+     }
+     return use_mmap_buffer;
+ }
+diff --git a/src/llama-model.cpp b/src/llama-model.cpp
+index f37f64f5..6df23d72 100644
+--- a/src/llama-model.cpp
++++ b/src/llama-model.cpp
+@@ -1535,6 +1535,12 @@ static const std::map<llm_arch, std::map<llm_tensor, std::string>> LLM_TENSOR_NA
+             { LLM_TENSOR_FFN_DOWN,        "blk.%d.ffn_down" },
+             { LLM_TENSOR_ATTN_POST_NORM,  "blk.%d.post_attention_norm" },
+             { LLM_TENSOR_FFN_POST_NORM,   "blk.%d.post_ffw_norm" },
++            { LLM_TENSOR_NEXTN_EH_PROJ,          "blk.%d.nextn.eh_proj" },
++            { LLM_TENSOR_NEXTN_ENORM,            "blk.%d.nextn.enorm" },
++            { LLM_TENSOR_NEXTN_HNORM,            "blk.%d.nextn.hnorm" },
++            { LLM_TENSOR_NEXTN_EMBED_TOKENS,     "blk.%d.nextn.embed_tokens" },
++            { LLM_TENSOR_NEXTN_SHARED_HEAD_HEAD, "blk.%d.nextn.shared_head_head" },
++            { LLM_TENSOR_NEXTN_SHARED_HEAD_NORM, "blk.%d.nextn.shared_head_norm" },
+         },
+     },
+     {
+diff --git a/src/llama.cpp b/src/llama.cpp
+index e170df2a..21b50bc0 100644
+--- a/src/llama.cpp
++++ b/src/llama.cpp
+@@ -6601,6 +6601,24 @@ static void llama_set_inputs(llama_context & lctx, const llama_batch & batch) {
+                 }
+             }
+             }
++            if (lctx.model.arch == LLM_ARCH_GLM4 && hparams.use_mrope() && batch.embd) {
++                // GLM image tokens share t, but remain causal in raster (y, x) order.
++                // mtmd supplies that order, so earlier ubatches are already in the past.
++                // ponytail: only the current ubatch needs the 2D tie-break; no KV format change.
++                const ggml_half h_inf = ggml_fp32_to_fp16(-INFINITY);
++                for (int64_t j = 0; j < n_tokens; ++j) {
++                    for (int64_t i = j + 1; i < n_tokens; ++i) {
++                        const bool future = batch.pos[n_tokens + i] > batch.pos[n_tokens + j] ||
++                            (batch.pos[n_tokens + i] == batch.pos[n_tokens + j] &&
++                             batch.pos[2*n_tokens + i] > batch.pos[2*n_tokens + j]);
++                        if (batch.pos[i] == batch.pos[j] && future) {
++                            const int64_t idx = j*n_kv + mask_kv_self.head + i;
++                            if (data)     data[idx] = -INFINITY;
++                            if (data_f16) data_f16[idx] = h_inf;
++                        }
++                    }
++                }
++            }
+ #if IK_PRINT_TIMING == 2
+             auto tim2 = ggml_time_us();
+             printf("set_inputs(mask1): %d us\n", int(tim2-tim1));
+@@ -10180,7 +10198,6 @@ enum llama_rope_type llama_rope_type(const struct llama_model * model) {
+         case LLM_ARCH_DEEPSEEK4:
+         case LLM_ARCH_DEEPSEEK41:
+         case LLM_ARCH_CHATGLM:
+-        case LLM_ARCH_GLM4:
+         case LLM_ARCH_GRANITE:
+         case LLM_ARCH_GRANITE_MOE:
+         case LLM_ARCH_COHERE2:
+@@ -10195,6 +10212,9 @@ enum llama_rope_type llama_rope_type(const struct llama_model * model) {
+         case LLM_ARCH_MUSE_GLIMMER:
+             return LLAMA_ROPE_TYPE_NORM;
+
++        case LLM_ARCH_GLM4:
++            return model->hparams.use_mrope() ? LLAMA_ROPE_TYPE_MROPE : LLAMA_ROPE_TYPE_NORM;
++
+         case LLM_ARCH_BAILINGMOE3:
+             // VL files carry mrope sections; text-only files keep NORM rope
+             return model->hparams.use_mrope() ? LLAMA_ROPE_TYPE_MROPE : LLAMA_ROPE_TYPE_NORM;
+diff --git a/tests/test-rope.cpp b/tests/test-rope.cpp
+index 8159e276..0385cf39 100644
+--- a/tests/test-rope.cpp
++++ b/tests/test-rope.cpp
+@@ -214,6 +214,50 @@ int main(int /*argc*/, const char ** /*argv*/) {
+         }
+     }
+
++    // Vision RoPE rotates both halves of a head even when the input buffer is reused.
++    // GLM-OCR exposed the second half being skipped in the CPU in-place path.
++    {
++        constexpr int head_dim = 64, n_heads = 2, n_pos = 3;
++        auto input = ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, head_dim, n_heads, n_pos);
++        auto copy = ggml_dup_tensor(ctx0, input);
++        auto positions = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_pos * 4);
++        for (int i = 0; i < head_dim * n_heads * n_pos; ++i) {
++            ((float *) input->data)[i] = ((float *) copy->data)[i] = float(i % 29 - 14) * 0.1f;
++        }
++        for (int axis = 0; axis < 4; ++axis) {
++            for (int i = 0; i < n_pos; ++i) {
++                ((int32_t *) positions->data)[axis * n_pos + i] = axis % 2 ? 2*i + 3 : i + 1;
++            }
++        }
++        int sections[4] = {16, 16, 16, 16};
++        auto out = ggml_rope_multi(ctx0, input, positions, nullptr, head_dim/2, sections,
++            GGML_ROPE_TYPE_VISION, 32768, 10000.0f, 1, 0, 1, 32, 1);
++        auto inplace = ggml_rope_multi_inplace(ctx0, copy, positions, nullptr, head_dim/2, sections,
++            GGML_ROPE_TYPE_VISION, 32768, 10000.0f, 1, 0, 1, 32, 1);
++        auto graph = ggml_new_graph(ctx0);
++        ggml_build_forward_expand(graph, out);
++        ggml_build_forward_expand(graph, inplace);
++        ggml_graph_compute_helper(work_buffer, graph, 4);
++        for (int row = 0; row < n_heads * n_pos; ++row) {
++            for (int j = 0; j < head_dim/2; ++j) {
++                const int axis = j / (head_dim/4);
++                const int p = ((int32_t *) positions->data)[axis * n_pos + row / n_heads];
++                const float theta = p * std::pow(10000.0f, -2.0f * (j % (head_dim/4)) / (head_dim/2));
++                const int i = row * head_dim + j;
++                const float x = ((float *) input->data)[i];
++                const float y = ((float *) input->data)[i + head_dim/2];
++                const float expected[2] = {x * std::cos(theta) - y * std::sin(theta),
++                                          x * std::sin(theta) + y * std::cos(theta)};
++                for (int half = 0; half < 2; ++half) {
++                    const int index = i + half * (head_dim/2);
++                    GGML_ASSERT(std::fabs(((float *) out->data)[index] - expected[half]) < 1e-4f);
++                    GGML_ASSERT(std::fabs(((float *) inplace->data)[index] - expected[half]) < 1e-4f);
++                }
++            }
++        }
++        printf("vision RoPE out-of-place/in-place: PASS\n");
++    }
++
+     ggml_free(ctx0);
+
+     return 0;
+diff --git a/examples/mtmd/test-glm-ocr.py b/examples/mtmd/test-glm-ocr.py
+new file mode 100644
+index 00000000..3630fe0d
+--- /dev/null
++++ b/examples/mtmd/test-glm-ocr.py
+@@ -0,0 +1,157 @@
++#!/usr/bin/env python3
++"""Real-model GLM-OCR API regression. Requires Pillow and local GGUFs, no downloads.
++
++Run once with a reference llama-server, then with the candidate and
++--reference-results pointing at the reference results.json. Servers run serially.
++Generated synthetic documents, server log and measured outputs go in --output.
++"""
++import argparse
++import base64
++import json
++import pathlib
++import re
++import socket
++import subprocess
++import time
++import unicodedata
++import urllib.error
++import urllib.request
++
++from PIL import Image, ImageDraw, ImageFont
++
++
++def canonical(text):
++    return " ".join(unicodedata.normalize("NFC", text).casefold().split())
++
++
++def fixtures(output, font_path):
++    cases = [
++        ("smoke", (672, 280), ["DOC OCR TEST 123"], ["DOC OCR TEST 123"]),
++        ("invoice", (840, 1008), [
++            "RECHNUNG NR. 2026-1042", "Müller & Söhne GmbH",
++            "Königstraße 17, 80331 München", "Kunde: Jörg Weiß",
++            "Datum: 09.03.2026", "Fällig: 23.03.2026", "",
++            "Büromaterial: 100,00 EUR", "Versand: 5,00 EUR",
++            "Netto: 105,00 EUR", "MwSt. 19%: 19,95 EUR",
++            "Gesamt: 124,95 EUR", "Vielen Dank für Ihren Auftrag!",
++        ], ["2026-1042", "Müller & Söhne GmbH", "Königstraße 17, 80331 München",
++            "Jörg Weiß", "09.03.2026", "23.03.2026", "Büromaterial: 100,00 EUR",
++            "Versand: 5,00 EUR", "Netto: 105,00 EUR", "MwSt. 19%: 19,95 EUR",
++            "Gesamt: 124,95 EUR"]),
++        ("table", (1008, 756), [
++            "LAGERBESTAND - 09.03.2026", "Artikel       Menge     Preis",
++            "Bleistift       12      0,80 EUR", "Notizbuch        3      4,50 EUR",
++            "Ordner           5      2,20 EUR", "", "Prüfung: Käthe Groß",
++            "Standort: Köln, Gebäude B", "Hinweis: Nur ungeöffnete Ware zählen.",
++        ], ["09.03.2026", "Bleistift 12 0,80 EUR", "Notizbuch 3 4,50 EUR",
++            "Ordner 5 2,20 EUR", "Käthe Groß", "Köln", "Gebäude B",
++            "ungeöffnete Ware"]),
++    ]
++    for name, size, lines, expected in cases:
++        image = Image.new("RGB", size, "white")
++        draw = ImageDraw.Draw(image)
++        font = ImageFont.truetype(font_path, 32 if name != "smoke" else 40)
++        for i, line in enumerate(lines):
++            draw.text((36, 40 + i * 62), line, font=font, fill="black")
++        image.save(output / (name + ".png"))
++        yield name, size, expected
++
++
++def request(url, body=None):
++    data = None if body is None else json.dumps(body).encode()
++    req = urllib.request.Request(url, data, {"Content-Type": "application/json"})
++    with urllib.request.urlopen(req, timeout=600) as response:
++        return json.load(response)
++
++
++def memory(pid):
++    # Linux process RSS high-water mark includes startup and completed requests.
++    status = pathlib.Path(f"/proc/{pid}/status").read_text()
++    return {line.split(":")[0]: int(line.split()[1]) for line in status.splitlines()
++            if line.startswith(("VmRSS:", "VmHWM:"))}
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--server", required=True, type=pathlib.Path)
++    parser.add_argument("--model", required=True, type=pathlib.Path)
++    parser.add_argument("--mmproj", required=True, type=pathlib.Path)
++    parser.add_argument("--output", required=True, type=pathlib.Path)
++    parser.add_argument("--reference-results", type=pathlib.Path)
++    parser.add_argument("--font", default="/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf")
++    args = parser.parse_args()
++    args.output.mkdir(parents=True, exist_ok=True)
++    cases = list(fixtures(args.output, args.font))
++    with socket.socket() as sock:
++        sock.bind(("127.0.0.1", 0))
++        port = sock.getsockname()[1]
++    cmd = [str(args.server.resolve()), "-m", str(args.model.resolve()),
++           "--mmproj", str(args.mmproj.resolve()), "--host", "127.0.0.1",
++           "--port", str(port), "-ngl", "0", "--no-mmproj-offload",
++           "-t", "4", "-tb", "4", "-c", "4096", "-b", "256", "-ub", "256",
++           "--parallel", "1", "--flash-attn", "off", "--no-warmup",
++           "--image-max-tokens", "1024", "--jinja"]
++    results = {"command": cmd, "cases": []}
++    failures = []
++    start = time.monotonic()
++    with (args.output / "server.log").open("w") as log:
++        proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)
++        try:
++            url = f"http://127.0.0.1:{port}"
++            while True:
++                if proc.poll() is not None:
++                    raise RuntimeError(f"server exited {proc.returncode}; see {args.output / 'server.log'}")
++                try:
++                    request(url + "/health")
++                    break
++                except (urllib.error.URLError, ConnectionError):
++                    if time.monotonic() - start > 300:
++                        raise RuntimeError("server startup timed out")
++                    time.sleep(0.25)
++            results["startup_seconds"] = time.monotonic() - start
++            for name, size, expected in cases:
++                encoded = base64.b64encode((args.output / (name + ".png")).read_bytes()).decode()
++                body = {"model": "glm", "messages": [{"role": "user", "content": [
++                    {"type": "image_url", "image_url": {"url": "data:image/png;base64," + encoded}},
++                    {"type": "text", "text": "Text Recognition:"},
++                ]}], "temperature": 0, "seed": 42, "top_k": 1, "top_p": 1,
++                    "min_p": 0, "repeat_penalty": 1, "max_tokens": 512, "cache_prompt": False,
++                    "chat_template_kwargs": {"enable_thinking": False}}
++                prompt = request(url + "/apply-template", {"messages": body["messages"],
++                    "chat_template_kwargs": body["chat_template_kwargs"]})
++                start_request = time.monotonic()
++                response = request(url + "/v1/chat/completions", body)
++                elapsed = time.monotonic() - start_request
++                choice = response["choices"][0]
++                text = choice["message"].get("content") or ""
++                missing = [item for item in expected if canonical(item) not in canonical(text)]
++                if missing or choice["finish_reason"] != "stop":
++                    failures.append({"case": name, "missing": missing, "finish_reason": choice["finish_reason"]})
++                results["cases"].append({"name": name, "image_size": size, "expected": expected,
++                    "text": text, "missing": missing, "wall_seconds": elapsed,
++                    "memory_kib": memory(proc.pid), "prompt": prompt, "response": response})
++                print(name, f"{elapsed:.3f}s", results["cases"][-1]["memory_kib"], repr(text), flush=True)
++        finally:
++            proc.terminate()
++            try:
++                proc.wait(timeout=15)
++            except subprocess.TimeoutExpired:
++                proc.kill()
++                proc.wait()
++            results["failures"] = failures
++            (args.output / "results.json").write_text(json.dumps(results, ensure_ascii=False, indent=2) + "\n")
++    if args.reference_results:
++        reference = json.loads(args.reference_results.read_text())
++        assert [c["name"] for c in reference["cases"]] == [c["name"] for c in results["cases"]]
++        for ref, candidate in zip(reference["cases"], results["cases"]):
++            # The server's per-process media ID is replaced by image embeddings, not tokenized.
++            prompt = lambda c: re.sub(r"<__media_[A-Za-z0-9]+__>", "<__media__>", c["prompt"]["prompt"])
++            assert prompt(ref) == prompt(candidate), "rendered prompt differs from reference"
++            print(ref["name"], "same normalized OCR:", canonical(ref["text"]) == canonical(candidate["text"]),
++                  "reference missing:", ref["missing"], "candidate missing:", candidate["missing"])
++    assert not failures, failures
++    print("PASS: GLM-OCR synthetic API regression")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/examples/mtmd/test-mtmd-pos.cpp b/examples/mtmd/test-mtmd-pos.cpp
+new file mode 100644
+index 00000000..ac8e09f2
+--- /dev/null
++++ b/examples/mtmd/test-mtmd-pos.cpp
+@@ -0,0 +1,40 @@
++#include "mtmd.h"
++
++#include <algorithm>
++#include <cstdio>
++#include <utility>
++
++static void check_positions(json image, llama_pos expected) {
++    json input = {{"type", MTMD_INPUT_CHUNK_TYPE_IMAGE}, {"tokens_image", image}};
++    auto * chunk = mtmd_input_chunk_from_json(input);
++    const size_t n_tokens = image["nx"].get<size_t>() * image["ny"].get<size_t>();
++    GGML_ASSERT(mtmd_input_chunk_get_n_tokens(chunk) == n_tokens);
++    GGML_ASSERT(mtmd_input_chunk_get_n_pos(chunk) == expected);
++
++    // llama-server copies image chunks into its prompt cache and may serialize them.
++    auto * copy = mtmd_input_chunk_copy(chunk);
++    mtmd_input_chunk_free(chunk);
++    GGML_ASSERT(mtmd_input_chunk_get_n_pos(copy) == expected);
++    mtmd_input_chunk_free_raw_data(copy);
++    json cached;
++    mtmd_input_chunk_to_json(copy, cached);
++    mtmd_input_chunk_free(copy);
++    auto * restored = mtmd_input_chunk_from_json(cached);
++    GGML_ASSERT(mtmd_input_chunk_get_n_tokens(restored) == n_tokens);
++    GGML_ASSERT(mtmd_input_chunk_get_n_pos(restored) == expected);
++    mtmd_input_chunk_free(restored);
++}
++
++int main() {
++    // GLM's post-image text must start beyond both spatial axes, not at t + 1.
++    for (const auto & size : {std::pair<int, int>{29, 35}, {35, 29}, {9, 1}}) {
++        const int span = std::max(size.first, size.second);
++        check_positions({{"nx", size.first}, {"ny", size.second},
++                         {"use_mrope_pos", true}, {"mrope_pos_span", span}}, span);
++    }
++    // Existing Qwen M-RoPE and ordinary vision counting are unchanged.
++    check_positions({{"nx", 29}, {"ny", 35}, {"use_mrope_pos", true}}, 1);
++    check_positions({{"nx", 29}, {"ny", 35}, {"use_mrope_pos", false}}, 1015);
++    check_positions({{"nx", 4}, {"ny", 7}}, 28);
++    std::puts("PASS: media position spans, clone and cache round-trip");
++}
