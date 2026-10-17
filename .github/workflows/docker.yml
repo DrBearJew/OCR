@@ -9,6 +9,7 @@ on:
       - 'scripts/smoke-docker-ocr.py'
       - 'scripts/install-docker.sh'
       - 'scripts/test-docker-installer.py'
+      - 'scripts/test-metadata-*.py'
       - 'deploy/docker/**'
       - '.github/workflows/docker.yml'
   workflow_dispatch:
@@ -24,17 +25,33 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: backend
             context: app/backend
+            file: app/backend/Dockerfile
+            timeout: 40
           - name: frontend
             context: app/frontend
+            file: app/frontend/Dockerfile
+            timeout: 40
           - name: metadata
             context: deploy/metadata
+            file: deploy/metadata/Dockerfile
+            timeout: 40
+          - name: metadata-cuda
+            context: deploy/metadata
+            file: deploy/metadata/Dockerfile.cuda
+            gpu_backend: cuda
+            timeout: 120
+          - name: metadata-vulkan
+            context: deploy/metadata
+            file: deploy/metadata/Dockerfile.vulkan
+            gpu_backend: vk
+            timeout: 60
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -47,13 +64,16 @@ jobs:
       - name: Installer regressions
         if: matrix.name == 'backend'
         run: python3 scripts/test-docker-installer.py
-      - name: Model download regressions
+      - name: Metadata download and runtime regressions (offline)
         if: matrix.name == 'metadata'
-        run: python3 scripts/test-metadata-download.py
+        run: |
+          python3 scripts/test-metadata-download.py
+          python3 scripts/test-metadata-runtime.py
       - name: Build candidate
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           load: true
           tags: dokocr-test:${{ matrix.name }}
           platforms: linux/amd64
@@ -62,6 +82,19 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+      - name: Metadata executable and linkage (no GPU inference)
+        if: startsWith(matrix.name, 'metadata')
+        run: |
+          docker run --rm --network none --entrypoint sh dokocr-test:${{ matrix.name }} -ec '
+            llama-server --version
+            ldd /usr/local/bin/llama-server | tee /tmp/linkage
+            ! grep -q "not found" /tmp/linkage
+          '
+      - name: GPU preflight API linkage (no device enumeration)
+        if: matrix.gpu_backend
+        run: |
+          docker run --rm --network none --entrypoint python3 dokocr-test:${{ matrix.name }} -c \
+            'import ctypes; getattr(ctypes.CDLL("libggml.so"), "ggml_backend_${{ matrix.gpu_backend }}_get_device_count")'
       - name: Real OCR without network access
         if: matrix.name == 'backend'
         run: |

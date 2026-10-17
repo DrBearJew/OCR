@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 libstd
 COPY --from=build /src/build/bin/llama-server /usr/local/bin/llama-server
 COPY --from=build /src/LICENSE /usr/share/doc/dokocr-metadata/ik-LICENSE
 COPY serve.py /usr/local/bin/dokocr-metadata
-ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 DOKOCR_METADATA_COMPUTE=cpu
 RUN llama-server --version
 VOLUME ["/models"]
 EXPOSE 8080

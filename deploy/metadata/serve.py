@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Provision the pinned public LFM model, then exec the schema-patched CPU server."""
+"""Validate the backend, provision pinned LFM weights, then exec the patched server."""
+import ctypes
 import fcntl
 import hashlib
 import os
@@ -80,11 +81,56 @@ def ensure_model(directory, url=URL, size=SIZE, sha256=SHA256):
         return model
 
 
+def integer_setting(name, default, minimum):
+    value = os.environ.get(name, default)
+    if not value or not value.isascii() or not value.isdecimal() or len(value) > 10:
+        raise ValueError(f"{name} must be an integer from {minimum} to 2147483647")
+    number = int(value)
+    if not minimum <= number <= 2147483647:
+        raise ValueError(f"{name} must be an integer from {minimum} to 2147483647")
+    return number
+
+
+def runtime_options():
+    compute = os.environ.get("DOKOCR_METADATA_COMPUTE", "cpu")
+    if compute not in ("cpu", "cuda", "vulkan"):
+        raise ValueError("DOKOCR_METADATA_COMPUTE must be cpu, cuda, or vulkan")
+    threads = integer_setting("DOKOCR_METADATA_THREADS", "4", 1)
+    layers = None
+    if "DOKOCR_METADATA_GPU_LAYERS" in os.environ:
+        layers = integer_setting("DOKOCR_METADATA_GPU_LAYERS", None, 0)
+    devices = os.environ.get("DOKOCR_METADATA_DEVICES")
+    if devices is not None and (not devices.strip() or any(ord(c) < 32 or ord(c) == 127 for c in devices)):
+        raise ValueError("DOKOCR_METADATA_DEVICES must be nonempty and contain no control characters")
+    if compute == "cpu":
+        if layers is not None or devices is not None:
+            raise ValueError("DOKOCR_METADATA_GPU_LAYERS / DOKOCR_METADATA_DEVICES requires cuda or vulkan compute")
+        return threads, ["--gpu-layers", "0", "--device", "none"]
+
+    # Pinned ik otherwise silently uses CPU when a backend/device is unavailable.
+    # Its public ggml API needs no model; shared GPU images expose these symbols.
+    backend, prefix = ("cuda", "CUDA") if compute == "cuda" else ("vk", "Vulkan")
+    try:
+        library = ctypes.CDLL("libggml.so")
+        count = getattr(library, f"ggml_backend_{backend}_get_device_count")
+        count.argtypes = []
+        count.restype = ctypes.c_int
+        available = [f"{prefix}{i}" for i in range(count())]
+    except (OSError, AttributeError) as error:
+        raise RuntimeError(f"{compute} backend unavailable; use the matching metadata image and host GPU drivers: {error}") from error
+    if not available:
+        raise RuntimeError(f"{compute} backend has no visible GPU devices; check host drivers and container device access")
+    if devices is not None and any(device not in available for device in devices.split(",")):
+        raise RuntimeError(f"DOKOCR_METADATA_DEVICES is unavailable for {compute}; available: {','.join(available)}")
+    options = ["--fit"] if layers is None else ["--gpu-layers", str(layers)]
+    if devices is not None:
+        options += ["--device", devices]
+    return threads, options
+
+
 def main():
+    threads, offload = runtime_options()
     model = ensure_model("/models")
-    threads = int(os.environ.get("DOKOCR_METADATA_THREADS", "4"))
-    if threads < 1:
-        raise ValueError("DOKOCR_METADATA_THREADS must be positive")
     command = ["/usr/local/bin/llama-server", "--model", str(model),
                "--alias", "metadata", "--host", "0.0.0.0", "--port", "8080",
                "--jinja", "--ctx-size", "128000", "--parallel", "1",
@@ -93,7 +139,7 @@ def main():
                "--cache-type-k", "q8_0", "--cache-type-v", "q8_0",
                "--ctx-checkpoints", "0", "--ctx-checkpoints-interval", "0",
                "--no-warmup", "--spec-type", "none", "--reasoning-budget", "3072",
-               "--flash-attn", "on", "--webui", "none"]
+               "--flash-attn", "on", "--webui", "none"] + offload
     os.execv(command[0], command)
 
 
