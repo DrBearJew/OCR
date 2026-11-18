@@ -67,7 +67,7 @@ def dashboard(db: Session = Depends(get_db)) -> dict:
         "status_counts": status_counts,
         "review_counts": review_counts,
         "collection_counts": collection_counts,
-        "recent_records": [RecordRead.model_validate(row).model_dump(mode="json") for row in recent_records],
+        "recent_records": [_record_summary(row) for row in recent_records],
         "failed_documents": [_document_summary(row) for row in failed_documents],
         "completed_documents": [_document_summary(row) for row in completed_documents],
     }
@@ -382,12 +382,19 @@ def _enum_value(value) -> str:
     return value.value if hasattr(value, "value") else str(value)
 
 
+def _record_summary(record: Record) -> dict:
+    data = RecordRead.model_validate(record).model_dump(mode="json")
+    data["documents"] = [_document_summary(doc) for doc in (record.documents or []) if doc.deleted_at is None]
+    return data
+
+
 def _document_summary(document: Document, *, include_diagnostics: bool = False) -> dict:
     data = DocumentRead.model_validate(document).model_dump(mode="json")
     text = document.ocr_text or ""
     data["ocr_text"] = None
     data["ocr_snippet"] = " ".join(text.split())[:500]
     data["raw_ocr_json"] = {}
+    data["processing_log_json"] = []
     data["qwen_response_text"] = None
     data["llm_raw_response"] = {}
     if include_diagnostics:

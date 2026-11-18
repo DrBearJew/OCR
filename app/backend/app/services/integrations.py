@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import logging
 from pathlib import Path
+import threading
 import time
 from typing import Any
 
@@ -57,27 +59,77 @@ def check_redis(settings: Settings | None = None) -> IntegrationStatus:
         return IntegrationStatus("redis", False, str(exc), _elapsed_ms(start))
 
 
-def check_llama(name: str, base_url: str, model: str, timeout_s: float) -> IntegrationStatus:
+def check_llama(
+    name: str,
+    base_url: str,
+    model: str,
+    timeout_s: float,
+    health_cache: dict[str, tuple[bool, str, int | None, int]] | None = None,
+    cache_lock: threading.Lock | None = None,
+) -> IntegrationStatus:
     start = time.perf_counter()
+    normalized_url = (base_url or "").strip().rstrip("/")
+    if health_cache is not None and normalized_url:
+        with cache_lock or threading.Lock():
+            cached = health_cache.get(normalized_url)
+        if cached is not None:
+            ok, detail, status_code, latency_ms = cached
+            meta: dict[str, Any] = {"base_url": base_url, "model": model}
+            if status_code is not None:
+                meta["status_code"] = status_code
+            return IntegrationStatus(name, ok, detail, latency_ms, meta)
+
     last_error = "not checked"
     for url in llama_health_urls(base_url):
         try:
             response = httpx.get(url, timeout=min(5.0, timeout_s))
             if response.status_code < 500:
+                latency = _elapsed_ms(start)
+                detail = f"reachable via {url}"
+                if health_cache is not None and normalized_url:
+                    with cache_lock or threading.Lock():
+                        health_cache[normalized_url] = (True, detail, response.status_code, latency)
                 return IntegrationStatus(
                     name,
                     True,
-                    f"reachable via {url}",
-                    _elapsed_ms(start),
+                    detail,
+                    latency,
                     {"base_url": base_url, "model": model, "status_code": response.status_code},
                 )
             last_error = f"HTTP {response.status_code} from {url}"
         except httpx.HTTPError as exc:
             last_error = str(exc)
-    return IntegrationStatus(name, False, last_error, _elapsed_ms(start), {"base_url": base_url, "model": model})
+    latency = _elapsed_ms(start)
+    if health_cache is not None and normalized_url:
+        with cache_lock or threading.Lock():
+            health_cache[normalized_url] = (False, last_error, None, latency)
+    return IntegrationStatus(name, False, last_error, latency, {"base_url": base_url, "model": model})
 
 
-def check_glm_multimodal(settings: Settings | None = None) -> IntegrationStatus:
+def _cached_model_ids(
+    base_url: str,
+    timeout_s: float,
+    models_cache: dict[str, list[str]] | None = None,
+    cache_lock: threading.Lock | None = None,
+) -> list[str]:
+    normalized_url = (base_url or "").strip().rstrip("/")
+    if models_cache is not None and normalized_url:
+        with cache_lock or threading.Lock():
+            cached = models_cache.get(normalized_url)
+        if cached is not None:
+            return list(cached)
+    model_ids = list_llama_model_ids(base_url, timeout_s=timeout_s)
+    if models_cache is not None and normalized_url:
+        with cache_lock or threading.Lock():
+            models_cache[normalized_url] = list(model_ids)
+    return model_ids
+
+
+def check_glm_multimodal(
+    settings: Settings | None = None,
+    models_cache: dict[str, list[str]] | None = None,
+    cache_lock: threading.Lock | None = None,
+) -> IntegrationStatus:
     settings = settings or get_settings()
     start = time.perf_counter()
     metadata: dict[str, Any] = {
@@ -87,7 +139,12 @@ def check_glm_multimodal(settings: Settings | None = None) -> IntegrationStatus:
     }
     if not metadata["mmproj_configured"]:
         return IntegrationStatus("glm_multimodal_ocr", False, "GLM_MMPROJ_PATH is empty; text chat may work but image OCR is not configured", _elapsed_ms(start), metadata)
-    model_ids = list_llama_model_ids(settings.glm_llamacpp_base_url, timeout_s=min(5.0, settings.llm_request_timeout_seconds))
+    model_ids = _cached_model_ids(
+        settings.glm_llamacpp_base_url,
+        timeout_s=min(5.0, settings.llm_request_timeout_seconds),
+        models_cache=models_cache,
+        cache_lock=cache_lock,
+    )
     metadata["available_models"] = model_ids
     configured_names = {settings.glm_model_name}
     path = Path(settings.glm_model_path)
@@ -101,12 +158,14 @@ def check_glm_multimodal(settings: Settings | None = None) -> IntegrationStatus:
             _elapsed_ms(start),
             metadata,
         )
-    # A full smoke OCR request would consume model time. This check validates the
-    # two configuration failures that caused text-health to look green while OCR hung.
     return IntegrationStatus("glm_multimodal_ocr", True, "multimodal OCR config looks usable", _elapsed_ms(start), metadata)
 
 
-def check_paddle_vl_multimodal(settings: Settings | None = None) -> IntegrationStatus:
+def check_paddle_vl_multimodal(
+    settings: Settings | None = None,
+    models_cache: dict[str, list[str]] | None = None,
+    cache_lock: threading.Lock | None = None,
+) -> IntegrationStatus:
     settings = settings or get_settings()
     start = time.perf_counter()
     metadata: dict[str, Any] = {
@@ -116,7 +175,12 @@ def check_paddle_vl_multimodal(settings: Settings | None = None) -> IntegrationS
     }
     if not metadata["mmproj_configured"]:
         return IntegrationStatus("paddle_vl_multimodal_ocr", False, "PADDLE_VL_MMPROJ_PATH is empty; image parsing is not configured", _elapsed_ms(start), metadata)
-    model_ids = list_llama_model_ids(settings.paddle_vl_llamacpp_base_url, timeout_s=min(5.0, settings.llm_request_timeout_seconds))
+    model_ids = _cached_model_ids(
+        settings.paddle_vl_llamacpp_base_url,
+        timeout_s=min(5.0, settings.llm_request_timeout_seconds),
+        models_cache=models_cache,
+        cache_lock=cache_lock,
+    )
     metadata["available_models"] = model_ids
     configured_names = {settings.paddle_vl_model_name}
     path = Path(settings.paddle_vl_model_path)
@@ -146,10 +210,14 @@ def check_celery_workers(settings: Settings | None = None) -> IntegrationStatus:
     try:
         from app.workers.celery_app import celery_app
 
-        inspect = celery_app.control.inspect(timeout=1.0)
-        ping = inspect.ping() or {}
+        inspect = celery_app.control.inspect(timeout=0.35)
         active = inspect.active() or {}
-        metadata["workers"] = sorted(ping.keys())
+        if active:
+            workers = sorted(active.keys())
+        else:
+            ping = inspect.ping() or {}
+            workers = sorted(ping.keys())
+        metadata["workers"] = workers
         metadata["active_tasks"] = {
             worker: [
                 {"id": item.get("id"), "name": item.get("name"), "delivery_info": item.get("delivery_info", {})}
@@ -157,7 +225,7 @@ def check_celery_workers(settings: Settings | None = None) -> IntegrationStatus:
             ]
             for worker, tasks in active.items()
         }
-        ok = bool(ping)
+        ok = bool(workers)
         return IntegrationStatus("celery_workers", ok, "workers reachable" if ok else "no Celery workers responded", _elapsed_ms(start), metadata)
     except Exception as exc:  # noqa: BLE001
         return IntegrationStatus("celery_workers", False, str(exc), _elapsed_ms(start), metadata)
@@ -165,15 +233,57 @@ def check_celery_workers(settings: Settings | None = None) -> IntegrationStatus:
 
 def collect_integrations(db: Session, settings: Settings | None = None) -> dict[str, Any]:
     settings = settings or settings_with_model_setup(db, get_settings())
+    db_status = check_database(db)
+    health_cache: dict[str, tuple[bool, str, int | None, int]] = {}
+    models_cache: dict[str, list[str]] = {}
+    cache_lock = threading.Lock()
+
+    def _check_models_chain() -> tuple[IntegrationStatus, IntegrationStatus, IntegrationStatus, IntegrationStatus, IntegrationStatus]:
+        paddle_llama = check_llama(
+            "paddle_vl_llama",
+            settings.paddle_vl_llamacpp_base_url,
+            settings.paddle_vl_model_name,
+            settings.llm_request_timeout_seconds,
+            health_cache,
+            cache_lock,
+        )
+        paddle_mm = check_paddle_vl_multimodal(settings, models_cache, cache_lock)
+        glm_llama = check_llama(
+            "glm_llama",
+            settings.glm_llamacpp_base_url,
+            settings.glm_model_name,
+            settings.llm_request_timeout_seconds,
+            health_cache,
+            cache_lock,
+        )
+        glm_mm = check_glm_multimodal(settings, models_cache, cache_lock)
+        qwen_llama = check_llama(
+            "qwen_llama",
+            settings.qwen_llamacpp_base_url,
+            settings.qwen_model_name,
+            settings.llm_request_timeout_seconds,
+            health_cache,
+            cache_lock,
+        )
+        return paddle_llama, paddle_mm, glm_llama, glm_mm, qwen_llama
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        redis_future = pool.submit(check_redis, settings)
+        models_future = pool.submit(_check_models_chain)
+        workers_future = pool.submit(check_celery_workers, settings)
+        redis_status = redis_future.result()
+        paddle_llama, paddle_mm, glm_llama, glm_mm, qwen_llama = models_future.result()
+        workers_status = workers_future.result()
+
     statuses = [
-        check_database(db),
-        check_redis(settings),
-        check_llama("paddle_vl_llama", settings.paddle_vl_llamacpp_base_url, settings.paddle_vl_model_name, settings.llm_request_timeout_seconds),
-        check_paddle_vl_multimodal(settings),
-        check_llama("glm_llama", settings.glm_llamacpp_base_url, settings.glm_model_name, settings.llm_request_timeout_seconds),
-        check_glm_multimodal(settings),
-        check_llama("qwen_llama", settings.qwen_llamacpp_base_url, settings.qwen_model_name, settings.llm_request_timeout_seconds),
-        check_celery_workers(settings),
+        db_status,
+        redis_status,
+        paddle_llama,
+        paddle_mm,
+        glm_llama,
+        glm_mm,
+        qwen_llama,
+        workers_status,
     ]
     return {
         "ok": all(item.ok for item in statuses[:2]),

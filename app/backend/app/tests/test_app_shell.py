@@ -317,3 +317,78 @@ def test_reviewed_document_overrides_review_only_record_warnings(db_session: Ses
     db_session.commit()
 
     assert derive_parent_status([doc]).value == "complete"
+
+
+def test_dashboard_recent_records_strip_heavy_document_fields(db_session: Session, tmp_path: Path) -> None:
+    doc = make_shell_document(db_session, tmp_path)
+    doc.raw_ocr_json = {"pages": [{"text": "huge" * 200}]}
+    doc.processing_log_json = [{"stage": "ocr", "detail": "x" * 200}]
+    db_session.commit()
+
+    payload = dashboard(db_session)
+    docs = [item for rec in payload["recent_records"] for item in rec.get("documents", [])]
+    matched = [item for item in docs if item["id"] == str(doc.id)]
+    assert len(matched) == 1
+    assert matched[0]["ocr_text"] is None
+    assert matched[0]["raw_ocr_json"] == {}
+    assert matched[0]["processing_log_json"] == []
+
+
+def test_collect_integrations_reuses_gateway_probes_and_skips_redundant_ping(monkeypatch, db_session: Session) -> None:
+    from app.config import Settings
+    from app.services.integrations import collect_integrations
+
+    http_calls: list[str] = []
+    celery_calls: list[str] = []
+
+    class FakeResp:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {"data": [{"id": "paddleocr-vl"}, {"id": "glm"}, {"id": "metadata"}]}
+
+    class FakeRedis:
+        def ping(self) -> bool:
+            return True
+
+        def llen(self, _queue: str) -> int:
+            return 0
+
+    class FakeInspect:
+        def active(self) -> dict:
+            celery_calls.append("active")
+            return {"celery@worker": []}
+
+        def ping(self) -> dict:
+            celery_calls.append("ping")
+            return {"celery@worker": {"ok": "pong"}}
+
+    class FakeControl:
+        def inspect(self, timeout: float = 1.0) -> FakeInspect:
+            return FakeInspect()
+
+    def fake_get(url: str, timeout: float = 5.0) -> FakeResp:
+        http_calls.append(url)
+        return FakeResp()
+
+    monkeypatch.setattr("app.services.integrations.redis.Redis.from_url", lambda _url: FakeRedis())
+    monkeypatch.setattr("app.services.integrations.httpx.get", fake_get)
+    monkeypatch.setattr("app.services.ocr_glm.httpx.get", fake_get)
+    monkeypatch.setattr("app.workers.celery_app.celery_app.control", FakeControl())
+
+    settings = Settings(
+        redis_url="redis://example/0",
+        paddle_vl_llamacpp_base_url="http://shared-gw:8092/v1",
+        glm_llamacpp_base_url="http://shared-gw:8092/v1",
+        qwen_llamacpp_base_url="http://shared-gw:8092/v1",
+        paddle_vl_model_path="paddleocr-vl",
+        paddle_vl_mmproj_path="/models/mmproj.gguf",
+        glm_model_path="glm",
+        glm_mmproj_path="/models/glm-mmproj.gguf",
+        qwen_model_path="metadata",
+    )
+    status = collect_integrations(db_session, settings)
+    assert status["ok"] is True
+    assert celery_calls == ["active"]
+    assert sum("/health" in u for u in http_calls) == 1
+    assert sum("/models" in u for u in http_calls) == 1

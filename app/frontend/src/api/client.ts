@@ -3,7 +3,16 @@ import type { ActivityItem, ActivityListPage, AdminActionResult, Batch, BatchDet
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 const TOKEN_KEY = 'dokocr_token'
 const TOKEN_EXPIRY_SKEW_SECONDS = 10
+const INTEGRATIONS_CACHE_MS = 15_000
 export const AUTH_EXPIRED_EVENT = 'dokocr:auth-expired'
+
+let integrationsCache: { value: IntegrationSummary; expiresAt: number } | null = null
+let integrationsInFlight: Promise<IntegrationSummary> | null = null
+
+function clearIntegrationsCache() {
+  integrationsCache = null
+  integrationsInFlight = null
+}
 
 interface ProcessOptions {
   force?: boolean
@@ -23,7 +32,10 @@ export function getToken(): string | null {
 
 export function setToken(token: string | null) {
   if (token) localStorage.setItem(TOKEN_KEY, token)
-  else localStorage.removeItem(TOKEN_KEY)
+  else {
+    localStorage.removeItem(TOKEN_KEY)
+    clearIntegrationsCache()
+  }
 }
 
 function expireClientSession() {
@@ -247,9 +259,30 @@ export const api = {
   deleteSavedView: (id: string) => request<{ ok: boolean }>(`/api/saved-views/${id}`, { method: 'DELETE' }),
   jobs: () => request<JobInfo[]>('/api/admin/jobs'),
   failed: () => request<JobInfo[]>('/api/admin/failed'),
-  integrations: () => request<IntegrationSummary>('/api/admin/integrations'),
+  integrations: (force = false) => {
+    const now = Date.now()
+    if (!force && integrationsCache && integrationsCache.expiresAt > now) {
+      return Promise.resolve(integrationsCache.value)
+    }
+    if (!force && integrationsInFlight) {
+      return integrationsInFlight
+    }
+    const promise = request<IntegrationSummary>('/api/admin/integrations')
+      .then((summary) => {
+        integrationsCache = { value: summary, expiresAt: Date.now() + INTEGRATIONS_CACHE_MS }
+        return summary
+      })
+      .finally(() => {
+        if (integrationsInFlight === promise) integrationsInFlight = null
+      })
+    integrationsInFlight = promise
+    return promise
+  },
   modelSetup: () => request<ModelSetup>('/api/admin/model-setup'),
-  saveModelSetup: (payload: ModelSetup) => request<ModelSetup>('/api/admin/model-setup', { method: 'PATCH', body: JSON.stringify(payload) }),
+  saveModelSetup: (payload: ModelSetup) => {
+    clearIntegrationsCache()
+    return request<ModelSetup>('/api/admin/model-setup', { method: 'PATCH', body: JSON.stringify(payload) })
+  },
   testModelEndpoint: (payload: { base_url: string; model?: string; timeout_seconds?: number }) =>
     request<ModelEndpointTestResult>('/api/admin/model-setup/test', { method: 'POST', body: JSON.stringify(payload) }),
   reconcile: () => request<AdminActionResult>('/api/admin/reconcile', { method: 'POST' }),

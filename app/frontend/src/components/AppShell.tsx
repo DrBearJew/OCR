@@ -1,13 +1,11 @@
 import type { ReactNode } from 'react'
-import { Activity, AlertTriangle, BarChart3, Bell, CircleHelp, Database, FileSearch, FileText, FolderTree, Layers, ListChecks, Menu, Search, Settings, UploadCloud } from 'lucide-react'
+import { Activity, AlertTriangle, BarChart3, Database, FileSearch, FileText, FolderTree, Layers, ListChecks, LogOut, Menu, Search, Settings } from 'lucide-react'
 import { api } from '../api/client'
 import { useEffect, useState } from 'react'
 import type { IntegrationSummary } from '../types'
 import { useI18n, type Language } from '../i18n'
 
 type NavKey = 'dashboard' | 'collections' | 'collection' | 'folders' | 'documents' | 'document' | 'search' | 'processing' | 'failed' | 'schemas' | 'admin' | 'activity' | 'batches' | 'batch'
-
-type TFn = (key: string, fallback?: string) => string
 
 interface ShellProps {
   active: NavKey
@@ -23,7 +21,7 @@ const navItems = [
   { keys: ['documents', 'document'], path: '/documents', labelKey: 'nav.documents', icon: FileText },
   { keys: ['search'], path: '/search', labelKey: 'nav.search', icon: Search },
   { keys: ['processing'], path: '/processing', labelKey: 'nav.processing', icon: ListChecks },
-  { keys: ['failed'], path: '/failed', labelKey: 'nav.failed', icon: AlertTriangle, count: 7 },
+  { keys: ['failed'], path: '/failed', labelKey: 'nav.failed', icon: AlertTriangle },
   { keys: ['schemas'], path: '/schemas', labelKey: 'nav.schemas', icon: Database },
   { keys: ['admin'], path: '/admin', labelKey: 'nav.admin', icon: Settings },
   { keys: ['activity'], path: '/activity', labelKey: 'nav.activity', icon: Activity }
@@ -61,22 +59,12 @@ function Sidebar({ active, onNavigate, onLogout }: { active: NavKey; onNavigate:
             <button key={item.labelKey} className={item.keys.includes(active) ? 'active' : ''} aria-label={t(item.labelKey)} onClick={() => onNavigate(item.path)}>
               <Icon size={17} />
               <span>{t(item.labelKey)}</span>
-              {item.count && <em>{item.count}</em>}
             </button>
           )
         })}
       </nav>
-      <div className="sidebar-card">
-        <strong>{t('shell.apiAccess')}</strong>
-        <span>{t('shell.apiDetail')}</span>
-        <small><i /> {t('common.active')}</small>
-      </div>
-      <div className="sidebar-card">
-        <strong>{t('shell.environment')}</strong>
-        <span>{t('common.production')}</span>
-      </div>
       <button className="logout" onClick={onLogout}>
-        <UploadCloud size={18} /> <span>{t('shell.signOut')}</span>
+        <LogOut size={17} /> <span>{t('shell.signOut')}</span>
       </button>
     </aside>
   )
@@ -87,10 +75,16 @@ export function TopStatusBar({ onNavigate, onToggleSidebar, sidebarCollapsed }: 
   const [summary, setSummary] = useState<IntegrationSummary | null>(null)
 
   useEffect(() => {
-    api.integrations().then(setSummary).catch(() => setSummary(null))
+    let active = true
+    api.integrations().then((data) => {
+      if (active) setSummary(data)
+    }).catch(() => {
+      if (active) setSummary(null)
+    })
+    return () => { active = false }
   }, [])
 
-  const chips = buildHealthChips(summary, t)
+  const status = summarizeSystemHealth(summary, t)
   return (
     <header className="top-status-bar">
       <button
@@ -103,13 +97,19 @@ export function TopStatusBar({ onNavigate, onToggleSidebar, sidebarCollapsed }: 
         <Menu size={20} />
       </button>
       <div className="health-chip-row">
-        {chips.map((chip) => <StatusChip key={chip.label} {...chip} />)}
+        <button
+          type="button"
+          className={`system-status-pill system-status-${status.state}`}
+          title={status.tooltip}
+          onClick={() => onNavigate('/admin')}
+        >
+          <i />
+          <span>{status.label}</span>
+        </button>
       </div>
       <div className="top-actions">
         <LanguageSwitch language={language} setLanguage={setLanguage} compact />
-        <button title={t('shell.globalSearch')} aria-label={t('shell.globalSearch')} onClick={() => onNavigate('/search')}><Search size={19} /></button>
-        <button title={t('shell.needsReview')} aria-label={t('shell.openNeedsReview')} className="notification-button" onClick={() => onNavigate('/failed')}><Bell size={19} /><span>3</span></button>
-        <button title={t('shell.activity')} aria-label={t('shell.openActivity')} onClick={() => onNavigate('/activity')}><CircleHelp size={19} /></button>
+        <button title={t('shell.globalSearch')} aria-label={t('shell.globalSearch')} onClick={() => onNavigate('/search')}><Search size={18} /></button>
         <button className="admin-menu" title={t('shell.adminSettings')} aria-label={t('shell.openAdminSettings')} onClick={() => onNavigate('/admin')}><b>AD</b><span>{t('nav.admin')}</span></button>
       </div>
     </header>
@@ -135,40 +135,22 @@ export function StatusChip({ label, detail, state = 'healthy' }: { label: string
   )
 }
 
-function buildHealthChips(summary: IntegrationSummary | null, t: TFn) {
-  const fallback = [
-    { label: t('health.paddle'), detail: t('common.checking'), state: 'checking' as const, key: 'paddle' },
-    { label: t('health.qwen'), detail: t('common.checking'), state: 'checking' as const, key: 'qwen' },
-    { label: t('health.llama'), detail: t('common.checking'), state: 'checking' as const, key: 'llama' },
-    { label: t('health.storage'), detail: t('common.checking'), state: 'checking' as const, key: 'storage' },
-    { label: t('health.workerQueue'), detail: t('common.checking'), state: 'checking' as const, key: 'worker' },
-    { label: t('health.api'), detail: t('common.online'), state: 'healthy' as const, key: 'api' }
-  ]
-  if (!summary) return fallback
-  const byName = new Map(summary.integrations.map((item) => [item.name.toLowerCase(), item]))
-  const paddle = byName.get('paddle_vl_llama')
-  const glm = byName.get('glm_llama')
-  const qwen = byName.get('qwen_llama')
-  const database = byName.get('database')
-  const redis = byName.get('redis')
-  return fallback.map((chip) => {
-    if (chip.key === 'paddle') return fromIntegration(chip.label, paddle || glm, t)
-    if (chip.key === 'qwen') return fromIntegration(chip.label, qwen, t)
-    if (chip.key === 'llama') {
-      const ocrOk = Boolean(paddle?.ok || glm?.ok)
-      if (!paddle && !glm && !qwen) return chip
-      if (ocrOk && qwen?.ok) return { label: chip.label, detail: t('common.healthy'), state: 'healthy' as const, key: chip.key }
-      if (ocrOk || qwen?.ok) return { label: chip.label, detail: t('common.partial'), state: 'warning' as const, key: chip.key }
-      return { label: chip.label, detail: t('common.down'), state: 'down' as const, key: chip.key }
+function summarizeSystemHealth(summary: IntegrationSummary | null, t: (key: string, fallback?: string) => string) {
+  if (!summary) {
+    return { state: 'checking' as const, label: t('shell.systemChecking', 'Checking…'), tooltip: t('common.checking') }
+  }
+  const failing = summary.integrations.filter((item) => !item.ok)
+  if (!failing.length) {
+    return {
+      state: 'healthy' as const,
+      label: t('shell.systemOk', 'System OK'),
+      tooltip: summary.integrations.map((item) => `${item.name}: OK`).join('\n')
     }
-    if (chip.key === 'storage') return fromIntegration(chip.label, database, t)
-    if (chip.key === 'worker') return fromIntegration(chip.label, redis, t, t('common.healthyRedis'))
-    if (chip.key === 'api') return { label: chip.label, detail: t('common.online'), state: 'healthy' as const, key: chip.key }
-    return chip
-  })
-}
-
-function fromIntegration(label: string, item: IntegrationSummary['integrations'][number] | undefined, t: TFn, healthyDetail?: string) {
-  if (!item) return { label, detail: t('common.checking'), state: 'checking' as const }
-  return { label, detail: item.ok ? healthyDetail ?? t('common.healthy') : t('common.down'), state: item.ok ? 'healthy' as const : 'down' as const }
+  }
+  const coreDown = failing.some((item) => item.name === 'database' || item.name === 'redis')
+  return {
+    state: coreDown ? 'down' as const : 'warning' as const,
+    label: `${failing.length} ${t('shell.systemIssues', failing.length === 1 ? 'issue' : 'issues')}`,
+    tooltip: failing.map((item) => `${item.name}: ${item.detail}`).join('\n')
+  }
 }

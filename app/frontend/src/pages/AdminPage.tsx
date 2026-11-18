@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { RefreshCw, RotateCcw, Save, Wrench } from 'lucide-react'
 import { api } from '../api/client'
 import type { Collection, Document, IngestionJob, IngestionSource, IntegrationSummary, JobInfo, ModelEndpointTestResult, ModelSetup, ProcessingHook } from '../types'
 import { useI18n } from '../i18n'
+
+type AdminTab = 'models' | 'system' | 'automation' | 'queues'
 
 interface ModelFormState {
   ocr_engine: string
@@ -24,15 +26,7 @@ const defaultModelForm: ModelFormState = {
   max_image_pixels: '40000000'
 }
 
-const engineLabels: Record<string, { title: string; detail: string }> = {
-  paddle_vl: { title: 'Primary OCR runtime', detail: 'Smart document OCR endpoint for rich layouts.' },
-  ppocrv6: { title: 'Local OCR runtime', detail: 'Fast local OCR for ordinary text documents.' },
-  glm: { title: 'Secondary OCR runtime', detail: 'Optional fallback multimodal OCR endpoint.' },
-  fake: { title: 'Demo OCR runtime', detail: 'Development/test stub only.' }
-}
-
 const DOKOCR_LLAMA_SWAP_URL = 'http://model-runtime:8092/v1'
-const DIRECT_MODEL_ENDPOINT_PLACEHOLDER = DOKOCR_LLAMA_SWAP_URL
 
 const defaultRuntimeSetup: ModelSetup = {
   mode: 'smart',
@@ -60,56 +54,81 @@ const defaultRuntimeSetup: ModelSetup = {
 
 export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: string) => void }) {
   const { t } = useI18n()
+  const [tab, setTab] = useState<AdminTab>('models')
+  const [loading, setLoading] = useState(false)
+
+  const [runtimeSetup, setRuntimeSetup] = useState<ModelSetup>(defaultRuntimeSetup)
+  const [collections, setCollections] = useState<Collection[]>([])
+  const [selectedCollectionId, setSelectedCollectionId] = useState('')
+  const [modelForm, setModelForm] = useState<ModelFormState>(defaultModelForm)
+  const [endpointTest, setEndpointTest] = useState<ModelEndpointTestResult | null>(null)
+  const [setupBusy, setSetupBusy] = useState(false)
+
+  const [integrations, setIntegrations] = useState<IntegrationSummary | null>(null)
+  const [collection, setCollection] = useState('Belege')
+
+  const [sources, setSources] = useState<IngestionSource[]>([])
+  const [hooks, setHooks] = useState<ProcessingHook[]>([])
+  const [sourceForm, setSourceForm] = useState({ name: '', path: '', collection_id: '', recursive: false })
+  const [hookForm, setHookForm] = useState({ name: '', stage: 'pre_consume', hook_kind: 'command', command: '', webhook_url: '', blocking: true })
+
   const [jobs, setJobs] = useState<JobInfo[]>([])
   const [failed, setFailed] = useState<JobInfo[]>([])
   const [duplicates, setDuplicates] = useState<Document[]>([])
-  const [collections, setCollections] = useState<Collection[]>([])
-  const [sources, setSources] = useState<IngestionSource[]>([])
   const [ingestionJobs, setIngestionJobs] = useState<IngestionJob[]>([])
-  const [hooks, setHooks] = useState<ProcessingHook[]>([])
-  const [integrations, setIntegrations] = useState<IntegrationSummary | null>(null)
-  const [collection, setCollection] = useState('Belege')
-  const [selectedCollectionId, setSelectedCollectionId] = useState('')
-  const [modelForm, setModelForm] = useState<ModelFormState>(defaultModelForm)
-  const [runtimeSetup, setRuntimeSetup] = useState<ModelSetup>(defaultRuntimeSetup)
-  const [endpointTest, setEndpointTest] = useState<ModelEndpointTestResult | null>(null)
-  const [setupBusy, setSetupBusy] = useState(false)
-  const [sourceForm, setSourceForm] = useState({ name: '', path: '', collection_id: '', recursive: false })
-  const [hookForm, setHookForm] = useState({ name: '', stage: 'pre_consume', hook_kind: 'command', command: '', webhook_url: '', blocking: true })
+
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
 
-  async function load() {
+  const loadTab = useCallback(async (target: AdminTab, force = false) => {
     setError('')
+    setLoading(true)
     try {
-      const [recentJobs, failedDocs, duplicateDocs, integrationStatus, modelSetup, collectionRows, sourceRows, ingestionRows, hookRows] = await Promise.all([
-        api.jobs(),
-        api.failed(),
-        api.duplicates(),
-        api.integrations(),
-        api.modelSetup(),
-        api.collections(),
-        api.ingestionSources(),
-        api.ingestionJobs(),
-        api.hooks()
-      ])
-      setJobs(recentJobs)
-      setFailed(failedDocs)
-      setDuplicates(duplicateDocs)
-      setIntegrations(integrationStatus)
-      setRuntimeSetup(modelSetup)
-      setCollections(collectionRows)
-      setSources(sourceRows)
-      setIngestionJobs(ingestionRows)
-      setHooks(hookRows)
-      if (!selectedCollectionId && collectionRows[0]) setSelectedCollectionId(collectionRows[0].id)
-      if (!sourceForm.collection_id && collectionRows[0]) setSourceForm((form) => ({ ...form, collection_id: collectionRows[0].id }))
+      if (target === 'models') {
+        const [modelSetup, collectionRows] = await Promise.all([api.modelSetup(), api.collections()])
+        setRuntimeSetup(modelSetup)
+        setCollections(collectionRows)
+        setSelectedCollectionId((prev) => prev || collectionRows[0]?.id || '')
+        setSourceForm((form) => (form.collection_id || !collectionRows[0] ? form : { ...form, collection_id: collectionRows[0].id }))
+      } else if (target === 'system') {
+        const [integrationStatus, collectionRows] = await Promise.all([
+          api.integrations(force),
+          collections.length ? Promise.resolve(collections) : api.collections()
+        ])
+        setIntegrations(integrationStatus)
+        if (!collections.length) setCollections(collectionRows)
+      } else if (target === 'automation') {
+        const [sourceRows, hookRows, collectionRows] = await Promise.all([
+          api.ingestionSources(),
+          api.hooks(),
+          collections.length ? Promise.resolve(collections) : api.collections()
+        ])
+        setSources(sourceRows)
+        setHooks(hookRows)
+        if (!collections.length) setCollections(collectionRows)
+        setSourceForm((form) => (form.collection_id || !collectionRows[0] ? form : { ...form, collection_id: collectionRows[0].id }))
+      } else if (target === 'queues') {
+        const [recentJobs, failedDocs, duplicateDocs, ingestionRows] = await Promise.all([
+          api.jobs(),
+          api.failed(),
+          api.duplicates(),
+          api.ingestionJobs()
+        ])
+        setJobs(recentJobs)
+        setFailed(failedDocs)
+        setDuplicates(duplicateDocs)
+        setIngestionJobs(ingestionRows)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('admin.loadError'))
+    } finally {
+      setLoading(false)
     }
-  }
+  }, [collections, t])
 
-  useEffect(() => { void load() }, [])
+  useEffect(() => {
+    void loadTab(tab)
+  }, [tab])
 
   const selectedCollection = useMemo(
     () => collections.find((item) => item.id === selectedCollectionId) || collections[0],
@@ -121,37 +140,29 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
     setModelForm(formFromCollection(selectedCollection))
   }, [selectedCollection?.id, selectedCollection?.updated_at])
 
-  const integrationByName = useMemo(() => {
-    const rows = integrations?.integrations || []
-    return new Map(rows.map((item) => [item.name, item]))
-  }, [integrations])
-
-  const runtimeProviderLabel = providerLabel(runtimeSetup.ocr_provider, t)
-
-  async function retry(id: string) {
-    await api.retryDocument(id)
-    await load()
-  }
-
-  async function runAction(action: () => Promise<unknown>, success = 'Action queued.') {
+  async function runAction(action: () => Promise<unknown>, success: string) {
+    setError('')
     setMessage('')
-    await action()
-    setMessage(success)
-    await load()
+    try {
+      await action()
+      setMessage(success)
+      await loadTab(tab, true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('admin.loadError'))
+    }
   }
 
   async function saveRuntimeSetup() {
     setSetupBusy(true)
+    setError('')
     setMessage('')
     try {
-      const payload = {
+      const saved = await api.saveModelSetup({
         ...runtimeSetup,
         qwen_enabled: Boolean(runtimeSetup.qwen_base_url.trim() && runtimeSetup.qwen_model.trim())
-      }
-      const saved = await api.saveModelSetup(payload)
+      })
       setRuntimeSetup(saved)
       setMessage(t('admin.modelSetupSaved'))
-      await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('admin.modelSetupSaveFailed'))
     } finally {
@@ -187,6 +198,8 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
 
   async function saveModelConfig() {
     if (!selectedCollection) return
+    setError('')
+    setMessage('')
     const nextConfig = {
       ...(selectedCollection.ocr_config_json || {}),
       ocr_engine: modelForm.ocr_engine,
@@ -198,70 +211,91 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
       max_image_pixels: toNumber(modelForm.max_image_pixels, defaultModelForm.max_image_pixels)
     }
     await api.patchCollection(selectedCollection.id, { ocr_config_json: nextConfig })
-    setMessage(`Saved model config for ${selectedCollection.name}. New documents in this collection inherit it.`)
-    await load()
+    setMessage(`${t('admin.saveConfig')}: ${selectedCollection.name}`)
+    await loadTab('models')
   }
 
   async function addSource() {
-    await api.createIngestionSource({
-      name: sourceForm.name,
-      source_type: 'consume_folder',
-      path: sourceForm.path,
-      enabled: true,
-      collection_id: sourceForm.collection_id || collections[0]?.id,
-      record_grouping: 'one_record_per_file',
-      polling_interval_seconds: 300,
-      ignore_patterns: ['.*', '*.tmp'],
-      recursive: sourceForm.recursive,
-      ocr_config_json: { ocr_mode: 'redo', language: 'deu+eng' }
-    })
+    if (!sourceForm.name.trim() || !sourceForm.path.trim()) return
+    await runAction(
+      () => api.createIngestionSource({
+        name: sourceForm.name,
+        source_type: 'consume_folder',
+        path: sourceForm.path,
+        enabled: true,
+        collection_id: sourceForm.collection_id || collections[0]?.id,
+        record_grouping: 'one_record_per_file',
+        polling_interval_seconds: 300,
+        ignore_patterns: ['.*', '*.tmp'],
+        recursive: sourceForm.recursive,
+        ocr_config_json: { ocr_mode: 'redo', language: 'deu+eng' }
+      }),
+      sourceForm.name
+    )
     setSourceForm({ name: '', path: '', collection_id: collections[0]?.id || '', recursive: false })
-    await load()
   }
 
   async function addHook() {
-    await api.createHook({
-      name: hookForm.name,
-      stage: hookForm.stage as 'pre_consume' | 'post_consume',
-      hook_kind: hookForm.hook_kind as 'command' | 'webhook',
-      enabled: true,
-      blocking: hookForm.blocking,
-      command: hookForm.command || null,
-      webhook_url: hookForm.webhook_url || null,
-      timeout_seconds: 30,
-      env_json: {}
-    })
+    if (!hookForm.name.trim()) return
+    await runAction(
+      () => api.createHook({
+        name: hookForm.name,
+        stage: hookForm.stage as 'pre_consume' | 'post_consume',
+        hook_kind: hookForm.hook_kind as 'command' | 'webhook',
+        enabled: true,
+        blocking: hookForm.blocking,
+        command: hookForm.command || null,
+        webhook_url: hookForm.webhook_url || null,
+        timeout_seconds: 30,
+        env_json: {}
+      }),
+      hookForm.name
+    )
     setHookForm({ name: '', stage: 'pre_consume', hook_kind: 'command', command: '', webhook_url: '', blocking: true })
-    await load()
   }
+
+  const tabs: { id: AdminTab; label: string }[] = [
+    { id: 'models', label: t('admin.tabModels', 'Models') },
+    { id: 'system', label: t('admin.tabSystem', 'System') },
+    { id: 'automation', label: t('admin.tabAutomation', 'Automation') },
+    { id: 'queues', label: t('admin.tabQueues', 'Queues') }
+  ]
 
   return (
     <main className="admin-page admin-console">
-      <header className="page-header">
-        <div>
-          <h1>{t('admin.title')}</h1>
-          <p>{t('admin.subtitle')}</p>
-        </div>
-        <button className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={18} /></button>
+      <header className="page-header admin-header-row">
+        <h1>{t('admin.title')}</h1>
+        <nav className="admin-tabs" role="tablist" aria-label={t('admin.title')}>
+          {tabs.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === item.id}
+              className={tab === item.id ? 'active' : ''}
+              onClick={() => setTab(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </nav>
+        <button className="icon-button" title={t('common.refresh')} disabled={loading} onClick={() => void loadTab(tab, true)}>
+          <RefreshCw size={17} />
+        </button>
       </header>
+
       {error && <p className="error">{error}</p>}
       {message && <p className="success-message">{message}</p>}
 
-      <section className="admin-card runtime-model-setup-card">
-        <div className="section-heading-row">
-          <div>
-            <h2>{t('admin.modelSetup')}</h2>
-            <p>{t('admin.modelSetupCopy')}</p>
-          </div>
-          <TechnicalPill state={runtimeSetup.ocr_provider === 'fake' ? 'info' : 'ok'} label={runtimeProviderLabel} />
-        </div>
-        <div className="runtime-wizard-grid">
-          <article className="runtime-wizard-panel">
-            <div className="runtime-panel-heading">
-              <strong>{t('admin.ocrRuntime')}</strong>
-              <p>{t('admin.ocrRuntimeCopy')}</p>
+      {tab === 'models' && (
+        <>
+          <section className="admin-card">
+            <div className="section-heading-row">
+              <h2>{t('admin.modelSetup')}</h2>
+              <TechnicalPill state={runtimeSetup.ocr_provider === 'fake' ? 'info' : 'ok'} label={providerLabel(runtimeSetup.ocr_provider, t)} />
             </div>
-            <div className="runtime-panel-grid">
+
+            <div className="admin-form-grid">
               <label>{t('admin.setupMode')}
                 <select value={runtimeSetup.mode} onChange={(event) => {
                   const mode = event.target.value
@@ -275,317 +309,306 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
               </label>
               <label>{t('admin.defaultOcrProvider')}
                 <select value={runtimeSetup.ocr_provider} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_provider: event.target.value })}>
-                  <option value="fake">{t('admin.providerOptionFake')}</option>
-                  <option value="ppocrv6">{t('admin.providerOptionLocal')}</option>
                   <option value="paddle_vl">{t('admin.providerOptionSmart')}</option>
+                  <option value="ppocrv6">{t('admin.providerOptionLocal')}</option>
                   <option value="glm">{t('admin.providerOptionSecondary')}</option>
+                  <option value="fake">{t('admin.providerOptionFake')}</option>
                 </select>
               </label>
               <label>{t('admin.paddleBaseUrl')}
-                <input value={runtimeSetup.paddle_vl_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, paddle_vl_base_url: event.target.value })} placeholder={DIRECT_MODEL_ENDPOINT_PLACEHOLDER} />
+                <input value={runtimeSetup.paddle_vl_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, paddle_vl_base_url: event.target.value })} placeholder={DOKOCR_LLAMA_SWAP_URL} />
               </label>
               <label>{t('admin.paddleModel')}
-                <input value={runtimeSetup.paddle_vl_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, paddle_vl_model: event.target.value })} placeholder={t('admin.modelIdPlaceholder')} />
+                <input value={runtimeSetup.paddle_vl_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, paddle_vl_model: event.target.value })} placeholder="paddleocr-vl" />
               </label>
-            </div>
-          </article>
-
-          <article className="runtime-wizard-panel secondary-runtime-panel">
-            <div className="runtime-panel-heading">
-              <strong>{t('admin.secondaryOcrRuntime')}</strong>
-              <p>{t('admin.secondaryOcrRuntimeCopy')}</p>
-            </div>
-            <div className="runtime-panel-grid two-column">
-              <label>{t('admin.glmBaseUrl')}
-                <input value={runtimeSetup.glm_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, glm_base_url: event.target.value })} placeholder={DIRECT_MODEL_ENDPOINT_PLACEHOLDER} />
-              </label>
-              <label>{t('admin.glmModel')}
-                <input value={runtimeSetup.glm_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, glm_model: event.target.value })} placeholder={t('admin.modelIdPlaceholder')} />
-              </label>
-            </div>
-          </article>
-
-          <article className="runtime-wizard-panel metadata-runtime-panel">
-            <div className="runtime-panel-heading">
-              <strong>{t('admin.metadataRuntime')}</strong>
-              <p>{t('admin.metadataRuntimeCopy')}</p>
-            </div>
-            <div className="runtime-panel-grid metadata-runtime-grid">
               <label>{t('admin.qwenBaseUrl')}
-                <input value={runtimeSetup.qwen_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_base_url: event.target.value })} placeholder={DIRECT_MODEL_ENDPOINT_PLACEHOLDER} />
+                <input value={runtimeSetup.qwen_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_base_url: event.target.value })} placeholder={DOKOCR_LLAMA_SWAP_URL} />
               </label>
               <label>{t('admin.qwenModel')}
-                <input value={runtimeSetup.qwen_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_model: event.target.value })} placeholder={t('admin.modelIdPlaceholder')} />
+                <input value={runtimeSetup.qwen_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_model: event.target.value })} placeholder="metadata" />
               </label>
               <label>{t('admin.timeoutSeconds')}
                 <input type="number" min="5" value={runtimeSetup.timeout_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, timeout_seconds: Number(event.target.value) || 120 })} />
               </label>
             </div>
-            <p className="form-help runtime-field-help">{t('admin.metadataEndpointHelp')}</p>
-          </article>
 
-          <details className="runtime-budget-section">
-            <summary>
-              <span>
-                <strong>{t('admin.ocrTimeBudget')}</strong>
-                <small>{t('admin.ocrTimeBudgetCopy')}</small>
-              </span>
-            </summary>
-            <div className="runtime-budget-grid">
-              <label>{t('admin.ocrSoftLimit')}
-                <input type="number" min="60" value={runtimeSetup.ocr_task_soft_time_limit} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_soft_time_limit: Number(event.target.value) || 600 })} />
+            <details className="admin-advanced">
+              <summary>{t('admin.advanced', 'Advanced')}</summary>
+              <div className="admin-advanced-body">
+                <div className="admin-form-grid">
+                  <label>{t('admin.glmBaseUrl')}
+                    <input value={runtimeSetup.glm_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, glm_base_url: event.target.value })} placeholder={DOKOCR_LLAMA_SWAP_URL} />
+                  </label>
+                  <label>{t('admin.glmModel')}
+                    <input value={runtimeSetup.glm_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, glm_model: event.target.value })} placeholder="glm" />
+                  </label>
+                  <label>{t('admin.ocrSoftLimit')}
+                    <input type="number" min="60" value={runtimeSetup.ocr_task_soft_time_limit} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_soft_time_limit: Number(event.target.value) || 600 })} />
+                  </label>
+                  <label>{t('admin.ocrHardLimit')}
+                    <input type="number" min="60" value={runtimeSetup.ocr_task_time_limit} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_time_limit: Number(event.target.value) || 660 })} />
+                  </label>
+                  <label>{t('admin.ocrHardGrace')}
+                    <input type="number" min="1" value={runtimeSetup.ocr_task_hard_time_limit_grace_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_hard_time_limit_grace_seconds: Number(event.target.value) || 120 })} />
+                  </label>
+                  <label>{t('admin.ocrLeaseGrace')}
+                    <input type="number" min="1" value={runtimeSetup.ocr_task_lease_grace_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_lease_grace_seconds: Number(event.target.value) || 300 })} />
+                  </label>
+                  <label>{t('admin.ocrBaseOverhead')}
+                    <input type="number" min="1" value={runtimeSetup.ocr_task_base_overhead_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_base_overhead_seconds: Number(event.target.value) || 300 })} />
+                  </label>
+                  <label>{t('admin.paddleChunkBudget')}
+                    <input type="number" min="1" value={runtimeSetup.ocr_task_paddle_vl_seconds_per_chunk} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_paddle_vl_seconds_per_chunk: Number(event.target.value) || 180 })} />
+                  </label>
+                  <label>{t('admin.glmPageBudget')}
+                    <input type="number" min="1" value={runtimeSetup.ocr_task_glm_seconds_per_page} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_glm_seconds_per_page: Number(event.target.value) || 180 })} />
+                  </label>
+                  <label>{t('admin.ppocrPageBudget')}
+                    <input type="number" min="1" value={runtimeSetup.ocr_task_ppocrv6_seconds_per_page} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_ppocrv6_seconds_per_page: Number(event.target.value) || 30 })} />
+                  </label>
+                  <label>{t('admin.pdfTextLayerMinChars')}
+                    <input type="number" min="1" value={runtimeSetup.ocr_pdf_text_layer_min_chars} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_pdf_text_layer_min_chars: Number(event.target.value) || 80 })} />
+                  </label>
+                  <label>{t('admin.pdfTextLayerMinCharsPerPage')}
+                    <input type="number" min="1" value={runtimeSetup.ocr_pdf_text_layer_min_chars_per_page} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_pdf_text_layer_min_chars_per_page: Number(event.target.value) || 20 })} />
+                  </label>
+                </div>
+                <div className="admin-advanced-footer">
+                  <label className="check">
+                    <input type="checkbox" checked={runtimeSetup.ocr_pdf_text_layer_auto_enabled} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_pdf_text_layer_auto_enabled: event.target.checked })} />
+                    {t('admin.pdfTextLayerFastPath')}
+                  </label>
+                  <div className="button-row">
+                    <button type="button" onClick={useInternalGatewayPreset} disabled={setupBusy}>{t('admin.useInternalGateway')}</button>
+                    <button type="button" onClick={() => void testRuntimeEndpoint('glm')} disabled={setupBusy}>{t('admin.testGlm')}</button>
+                  </div>
+                </div>
+              </div>
+            </details>
+
+            <div className="button-row form-actions runtime-setup-actions">
+              <button type="button" onClick={() => void testRuntimeEndpoint('paddle')} disabled={setupBusy}>{t('admin.testPaddle')}</button>
+              <button type="button" onClick={() => void testRuntimeEndpoint('qwen')} disabled={setupBusy}>{t('admin.testQwen')}</button>
+              <button type="button" className="primary" onClick={() => void saveRuntimeSetup()} disabled={setupBusy}><Save size={16} /> {t('admin.saveModelSetup')}</button>
+            </div>
+            {endpointTest && (
+              <p className={endpointTest.ok ? 'success-message' : 'error'}>
+                {translateEndpointDetail(endpointTest.detail, t)}
+                {endpointTest.available_models.length ? ` · ${endpointTest.available_models.join(', ')}` : ''}
+              </p>
+            )}
+          </section>
+
+          <section className="admin-card">
+            <div className="section-heading-row">
+              <h2>{t('admin.modelConfig')}</h2>
+              <TechnicalPill state="info" label={t('admin.collectionDefault')} />
+            </div>
+            <div className="model-config-form">
+              <label>{t('dashboard.collection')}
+                <select value={selectedCollection?.id || ''} onChange={(event) => setSelectedCollectionId(event.target.value)}>
+                  {collections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
               </label>
-              <label>{t('admin.ocrHardLimit')}
-                <input type="number" min="60" value={runtimeSetup.ocr_task_time_limit} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_time_limit: Number(event.target.value) || 660 })} />
+              <label>{t('admin.ocrEngine')}
+                <select value={modelForm.ocr_engine} onChange={(event) => setModelForm({ ...modelForm, ocr_engine: event.target.value })}>
+                  <option value="paddle_vl">{t('admin.engineOptionPaddle')}</option>
+                  <option value="ppocrv6">{t('admin.engineOptionPpocr')}</option>
+                  <option value="glm">{t('admin.engineOptionGlm')}</option>
+                  <option value="fake">{t('admin.engineOptionFake')}</option>
+                </select>
               </label>
-              <label>{t('admin.ocrHardGrace')}
-                <input type="number" min="1" value={runtimeSetup.ocr_task_hard_time_limit_grace_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_hard_time_limit_grace_seconds: Number(event.target.value) || 120 })} />
+              <label>{t('admin.ocrMode')}
+                <select value={modelForm.ocr_mode} onChange={(event) => setModelForm({ ...modelForm, ocr_mode: event.target.value })}>
+                  <option value="redo">{t('admin.ocrModeRedo')}</option>
+                  <option value="force">{t('admin.ocrModeForce')}</option>
+                  <option value="skip">{t('admin.ocrModeSkip')}</option>
+                </select>
               </label>
-              <label>{t('admin.ocrLeaseGrace')}
-                <input type="number" min="1" value={runtimeSetup.ocr_task_lease_grace_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_lease_grace_seconds: Number(event.target.value) || 300 })} />
+              <label>{t('fields.language')}
+                <input value={modelForm.language} onChange={(event) => setModelForm({ ...modelForm, language: event.target.value })} />
               </label>
-              <label>{t('admin.ocrBaseOverhead')}
-                <input type="number" min="1" value={runtimeSetup.ocr_task_base_overhead_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_base_overhead_seconds: Number(event.target.value) || 300 })} />
+              <label>{t('admin.pageLimit')}
+                <input type="number" min="1" value={modelForm.page_limit} onChange={(event) => setModelForm({ ...modelForm, page_limit: event.target.value })} />
               </label>
-              <label>{t('admin.paddleChunkBudget')}
-                <input type="number" min="1" value={runtimeSetup.ocr_task_paddle_vl_seconds_per_chunk} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_paddle_vl_seconds_per_chunk: Number(event.target.value) || 180 })} />
+              <label>{t('admin.dpi')}
+                <input type="number" min="72" value={modelForm.image_dpi} onChange={(event) => setModelForm({ ...modelForm, image_dpi: event.target.value })} />
               </label>
-              <label>{t('admin.glmPageBudget')}
-                <input type="number" min="1" value={runtimeSetup.ocr_task_glm_seconds_per_page} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_glm_seconds_per_page: Number(event.target.value) || 180 })} />
+              <label>{t('admin.output')}
+                <select value={modelForm.output_type} onChange={(event) => setModelForm({ ...modelForm, output_type: event.target.value })}>
+                  <option value="markdown">markdown</option>
+                  <option value="text">text</option>
+                </select>
               </label>
-              <label>{t('admin.ppocrPageBudget')}
-                <input type="number" min="1" value={runtimeSetup.ocr_task_ppocrv6_seconds_per_page} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_task_ppocrv6_seconds_per_page: Number(event.target.value) || 30 })} />
+              <label>{t('admin.maxImagePixels')}
+                <input type="number" min="1000000" value={modelForm.max_image_pixels} onChange={(event) => setModelForm({ ...modelForm, max_image_pixels: event.target.value })} />
               </label>
+              <button type="button" className="primary" onClick={() => void saveModelConfig()}><Save size={16} /> {t('admin.saveConfig')}</button>
+            </div>
+          </section>
+        </>
+      )}
+
+      {tab === 'system' && (
+        <>
+          <section className="admin-card">
+            <div className="section-heading-row">
+              <h2>{t('admin.integrations')}</h2>
+              <TechnicalPill state={integrations?.ok ? 'ok' : 'down'} label={integrations?.ok ? t('admin.allReachable') : t('admin.needsAttention')} />
+            </div>
+            <div className="admin-list technical-list">
+              {integrations?.integrations.map((item) => (
+                <div key={item.name} className="admin-row technical-row">
+                  <strong>{translateIntegrationName(item.name, t)}</strong>
+                  <TechnicalPill state={item.ok ? 'ok' : 'down'} label={item.ok ? t('admin.up') : t('admin.down')} />
+                  <span>{translateIntegrationDetail(item.detail, t)}</span>
+                  <small>{item.latency_ms !== null ? `${item.latency_ms} ms` : ''}</small>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="admin-card">
+            <div className="section-heading-row">
+              <h2>{t('admin.maintenance')}</h2>
+            </div>
+            <div className="admin-actions technical-actions">
+              <button onClick={() => void runAction(api.reconcile, t('admin.reconciliationQueued'))}><Wrench size={16} /> {t('admin.reconcileStuck')}</button>
+              <button onClick={() => void runAction(api.retryFailed, t('admin.failedDocsRetried'))}><RotateCcw size={16} /> {t('admin.retryFailed')}</button>
+              <select value={collection} onChange={(event) => setCollection(event.target.value)}>
+                {(collections.length ? collections.map((c) => c.name) : ['Belege', 'Eingangsrechnung', 'Ausgangsrechnung']).map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+              <button onClick={() => void runAction(() => api.reextractCollection(collection, false), `${t('admin.reextractQueuedFor')} ${collection}.`)}>{t('admin.reextractCollection')}</button>
+            </div>
+          </section>
+        </>
+      )}
+
+      {tab === 'automation' && (
+        <>
+          <section className="admin-card">
+            <div className="section-heading-row">
+              <h2>{t('admin.ingestionSources')}</h2>
+              <TechnicalPill state="info" label={`${sources.length}`} />
+            </div>
+            <div className="admin-actions technical-actions">
+              <input placeholder={t('admin.sourceName')} value={sourceForm.name} onChange={(event) => setSourceForm({ ...sourceForm, name: event.target.value })} />
+              <input placeholder={t('admin.consumeFolderPath')} value={sourceForm.path} onChange={(event) => setSourceForm({ ...sourceForm, path: event.target.value })} />
+              <select value={sourceForm.collection_id} onChange={(event) => setSourceForm({ ...sourceForm, collection_id: event.target.value })}>
+                {collections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+              <label className="check"><input type="checkbox" checked={sourceForm.recursive} onChange={(event) => setSourceForm({ ...sourceForm, recursive: event.target.checked })} /> {t('admin.recursive')}</label>
+              <button onClick={() => void addSource()}>{t('admin.addSource')}</button>
+              <button onClick={() => void runAction(api.scanAllIngestionSources, t('admin.ingestionScanStarted'))}>{t('admin.scanAll')}</button>
+            </div>
+            {sources.length > 0 && (
+              <div className="admin-list technical-list">
+                {sources.map((source) => (
+                  <div key={source.id} className="admin-row technical-row">
+                    <strong>{source.name}</strong>
+                    <TechnicalPill state={source.enabled ? 'ok' : 'down'} label={source.enabled ? t('status.enabled') : t('status.disabled')} />
+                    <span>{source.path}</span>
+                    <button onClick={() => void runAction(() => api.scanIngestionSource(source.id), `${t('admin.scanStartedFor')} ${source.name}.`)}>{t('admin.scan')}</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="admin-card">
+            <div className="section-heading-row">
+              <h2>{t('admin.processingHooks')}</h2>
+              <TechnicalPill state="info" label={`${hooks.length}`} />
+            </div>
+            <div className="admin-actions technical-actions">
+              <input placeholder={t('admin.hookName')} value={hookForm.name} onChange={(event) => setHookForm({ ...hookForm, name: event.target.value })} />
+              <select value={hookForm.stage} onChange={(event) => setHookForm({ ...hookForm, stage: event.target.value })}>
+                <option value="pre_consume">pre_consume</option>
+                <option value="post_consume">post_consume</option>
+              </select>
+              <select value={hookForm.hook_kind} onChange={(event) => setHookForm({ ...hookForm, hook_kind: event.target.value })}>
+                <option value="command">command</option>
+                <option value="webhook">webhook</option>
+              </select>
+              {hookForm.hook_kind === 'command'
+                ? <input placeholder={t('admin.command')} value={hookForm.command} onChange={(event) => setHookForm({ ...hookForm, command: event.target.value })} />
+                : <input placeholder={t('admin.webhookUrl')} value={hookForm.webhook_url} onChange={(event) => setHookForm({ ...hookForm, webhook_url: event.target.value })} />}
+              <label className="check"><input type="checkbox" checked={hookForm.blocking} onChange={(event) => setHookForm({ ...hookForm, blocking: event.target.checked })} /> {t('admin.blocking')}</label>
+              <button onClick={() => void addHook()}>{t('admin.addHook')}</button>
+            </div>
+            {hooks.length > 0 && (
+              <div className="admin-list technical-list">
+                {hooks.map((hook) => (
+                  <div key={hook.id} className="admin-row technical-row">
+                    <strong>{hook.name}</strong>
+                    <TechnicalPill state={hook.enabled ? 'ok' : 'down'} label={hook.enabled ? t('status.enabled') : t('status.disabled')} />
+                    <span>{hook.stage} · {hook.hook_kind}</span>
+                    <button onClick={() => void runAction(() => api.testHook(hook.id), `${t('admin.hookTestQueuedFor')} ${hook.name}.`)}>{t('admin.testHook')}</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </>
+      )}
+
+      {tab === 'queues' && (
+        <section className="admin-card operational-card">
+          <details open={failed.length > 0}>
+            <summary>{t('admin.failedDocuments')} ({failed.length})</summary>
+            <div className="admin-list technical-list compact-list">
+              {failed.map((job) => (
+                <div key={job.document_id} className="admin-row technical-row">
+                  <button onClick={() => onOpenDocument(job.document_id)}>{job.title || job.filename}</button>
+                  <TechnicalPill state="down" label={job.state} />
+                  <span>{job.error_message}</span>
+                  <button className="icon-button" title={t('common.retry')} onClick={() => void runAction(() => api.retryDocument(job.document_id), t('admin.failedDocsRetried'))}><RotateCcw size={16} /></button>
+                </div>
+              ))}
             </div>
           </details>
-
-          <details className="runtime-budget-section">
-            <summary>
-              <span>
-                <strong>{t('admin.pdfTextLayerFastPath')}</strong>
-                <small>{t('admin.pdfTextLayerFastPathCopy')}</small>
-              </span>
-            </summary>
-            <div className="runtime-budget-grid">
-              <label className="check"><input type="checkbox" checked={runtimeSetup.ocr_pdf_text_layer_auto_enabled} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_pdf_text_layer_auto_enabled: event.target.checked })} /> {t('admin.pdfTextLayerAutoEnabled')}</label>
-              <label>{t('admin.pdfTextLayerMinChars')}
-                <input type="number" min="1" value={runtimeSetup.ocr_pdf_text_layer_min_chars} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_pdf_text_layer_min_chars: Number(event.target.value) || 80 })} />
-              </label>
-              <label>{t('admin.pdfTextLayerMinCharsPerPage')}
-                <input type="number" min="1" value={runtimeSetup.ocr_pdf_text_layer_min_chars_per_page} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_pdf_text_layer_min_chars_per_page: Number(event.target.value) || 20 })} />
-              </label>
+          <details>
+            <summary>{t('admin.duplicates')} ({duplicates.length})</summary>
+            <div className="admin-list technical-list compact-list">
+              {duplicates.map((doc) => (
+                <div key={doc.id} className="admin-row technical-row">
+                  <button onClick={() => onOpenDocument(doc.id)}>{doc.manual_title_override || doc.extracted_title || doc.original_filename}</button>
+                  <TechnicalPill state="info" label={t('admin.duplicate')} />
+                  <span>{t('admin.duplicateOf')} {doc.duplicate_of_document_id}</span>
+                  <button className="icon-button" title={t('admin.forceRetryOcr')} onClick={() => void runAction(() => api.retryDocument(doc.id), t('admin.failedDocsRetried'))}><RotateCcw size={16} /></button>
+                </div>
+              ))}
             </div>
-            <p className="form-help runtime-field-help">{t('admin.pdfTextLayerHelp')}</p>
           </details>
-        </div>
-        <p className="form-help">{t('admin.internalGatewayHelp')}</p>
-        <div className="button-row form-actions runtime-setup-actions">
-          <button type="button" onClick={useInternalGatewayPreset} disabled={setupBusy}>{t('admin.useInternalGateway')}</button>
-          <button type="button" onClick={() => void testRuntimeEndpoint('paddle')} disabled={setupBusy}>{t('admin.testPaddle')}</button>
-          <button type="button" onClick={() => void testRuntimeEndpoint('glm')} disabled={setupBusy}>{t('admin.testGlm')}</button>
-          <button type="button" onClick={() => void testRuntimeEndpoint('qwen')} disabled={setupBusy}>{t('admin.testQwen')}</button>
-          <button type="button" className="primary" onClick={() => void saveRuntimeSetup()} disabled={setupBusy}><Save size={17} /> {t('admin.saveModelSetup')}</button>
-        </div>
-        {endpointTest && <p className={endpointTest.ok ? 'success-message' : 'error'}>{translateEndpointDetail(endpointTest.detail, t)}{endpointTest.available_models.length ? ` · ${t('admin.models')}: ${endpointTest.available_models.join(', ')}` : ''}</p>}
-      </section>
-
-      <section className="admin-card model-config-card">
-        <div className="section-heading-row">
-          <div>
-            <h2>{t('admin.modelConfig')}</h2>
-            <p>{t('admin.modelConfigCopy')}</p>
-          </div>
-          <TechnicalPill state="info" label={t('admin.collectionDefault')} />
-        </div>
-        <div className="model-engine-grid">
-          <EngineCard engine="paddle_vl" item={integrationByName.get('paddle_vl_multimodal_ocr') || integrationByName.get('paddle_vl_llama')} />
-          <EngineCard engine="ppocrv6" item={undefined} note={t('admin.enginePpocrNote')} />
-          <EngineCard engine="glm" item={integrationByName.get('glm_multimodal_ocr') || integrationByName.get('glm_llama')} />
-          <EngineCard engine="qwen" item={integrationByName.get('qwen_llama')} title={t('admin.qwenMetadata')} detail={t('admin.qwenMetadataDetail')} />
-        </div>
-        <div className="model-config-form">
-          <label>{t('dashboard.collection')}
-            <select value={selectedCollection?.id || ''} onChange={(event) => setSelectedCollectionId(event.target.value)}>
-              {collections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
-          </label>
-          <label>{t('admin.ocrEngine')}
-            <select value={modelForm.ocr_engine} onChange={(event) => setModelForm({ ...modelForm, ocr_engine: event.target.value })}>
-              <option value="paddle_vl">{t('admin.engineOptionPaddle')}</option>
-              <option value="ppocrv6">{t('admin.engineOptionPpocr')}</option>
-              <option value="glm">{t('admin.engineOptionGlm')}</option>
-              <option value="fake">{t('admin.engineOptionFake')}</option>
-            </select>
-          </label>
-          <label>{t('admin.ocrMode')}
-            <select value={modelForm.ocr_mode} onChange={(event) => setModelForm({ ...modelForm, ocr_mode: event.target.value })}>
-              <option value="redo">{t('admin.ocrModeRedo')}</option>
-              <option value="force">{t('admin.ocrModeForce')}</option>
-              <option value="skip">{t('admin.ocrModeSkip')}</option>
-            </select>
-          </label>
-          <label>{t('fields.language')}
-            <input value={modelForm.language} onChange={(event) => setModelForm({ ...modelForm, language: event.target.value })} />
-          </label>
-          <label>{t('admin.pageLimit')}
-            <input type="number" min="1" value={modelForm.page_limit} onChange={(event) => setModelForm({ ...modelForm, page_limit: event.target.value })} />
-          </label>
-          <label>{t('admin.dpi')}
-            <input type="number" min="72" value={modelForm.image_dpi} onChange={(event) => setModelForm({ ...modelForm, image_dpi: event.target.value })} />
-          </label>
-          <label>{t('admin.output')}
-            <select value={modelForm.output_type} onChange={(event) => setModelForm({ ...modelForm, output_type: event.target.value })}>
-              <option value="markdown">markdown</option>
-              <option value="text">text</option>
-            </select>
-          </label>
-          <label>{t('admin.maxImagePixels')}
-            <input type="number" min="1000000" value={modelForm.max_image_pixels} onChange={(event) => setModelForm({ ...modelForm, max_image_pixels: event.target.value })} />
-          </label>
-          <button type="button" className="primary" onClick={() => void saveModelConfig()}><Save size={17} /> {t('admin.saveConfig')}</button>
-        </div>
-      </section>
-
-      <section className="admin-card">
-        <div className="section-heading-row">
-          <div>
-            <h2>{t('admin.maintenance')}</h2>
-            <p>{t('admin.maintenanceCopy')}</p>
-          </div>
-        </div>
-        <div className="admin-actions technical-actions">
-          <button onClick={() => void runAction(api.reconcile, t('admin.reconciliationQueued'))}><Wrench size={18} /> {t('admin.reconcileStuck')}</button>
-          <button onClick={() => void runAction(api.retryFailed, t('admin.failedDocsRetried'))}><RotateCcw size={18} /> {t('admin.retryFailed')}</button>
-          <select value={collection} onChange={(event) => setCollection(event.target.value)}>
-            <option>Belege</option>
-            <option>Eingangsrechnung</option>
-            <option>Ausgangsrechnung</option>
-          </select>
-          <button onClick={() => void runAction(() => api.reextractCollection(collection, false), `${t('admin.reextractQueuedFor')} ${collection}.`)}>{t('admin.reextractCollection')}</button>
-        </div>
-      </section>
-
-      <section className="admin-card">
-        <div className="section-heading-row"><h2>{t('admin.integrations')}</h2><TechnicalPill state={integrations?.ok ? 'ok' : 'down'} label={integrations?.ok ? t('admin.allReachable') : t('admin.needsAttention')} /></div>
-        <div className="admin-list technical-list">
-          {integrations?.integrations.map((item) => (
-            <div key={item.name} className="admin-row technical-row">
-              <strong>{translateIntegrationName(item.name, t)}</strong>
-              <TechnicalPill state={item.ok ? 'ok' : 'down'} label={item.ok ? t('admin.up') : t('admin.down')} />
-              <span>{translateIntegrationDetail(item.detail, t)}</span>
-              <small>{item.latency_ms ?? ''}{item.latency_ms !== null ? ' ms' : ''}</small>
+          <details>
+            <summary>{t('admin.ingestionJobs')} ({ingestionJobs.length})</summary>
+            <div className="admin-list technical-list compact-list">
+              {ingestionJobs.slice(0, 20).map((job) => (
+                <div key={job.id} className="admin-row technical-row">
+                  <button disabled={!job.document_id} onClick={() => job.document_id && onOpenDocument(job.document_id)}>{job.discovered_path}</button>
+                  <TechnicalPill state={job.status === 'failed' ? 'down' : job.status === 'imported' || job.status === 'skipped' ? 'ok' : 'info'} label={job.status} />
+                  <span>{job.error_message || job.sha256 || ''}</span>
+                  <button onClick={() => void runAction(() => api.retryIngestionJob(job.id), t('admin.ingestionJobRetried'))}>{t('common.retry')}</button>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="admin-card">
-        <div className="section-heading-row"><h2>{t('admin.ingestionSources')}</h2><TechnicalPill state="info" label={`${sources.length} ${t('admin.configured')}`} /></div>
-        <div className="admin-actions technical-actions">
-          <input placeholder={t('admin.sourceName')} value={sourceForm.name} onChange={(event) => setSourceForm({ ...sourceForm, name: event.target.value })} />
-          <input placeholder={t('admin.consumeFolderPath')} value={sourceForm.path} onChange={(event) => setSourceForm({ ...sourceForm, path: event.target.value })} />
-          <select value={sourceForm.collection_id} onChange={(event) => setSourceForm({ ...sourceForm, collection_id: event.target.value })}>
-            {collections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-          </select>
-          <label className="check"><input type="checkbox" checked={sourceForm.recursive} onChange={(event) => setSourceForm({ ...sourceForm, recursive: event.target.checked })} /> {t('admin.recursive')}</label>
-          <button onClick={() => void addSource()}>{t('admin.addSource')}</button>
-          <button onClick={() => void runAction(api.scanAllIngestionSources, t('admin.ingestionScanStarted'))}>{t('admin.scanAll')}</button>
-        </div>
-        <div className="admin-list technical-list">
-          {sources.map((source) => (
-            <div key={source.id} className="admin-row technical-row">
-              <strong>{source.name}</strong>
-              <TechnicalPill state={source.enabled ? 'ok' : 'down'} label={source.enabled ? t('status.enabled') : t('status.disabled')} />
-              <span>{source.path} · {source.record_grouping}</span>
-              <button onClick={() => void runAction(() => api.scanIngestionSource(source.id), `${t('admin.scanStartedFor')} ${source.name}.`)}>{t('admin.scan')}</button>
+          </details>
+          <details open={failed.length === 0}>
+            <summary>{t('admin.recentJobs')} ({jobs.length})</summary>
+            <div className="admin-list technical-list compact-list">
+              {jobs.map((job) => (
+                <div key={job.document_id} className="admin-row technical-row">
+                  <button onClick={() => onOpenDocument(job.document_id)}>{job.title || job.filename}</button>
+                  <TechnicalPill state={job.state === 'failed' ? 'down' : 'info'} label={job.state} />
+                  <span>{new Date(job.updated_at).toLocaleString()}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="admin-card">
-        <div className="section-heading-row"><h2>{t('admin.processingHooks')}</h2><TechnicalPill state="info" label={`${hooks.length} ${t('admin.configured')}`} /></div>
-        <div className="admin-actions technical-actions">
-          <input placeholder={t('admin.hookName')} value={hookForm.name} onChange={(event) => setHookForm({ ...hookForm, name: event.target.value })} />
-          <select value={hookForm.stage} onChange={(event) => setHookForm({ ...hookForm, stage: event.target.value })}>
-            <option value="pre_consume">pre_consume</option>
-            <option value="post_consume">post_consume</option>
-          </select>
-          <select value={hookForm.hook_kind} onChange={(event) => setHookForm({ ...hookForm, hook_kind: event.target.value })}>
-            <option value="command">command</option>
-            <option value="webhook">webhook</option>
-          </select>
-          <input placeholder={t('admin.command')} value={hookForm.command} onChange={(event) => setHookForm({ ...hookForm, command: event.target.value })} />
-          <input placeholder={t('admin.webhookUrl')} value={hookForm.webhook_url} onChange={(event) => setHookForm({ ...hookForm, webhook_url: event.target.value })} />
-          <label className="check"><input type="checkbox" checked={hookForm.blocking} onChange={(event) => setHookForm({ ...hookForm, blocking: event.target.checked })} /> {t('admin.blocking')}</label>
-          <button onClick={() => void addHook()}>{t('admin.addHook')}</button>
-        </div>
-        <div className="admin-list technical-list">
-          {hooks.map((hook) => (
-            <div key={hook.id} className="admin-row technical-row">
-              <strong>{hook.name}</strong>
-              <TechnicalPill state={hook.enabled ? 'ok' : 'down'} label={hook.enabled ? t('status.enabled') : t('status.disabled')} />
-              <span>{hook.stage} · {hook.hook_kind}</span>
-              <button onClick={() => void runAction(() => api.testHook(hook.id), `${t('admin.hookTestQueuedFor')} ${hook.name}.`)}>{t('admin.testHook')}</button>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="admin-card operational-card">
-        <div className="section-heading-row"><h2>{t('admin.operationalQueues')}</h2><p>{t('admin.operationalQueuesCopy')}</p></div>
-        <details>
-          <summary>{t('admin.ingestionJobs')} ({ingestionJobs.length})</summary>
-          <div className="admin-list technical-list compact-list">
-            {ingestionJobs.slice(0, 20).map((job) => (
-              <div key={job.id} className="admin-row technical-row">
-                <button disabled={!job.document_id} onClick={() => job.document_id && onOpenDocument(job.document_id)}>{job.discovered_path}</button>
-                <TechnicalPill state={job.status === 'failed' ? 'down' : job.status === 'imported' || job.status === 'skipped' ? 'ok' : 'info'} label={job.status} />
-                <span>{job.error_message || job.sha256 || ''}</span>
-                <button onClick={() => void runAction(() => api.retryIngestionJob(job.id), t('admin.ingestionJobRetried'))}>{t('common.retry')}</button>
-              </div>
-            ))}
-          </div>
-        </details>
-        <details>
-          <summary>{t('admin.failedDocuments')} ({failed.length})</summary>
-          <div className="admin-list technical-list compact-list">
-            {failed.map((job) => (
-              <div key={job.document_id} className="admin-row technical-row">
-                <button onClick={() => onOpenDocument(job.document_id)}>{job.title || job.filename}</button>
-                <TechnicalPill state="down" label={job.state} />
-                <span>{job.error_message}</span>
-                <button className="icon-button" title={t('common.retry')} onClick={() => void retry(job.document_id)}><RotateCcw size={18} /></button>
-              </div>
-            ))}
-          </div>
-        </details>
-        <details>
-          <summary>{t('admin.duplicates')} ({duplicates.length})</summary>
-          <div className="admin-list technical-list compact-list">
-            {duplicates.map((doc) => (
-              <div key={doc.id} className="admin-row technical-row">
-                <button onClick={() => onOpenDocument(doc.id)}>{doc.manual_title_override || doc.extracted_title || doc.original_filename}</button>
-                <TechnicalPill state="info" label={t('admin.duplicate')} />
-                <span>{t('admin.duplicateOf')} {doc.duplicate_of_document_id}</span>
-                <button className="icon-button" title={t('admin.forceRetryOcr')} onClick={() => void retry(doc.id)}><RotateCcw size={18} /></button>
-              </div>
-            ))}
-          </div>
-        </details>
-        <details>
-          <summary>{t('admin.recentJobs')} ({jobs.length})</summary>
-          <div className="admin-list technical-list compact-list">
-            {jobs.map((job) => (
-              <div key={job.document_id} className="admin-row technical-row">
-                <button onClick={() => onOpenDocument(job.document_id)}>{job.title || job.filename}</button>
-                <TechnicalPill state={job.state === 'failed' ? 'down' : 'info'} label={job.state} />
-                <span>{new Date(job.updated_at).toLocaleString()}</span>
-              </div>
-            ))}
-          </div>
-        </details>
-      </section>
+          </details>
+        </section>
+      )}
     </main>
   )
 }
@@ -614,21 +637,6 @@ function providerLabel(provider: string, t: (key: string, fallback?: string) => 
   if (provider === 'paddle_vl') return t('admin.providerOptionSmart')
   if (provider === 'glm') return t('admin.providerOptionSecondary')
   return provider
-}
-
-function EngineCard({ engine, item, note, title, detail }: { engine: string; item: IntegrationSummary['integrations'][number] | undefined; note?: string; title?: string; detail?: string }) {
-  const { t } = useI18n()
-  const meta = engineLabels[engine] || { title: title || engine, detail: detail || '' }
-  const translatedTitle = title || t(`admin.engineTitle.${engine}`, meta.title)
-  const translatedDetail = detail || t(`admin.engineDetail.${engine}`, meta.detail)
-  return (
-    <article className="engine-card">
-      <div><strong>{translatedTitle}</strong><p>{translatedDetail}</p></div>
-      <TechnicalPill state={item ? item.ok ? 'ok' : 'down' : 'info'} label={item ? item.ok ? t('admin.up') : t('admin.down') : t('admin.configuredStandalone')} />
-      {item?.detail && <small>{translateIntegrationDetail(item.detail, t)}</small>}
-      {note && <small>{note}</small>}
-    </article>
-  )
 }
 
 function translateIntegrationName(name: string, t: (key: string, fallback?: string) => string) {

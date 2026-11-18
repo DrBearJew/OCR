@@ -789,6 +789,7 @@ def _document_summary(document: Document) -> dict:
     data["ocr_text"] = None
     data["ocr_snippet"] = " ".join(text.split())[:500]
     data["raw_ocr_json"] = {}
+    data["processing_log_json"] = []
     data["qwen_response_text"] = None
     data["llm_raw_response"] = {}
     return data
