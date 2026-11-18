@@ -24,7 +24,7 @@ Usage: bash install-docker.sh [options]
 Options:
   --directory DIR    Install files here (default: ./dokocr)
   --metadata         Enable metadata using the saved runtime (CPU on a new install)
-  --metadata-runtime MODE  Enable metadata with cpu, cuda, vulkan, or external runtime
+  --metadata-runtime MODE  Choose unified (PaddleOCR-VL + LFM), cpu, cuda, vulkan, or external
   --metadata-url URL  External OpenAI-compatible server URL (requires external runtime)
   --metadata-model NAME  External served model alias (default: metadata)
   --no-metadata      Disable optional metadata refinement on an existing install
@@ -65,11 +65,11 @@ while (($#)); do
       shift
       ;;
     --metadata-runtime)
-      (($# >= 2)) || fail "--metadata-runtime requires cpu, cuda, vulkan, or external"
+      (($# >= 2)) || fail "--metadata-runtime requires unified, cpu, cuda, vulkan, or external"
       [[ "$METADATA_RUNTIME_ARG_SET" == false ]] || fail "--metadata-runtime may be specified only once"
       case "$2" in
-        cpu|cuda|vulkan|external) METADATA_RUNTIME_ARG=$2 ;;
-        *) fail "Invalid --metadata-runtime '$2'; choose cpu, cuda, vulkan, or external" ;;
+        unified|cpu|cuda|vulkan|external) METADATA_RUNTIME_ARG=$2 ;;
+        *) fail "Invalid --metadata-runtime '$2'; choose unified, cpu, cuda, vulkan, or external" ;;
       esac
       [[ "$METADATA_ARG" != false ]] || fail "--metadata-runtime and --no-metadata cannot be combined"
       METADATA_RUNTIME_ARG_SET=true
@@ -354,7 +354,7 @@ POSTGRES_PASSWORD=${SAVED_POSTGRES_PASSWORD:-}
 
 validate_image_tag "$IMAGE_TAG"
 [[ "$METADATA_ENABLED" == true || "$METADATA_ENABLED" == false ]] || fail "DOKOCR_METADATA_ENABLED in $ENV_FILE must be true or false"
-case "$METADATA_RUNTIME" in cpu|cuda|vulkan|external) ;; *) fail "DOKOCR_METADATA_RUNTIME in $ENV_FILE must be cpu, cuda, vulkan, or external" ;; esac
+case "$METADATA_RUNTIME" in unified|cpu|cuda|vulkan|external) ;; *) fail "DOKOCR_METADATA_RUNTIME in $ENV_FILE must be unified, cpu, cuda, vulkan, or external" ;; esac
 [[ -z "$SAVED_METADATA_URL" ]] || validate_metadata_url "$SAVED_METADATA_URL"
 [[ -z "$SAVED_EXTERNAL_URL_KEY" ]] || validate_metadata_url "$SAVED_EXTERNAL_URL_KEY"
 [[ -z "$SAVED_METADATA_MODEL" ]] || validate_metadata_model "$SAVED_METADATA_MODEL"
@@ -418,6 +418,7 @@ COMPOSE_OVERRIDE_NAME=""
 case "$METADATA_RUNTIME" in
   cuda) COMPOSE_OVERRIDE_NAME=compose.metadata-cuda.yml ;;
   vulkan) COMPOSE_OVERRIDE_NAME=compose.metadata-vulkan.yml ;;
+  unified) [[ "$METADATA_ENABLED" != true ]] || COMPOSE_OVERRIDE_NAME=compose.metadata-unified.yml ;;
 esac
 LOCAL_OVERRIDE=""
 OVERRIDE_URL=""
@@ -611,7 +612,11 @@ printf 'Admin username: %s\nCredentials: %s\n' "$ADMIN_USERNAME" "$ENV_FILE"
 if [[ "$METADATA_ENABLED" == true && "$METADATA_RUNTIME" == external ]]; then
   printf 'Optional metadata refinement is enabled with the selected external server/model.\n'
 elif [[ "$METADATA_ENABLED" == true ]]; then
-  printf 'Optional LFM2.5 metadata refinement is enabled with the %s runtime. Its model is stored in the persistent metadata-models volume.\n' "$METADATA_RUNTIME"
+  if [[ "$METADATA_RUNTIME" == unified ]]; then
+    printf 'PaddleOCR-VL and LFM2.5 use one local ik runtime. Only one model loads at a time.\n'
+  else
+    printf 'Optional LFM2.5 metadata refinement is enabled with the %s runtime. Its model is stored in the persistent metadata-models volume.\n' "$METADATA_RUNTIME"
+  fi
 else
   printf 'OCR: real PP-OCRv6 medium CPU mode; optional LFM2.5 metadata download is disabled.\n'
 fi

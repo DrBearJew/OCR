@@ -24,13 +24,13 @@ def digest(path):
     return result.hexdigest()
 
 
-def ensure_model(directory, url=URL, size=SIZE, sha256=SHA256):
+def ensure_model(directory, url=URL, size=SIZE, sha256=SHA256, *, name=NAME):
     """Resume our partial download; never overwrite an existing invalid model."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
-    model = directory / NAME
-    partial = directory / (NAME + ".partial")
-    lock = directory / (NAME + ".lock")
+    model = directory / name
+    partial = directory / (name + ".partial")
+    lock = directory / (name + ".lock")
     for path in (model, partial, lock):
         if path.is_symlink():
             raise RuntimeError(f"Refusing symlink at model-managed path: {path}")
@@ -48,8 +48,8 @@ def ensure_model(directory, url=URL, size=SIZE, sha256=SHA256):
                 raise RuntimeError(f"Partial model checksum mismatch: {partial}; move it aside before retrying")
         else:
             if shutil.disk_usage(directory).free < size - offset + 128 * 1024 * 1024:
-                raise RuntimeError("Not enough disk space for LFM model download (6.1 GB plus working space)")
-            print(f"Downloading {NAME} ({size} bytes; resuming at {offset}); first start can take several minutes", flush=True)
+                raise RuntimeError(f"Not enough disk space for {name} ({size} bytes plus working space)")
+            print(f"Downloading {name} ({size} bytes; resuming at {offset}); first start can take several minutes", flush=True)
             headers = {"User-Agent": "DokOCR-model-setup"}
             if offset:
                 headers["Range"] = f"bytes={offset}-"
@@ -77,7 +77,7 @@ def ensure_model(directory, url=URL, size=SIZE, sha256=SHA256):
             if partial.stat().st_size != size or digest(partial) != sha256:
                 raise RuntimeError(f"Incomplete or checksum-mismatched model download: {partial}; no model activated")
         os.replace(partial, model)
-        print("LFM model checksum verified", flush=True)
+        print(f"{name} checksum verified", flush=True)
         return model
 
 

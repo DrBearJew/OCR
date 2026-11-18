@@ -10,7 +10,7 @@ With Docker Engine and the Compose plugin already installed:
 curl -fL https://raw.githubusercontent.com/DrBearJew/OCR/main/scripts/install-docker.sh -o install-docker.sh && bash install-docker.sh
 ```
 
-No source build or manual model setup is needed for bundled runtimes. The installer generates credentials and prints their private file location. For optional AI, choose `--metadata-runtime cpu`, `cuda`, or `vulkan`; GPU modes use ik's automatic fitting. Use `--metadata-runtime external --metadata-url URL --metadata-model NAME` for your own server. These choices affect metadata inference, not the bundled CPU OCR provider. See the guide for driver requirements, privacy and verification limits.
+No source build or manual model setup is needed. On a supported AVX-512 CPU, run `bash install-docker.sh --metadata-runtime unified` to use PaddleOCR-VL and LFM on one ik_llama.cpp runtime. The `cpu`, `cuda`, `vulkan`, and `external` options instead pair metadata AI with the default PP-OCRv6 OCR. See the [installation guide](docs/INSTALL.md) for requirements.
 
 ![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)

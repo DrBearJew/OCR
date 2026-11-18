@@ -4,6 +4,7 @@ This is the straightforward prebuilt-image install for Linux x86_64. It needs no
 
 - `ghcr.io/drbearjew/ocr-backend:<tag>`
 - `ghcr.io/drbearjew/ocr-frontend:<tag>`
+- `ghcr.io/drbearjew/ocr-metadata:unified-<tag>` (PaddleOCR-VL and LFM on one CPU runtime)
 - `ghcr.io/drbearjew/ocr-metadata:<tag>` (CPU metadata)
 - `ghcr.io/drbearjew/ocr-metadata-cuda:<tag>` (NVIDIA metadata)
 - `ghcr.io/drbearjew/ocr-metadata-vulkan:<tag>` (Vulkan metadata)
@@ -19,6 +20,7 @@ Supported images target Linux x86_64. The installer also needs `curl` and OpenSS
 | Install | Recommended provisioning | Disk space | CPU/GPU |
 | --- | --- | --- | --- |
 | Standard, local PP-OCRv6 | 4 CPU cores, 4 GiB RAM | At least 10 GiB | x86_64 CPU; no GPU |
+| Unified PaddleOCR-VL + LFM | 16 GiB RAM | At least 20 GiB | AVX-512 BF16, VBMI and VNNI; no GPU |
 | With local CPU metadata AI | 16 GiB RAM | At least 20 GiB | AVX2, FMA, and F16C; no GPU |
 | With local GPU metadata AI | Depends on offloading and context | At least 20 GiB | Same host CPU baseline plus a compatible CUDA or Vulkan GPU/driver |
 
@@ -41,7 +43,15 @@ The installer fetches the standalone Compose file and prebuilt images. It genera
 
 The default OCR path is real PP-OCRv6 medium running locally through ONNX Runtime on CPU. Its models are prewarmed in the backend image. It is not fake OCR and does not use PaddleOCR-VL. Metadata extraction, review, and search have deterministic application behavior; a model is not required for the standard install.
 
-### Optional metadata AI
+### One local runtime for OCR and metadata
+
+```bash
+bash install-docker.sh --metadata-runtime unified
+```
+
+Choose this on a supported AVX-512 CPU to use PaddleOCR-VL for OCR and LFM2.5 for metadata. Docker installs one inference container with one ik_llama.cpp build; no host llama install or model endpoint setup is needed. First startup downloads and verifies about 7.85 GB of public model assets and prepares the OCR weights. Only one model loads at a time, and it unloads when idle. On older CPUs, use the default OCR mode or the CPU metadata option below.
+
+### Optional metadata AI with standard OCR
 
 Add `--metadata` to enable native, schema-patched ik LFM2.5-8B-A1B Q5_K_M metadata refinement:
 
@@ -69,7 +79,7 @@ bash install-docker.sh --metadata-runtime external \
   --metadata-model metadata
 ```
 
-Selecting a runtime enables metadata. The installer remembers your choice on reruns; `--no-metadata` disables it without deleting documents or cached weights. There is no silent switch to another compute backend when the selected runtime fails.
+Selecting a runtime enables metadata. The installer remembers your choice on reruns; `--no-metadata` disables it without deleting documents or cached weights. In unified mode, disabling metadata returns OCR to PP-OCRv6 as well. There is no silent switch to another compute backend when the selected runtime fails.
 
 - **CUDA:** the bundled CUDA 12.4.1 image targets Turing (compute capability 7.5) or newer; later GPU compatibility depends on driver/PTX support. Install a compatible NVIDIA host driver and configure the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) for Docker. The installer requests GPU access but does not install drivers, change Docker services, or require host `nvidia-smi` to select this mode.
 - **Vulkan:** requires a compatible host GPU/driver and accessible `/dev/dri` devices. The container receives those devices without privileged mode and includes Mesa AMD/Intel Vulkan drivers. Proprietary NVIDIA Vulkan needs separately configured matching ICD/libraries; the bundled override does not arrange that integration. Compatibility depends on the GPU and Vulkan driver; this is not a guarantee that every GPU works.
@@ -93,7 +103,7 @@ Use `bash install-docker.sh --help` for the installer interface and current defa
 | --- | --- |
 | `--directory PATH` | Install into a chosen directory; default `./dokocr`. |
 | `--metadata` / `--no-metadata` | Enable metadata using the saved runtime (CPU on a new install), or disable it. |
-| `--metadata-runtime cpu\|cuda\|vulkan\|external` | Select and enable metadata using this runtime; preserve the choice on reruns. |
+| `--metadata-runtime unified\|cpu\|cuda\|vulkan\|external` | Select and enable metadata using this runtime; preserve the choice on reruns. |
 | `--metadata-url URL` | HTTP(S) base URL for the `external` runtime; no URL credentials, query, or fragment. |
 | `--metadata-model NAME` | Served model alias for the `external` runtime; default `metadata`. |
 | `--image-tag TAG` | Select the trusted repository ref and matching image tag; default `main`. |

@@ -4,13 +4,14 @@ Use the [installation guide](../../docs/INSTALL.md) for requirements, security, 
 
 ```bash
 bash install-docker.sh                             # Real CPU PP-OCRv6; no model AI
+bash install-docker.sh --metadata-runtime unified   # PaddleOCR-VL + LFM on one ik runtime (AVX-512)
 bash install-docker.sh --metadata-runtime cpu       # Optional local LFM metadata
 bash install-docker.sh --metadata-runtime cuda      # NVIDIA, automatic ik fitting
 bash install-docker.sh --metadata-runtime vulkan    # Compatible AMD/Intel Vulkan GPU
 bash install-docker.sh --metadata-runtime external --metadata-url http://inference.example.local:8080/v1 --metadata-model metadata
 ```
 
-These switches choose metadata compute, not OCR acceleration. `--metadata` enables the saved runtime (CPU on a new install); `--no-metadata` disables it without deleting the selection or data. External mode starts/downloads no local metadata image or weights. Use a trusted, compatible endpoint: document text is sent there.
+`unified` selects PaddleOCR-VL and LFM together; the other modes keep PP-OCRv6 as the OCR provider. `--metadata` enables the saved runtime (CPU on a new install); `--no-metadata` disables it without deleting the selection or data. External mode starts/downloads no local metadata image or weights. Use a trusted, compatible endpoint: document text is sent there.
 
 The installer fetches the base Compose file and selected GPU override from the same trusted image/repository ref, or uses its checkout's files when run from source. GPU overrides are recorded through `COMPOSE_FILE` in the private install `.env`, so ordinary `docker compose` commands retain the selection. CUDA requests NVIDIA GPUs; Vulkan maps `/dev/dri` without privileged mode. Optional GPU controls and driver/hardware limitations are in the [metadata runtime guide](../metadata/README.md).
 

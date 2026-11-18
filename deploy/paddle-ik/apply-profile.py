@@ -9,15 +9,24 @@ def replace(path, old, new):
     Path(path).write_text(source.replace(old, new, 1))
 
 
-# This is a dedicated PaddleOCR build. Use original Q8_0 activation scales.
-for suffix, marker in [
-    ('ggml.c', '.vec_dot                  = ggml_vec_dot_q8_0_q8_0,\n'),
-    ('ggml-quants.c', None),
-]:
-    marker = marker or ''
-    tail = '\n    enum ggml_type dot_type = GGML_TYPE_Q8_2_X4;' if not marker else ''
-    replace('ggml/src/' + suffix, marker + '#if GGML_USE_IQK_MULMAT' + tail,
-            marker + '#if 0 // PaddleOCR requires FP16 activation scales' + tail)
+# The gateway uses a separate process per model, but both exec the same binary.
+# Choose the Q8_0 activation layout once, before any model tensors are built.
+replace('ggml/src/ggml.c', 'static const ggml_type_traits_t type_traits[',
+        'static ggml_type_traits_t type_traits[')
+replace('ggml/src/ggml.c', '        // initialize time system (required on Windows)', '''        const char * paddle = getenv("DOKOCR_PADDLE_FP16_ACTIVATIONS");
+        if (paddle && strcmp(paddle, "1") == 0) {
+            type_traits[GGML_TYPE_Q8_0].vec_dot_type = GGML_TYPE_Q8_0;
+        }
+
+        // initialize time system (required on Windows)''')
+replace('ggml/src/ggml-quants.c', '    enum ggml_type dot_type = GGML_TYPE_Q8_2_X4;',
+        '    enum ggml_type dot_type = ggml_internal_get_type_traits(GGML_TYPE_Q8_0).vec_dot_type;')
+replace('ggml/src/ggml-quants.c', '    if (iqk_mul_mat(nrc, nrc, n, GGML_TYPE_Q8_0, vx, bx, dot_type, vy, by, s, bs, 0, 1)) {',
+        '    if (dot_type != GGML_TYPE_Q8_0 && iqk_mul_mat(nrc, nrc, n, GGML_TYPE_Q8_0, vx, bx, dot_type, vy, by, s, bs, 0, 1)) {')
+
+# Portable CI builds do not get the extra foundation features from -march=native.
+replace('ggml/src/CMakeLists.txt', 'list(APPEND ARCH_FLAGS -mavx512bw)',
+        'list(APPEND ARCH_FLAGS -mavx512bw -mavx512dq -mavx512vl -mavx512cd)')
 
 marker = '#if IK_PRINT_TIMING == 2\n            auto tim2 = ggml_time_us();\n            printf("set_inputs(mask1): %d us\\n", int(tim2-tim1));\n#endif'
 mask = '''            // Paddle image tokens share a scalar position, but attention is

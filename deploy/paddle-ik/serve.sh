@@ -11,6 +11,8 @@ for flag in avx2 fma f16c avx512f avx512dq avx512cd avx512bw avx512vl avx512vbmi
         exit 1
     fi
 done
+[ "$1" != --check-cpu ] || exit 0
+export DOKOCR_PADDLE_FP16_ACTIVATIONS=1
 exec /opt/dokocr/bin/llama-server --port "$1" --host 127.0.0.1 --webui none --jinja \
     --model /models/paddleocr-vl-q8_0.gguf --mmproj /models/paddleocr-vl-mmproj.gguf \
     --chat-template-file /models/paddleocr-vl-chat_template.jinja --alias paddleocr-vl \

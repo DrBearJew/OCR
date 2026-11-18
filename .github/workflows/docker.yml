@@ -53,10 +53,10 @@ jobs:
             file: deploy/metadata/Dockerfile.vulkan
             gpu_backend: vk
             timeout: 60
-          - name: paddle-ik
-            context: deploy/paddle-ik
+          - name: unified
+            context: deploy
             file: deploy/paddle-ik/Dockerfile
-            timeout: 60
+            timeout: 90
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -65,7 +65,12 @@ jobs:
         shell: bash
         run: |
           owner="${GITHUB_REPOSITORY_OWNER,,}"
-          echo "image=ghcr.io/$owner/ocr-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
+          if [[ "${{ matrix.name }}" == unified ]]; then
+            echo "image=ghcr.io/$owner/ocr-metadata" >> "$GITHUB_OUTPUT"
+            echo "prefix=unified-" >> "$GITHUB_OUTPUT"
+          else
+            echo "image=ghcr.io/$owner/ocr-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
+          fi
       - name: Installer regressions
         if: matrix.name == 'backend'
         run: python3 scripts/test-docker-installer.py
@@ -74,11 +79,12 @@ jobs:
         run: |
           python3 scripts/test-metadata-download.py
           python3 scripts/test-metadata-runtime.py
-      - name: Paddle CPU regression tests on AVX2
-        if: matrix.name == 'paddle-ik'
+      - name: Paddle and LFM CPU regression tests on AVX2
+        if: matrix.name == 'unified'
         uses: docker/build-push-action@v6
         with:
-          context: deploy/paddle-ik
+          context: deploy
+          file: deploy/paddle-ik/Dockerfile
           target: build
           build-args: PADDLE_AVX512=OFF
           platforms: linux/amd64
@@ -163,8 +169,9 @@ jobs:
       - name: Publish checked image
         env:
           IMAGE: ${{ steps.names.outputs.image }}
+          PREFIX: ${{ steps.names.outputs.prefix }}
         run: |
-          docker tag dokocr-test:${{ matrix.name }} "$IMAGE:${GITHUB_SHA}"
-          docker tag dokocr-test:${{ matrix.name }} "$IMAGE:main"
-          docker push "$IMAGE:${GITHUB_SHA}"
-          docker push "$IMAGE:main"
+          docker tag dokocr-test:${{ matrix.name }} "$IMAGE:${PREFIX}${GITHUB_SHA}"
+          docker tag dokocr-test:${{ matrix.name }} "$IMAGE:${PREFIX}main"
+          docker push "$IMAGE:${PREFIX}${GITHUB_SHA}"
+          docker push "$IMAGE:${PREFIX}main"

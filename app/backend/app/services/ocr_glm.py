@@ -183,7 +183,7 @@ class PaddleVLLlamaCppOCRProvider:
             mime_type, data = _image_data_for_llama(path)
             image_url = f"data:{mime_type};base64,{data}"
         image_part = {"type": "image_url", "image_url": {"url": image_url}}
-        text_part = {"type": "text", "text": prompt.text}
+        text_part = {"type": "text", "text": prompt.text.strip() if ik else prompt.text}
         payload = {
             "model": self.settings.paddle_vl_model_name,
             "messages": [

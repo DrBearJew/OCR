@@ -1,0 +1,16 @@
+healthCheckTimeout: 180
+startPort: 18100
+models:
+  paddleocr-vl:
+    cmd: /usr/local/bin/dokocr-serve-role paddleocr-vl ${PORT}
+    concurrencyLimit: 1
+    ttl: 180
+  metadata:
+    cmd: /usr/local/bin/dokocr-serve-role metadata ${PORT}
+    concurrencyLimit: 1
+    ttl: 180
+groups:
+  local:
+    swap: true
+    exclusive: true
+    members: [paddleocr-vl, metadata]

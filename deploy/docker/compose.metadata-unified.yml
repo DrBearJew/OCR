@@ -1,0 +1,24 @@
+x-local-ai: &local-ai
+  OCR_PROVIDER: paddle_vl
+  PADDLE_VL_IK_PROFILE: "true"
+  PADDLE_VL_LLAMACPP_BASE_URL: http://metadata:8080/v1
+  PADDLE_VL_MODEL_PATH: paddleocr-vl
+  PADDLE_VL_MMPROJ_PATH: /models/paddleocr-vl-mmproj.gguf
+  QWEN_LLAMACPP_BASE_URL: http://metadata:8080/v1
+  QWEN_MODEL_PATH: metadata
+
+services:
+  backend:
+    environment: *local-ai
+    depends_on:
+      metadata:
+        condition: service_healthy
+  worker:
+    environment: *local-ai
+    depends_on:
+      metadata:
+        condition: service_healthy
+  metadata:
+    image: ghcr.io/drbearjew/ocr-metadata:unified-${DOKOCR_IMAGE_TAG:-main}
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]

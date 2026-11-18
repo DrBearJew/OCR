@@ -122,6 +122,7 @@ if url.startswith("https://raw.githubusercontent.com/"):
         "compose.yml": "MOCK_COMPOSE_SOURCE",
         "compose.metadata-cuda.yml": "MOCK_CUDA_SOURCE",
         "compose.metadata-vulkan.yml": "MOCK_VULKAN_SOURCE",
+        "compose.metadata-unified.yml": "MOCK_UNIFIED_SOURCE",
     }}
     if name not in sources:
         raise SystemExit(2)
@@ -178,6 +179,7 @@ def run_installer(script: Path, bindir: Path, log: Path, compose_source: Path, d
         "MOCK_COMPOSE_SOURCE": str(compose_source),
         "MOCK_CUDA_SOURCE": str(ROOT / "deploy" / "docker" / "compose.metadata-cuda.yml"),
         "MOCK_VULKAN_SOURCE": str(ROOT / "deploy" / "docker" / "compose.metadata-vulkan.yml"),
+        "MOCK_UNIFIED_SOURCE": str(ROOT / "deploy" / "docker" / "compose.metadata-unified.yml"),
         "MOCK_OPENSSL_COUNT": str(log.parent / "openssl-count"),
         "MOCK_DOCKER_STATE": str(log.parent / "docker-state"),
     })
@@ -266,6 +268,17 @@ def test_optional_real_docker_config() -> str:
         work = Path(temporary)
         cuda_file = ROOT / "deploy" / "docker" / "compose.metadata-cuda.yml"
         vulkan_file = ROOT / "deploy" / "docker" / "compose.metadata-vulkan.yml"
+        unified_file = ROOT / "deploy" / "docker" / "compose.metadata-unified.yml"
+        unified_config = render(work, [unified_file], True, {"DOKOCR_METADATA_ENABLED": "true"})
+        gateway = unified_config['services']['metadata']
+        check(gateway['image'] == 'ghcr.io/drbearjew/ocr-metadata:unified-main' and not gateway.get('ports'),
+              'unified mode must start one private runtime service')
+        for role in ('backend', 'worker'):
+            env = unified_config['services'][role]['environment']
+            check(env['OCR_PROVIDER'] == 'paddle_vl' and env['PADDLE_VL_IK_PROFILE'] == 'true',
+                  'unified mode must activate the verified Paddle profile')
+            check(env['PADDLE_VL_LLAMACPP_BASE_URL'] == env['QWEN_LLAMACPP_BASE_URL'] == 'http://metadata:8080/v1',
+                  'OCR and metadata must share a gateway')
         default_config = render(work, [], False, {})
         cpu_config = render(work, [], True, {"DOKOCR_METADATA_ENABLED": "true"})
         cuda_config = render(work, [cuda_file], True, {"DOKOCR_METADATA_ENABLED": "true", "DOKOCR_METADATA_GPU_LAYERS": "21", "DOKOCR_METADATA_DEVICES": "CUDA0,CUDA1", "CUDA_VISIBLE_DEVICES": "1,0"})
@@ -305,7 +318,7 @@ def test_optional_real_docker_config() -> str:
             environment = external_config["services"][service]["environment"]
             check(environment["QWEN_LLAMACPP_BASE_URL"] == external_url and environment["QWEN_MODEL_PATH"] == "served-model", f"external metadata settings missing from {service}")
             check("host.docker.internal=host-gateway" in external_config["services"][service].get("extra_hosts", []), f"{service} is missing the host-gateway mapping")
-    return "Docker Compose CLI v2+ parsed CPU, CUDA, Vulkan, external, and default configurations; reservations/mounts checked; config only, no hardware or containers"
+    return "Docker Compose CLI parsed unified, CPU, CUDA, Vulkan, external, and default configurations"
 
 
 def main() -> None:
@@ -316,6 +329,16 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="dokocr-installer-test-") as temporary:
         work = Path(temporary)
         bindir, log = install_mocks(work)
+        unified_install = work / 'unified-install'
+        result = run_installer(INSTALLER, bindir, log, COMPOSE, unified_install,
+                               ['--project-name', 'unified-test', '--metadata-runtime', 'unified'])
+        check(result.returncode == 0, result.stderr)
+        check((unified_install / 'compose.metadata-unified.yml').is_file(), 'unified override was not installed')
+        check('COMPOSE_FILE=compose.yml:compose.metadata-unified.yml' in (unified_install / '.env').read_text(),
+              'unified mode was not persisted')
+        disabled = run_installer(INSTALLER, bindir, log, COMPOSE, unified_install, ['--no-metadata'])
+        check(disabled.returncode == 0, disabled.stderr)
+        check('COMPOSE_FILE=compose.yml\n' in (unified_install / '.env').read_text(), 'disabling unified mode must restore default OCR')
         downloaded = work / "downloaded"
         downloaded.mkdir()
         script = downloaded / "install-docker.sh"
