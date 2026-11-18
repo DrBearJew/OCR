@@ -27,6 +27,7 @@ FROM base AS runtime
 COPY --from=build /src/build/bin/llama-server /opt/dokocr/bin/
 COPY --from=build /src/build/src/libllama.so /src/build/ggml/src/libggml.so /src/build/examples/mtmd/libmtmd.so /opt/dokocr/lib/
 COPY --from=build /src/LICENSE /usr/share/doc/dokocr-paddle-ik/LICENSE
+COPY paddlevl/paddleocr-vl-chat_template.jinja /opt/dokocr/share/paddleocr-vl-chat_template.jinja
 RUN ldd /opt/dokocr/bin/llama-server > /tmp/linkage && ! grep 'not found' /tmp/linkage
 
 FROM debian:bookworm-slim AS swap

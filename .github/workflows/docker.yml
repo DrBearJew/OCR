@@ -103,6 +103,15 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+      - name: Unified image bundles one server and the Paddle chat template
+        if: matrix.name == 'unified'
+        run: |
+          docker run --rm --network none --entrypoint sh dokocr-test:unified -ec '
+            test -x /opt/dokocr/bin/llama-server
+            test -x /opt/dokocr/bin/llama-quantize
+            test -s /opt/dokocr/share/paddleocr-vl-chat_template.jinja
+            llama-swap -version
+          '
       - name: Metadata executable and linkage (no GPU inference)
         if: startsWith(matrix.name, 'metadata')
         run: |
