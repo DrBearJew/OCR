@@ -6,6 +6,7 @@ on:
     paths:
       - 'app/**'
       - 'deploy/metadata/**'
+      - 'deploy/paddle-ik/**'
       - 'scripts/smoke-docker-ocr.py'
       - 'scripts/install-docker.sh'
       - 'scripts/test-docker-installer.py'
@@ -52,6 +53,10 @@ jobs:
             file: deploy/metadata/Dockerfile.vulkan
             gpu_backend: vk
             timeout: 60
+          - name: paddle-ik
+            context: deploy/paddle-ik
+            file: deploy/paddle-ik/Dockerfile
+            timeout: 60
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -69,6 +74,16 @@ jobs:
         run: |
           python3 scripts/test-metadata-download.py
           python3 scripts/test-metadata-runtime.py
+      - name: Paddle CPU regression tests on AVX2
+        if: matrix.name == 'paddle-ik'
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/paddle-ik
+          target: build
+          build-args: PADDLE_AVX512=OFF
+          platforms: linux/amd64
+          cache-from: type=gha,scope=paddle-ik-tests
+          cache-to: type=gha,scope=paddle-ik-tests,mode=max
       - name: Build candidate
         uses: docker/build-push-action@v6
         with:
