@@ -108,4 +108,3 @@ If you already run an OpenAI-compatible inference server, skip the overlay and c
 - [Metadata runtime](deploy/metadata/README.md) — LFM2.5 CPU/CUDA/Vulkan images, GPU controls, and JSON-schema patch.
 - [Maintainer model-runtime recipe](deploy/model-runtime/README.md) — custom multi-model `llama-swap` container contract.
 - [Native GLM-OCR port](deploy/glm/README.md) — optional CPU GLM-OCR patch for `ik_llama.cpp`.
-- [OpenVINO sidecar reference](deploy/paddlevl/README-llama-swap-openvino-sidecar.md) — legacy host/sidecar setup for PaddleOCR-VL.

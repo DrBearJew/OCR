@@ -1,6 +1,6 @@
 # Native GLM-OCR patch for ik_llama.cpp
 
-[`glm-ocr-native.patch`](glm-ocr-native.patch) adds native CPU GLM-OCR multimodal support to `ik_llama.cpp` at commit `cea2d61ffdac38ee2958ba88d120fa07cb67703a`, with no Python inference engine or OpenVINO dependency.
+[`glm-ocr-native.patch`](glm-ocr-native.patch) adds native CPU GLM-OCR multimodal support to `ik_llama.cpp` at commit `cea2d61ffdac38ee2958ba88d120fa07cb67703a`, with no Python inference engine required.
 
 This is an optional source patch for operators who want the `glm` fallback provider. It touches different files from the [LFM JSON-schema patch](../metadata/lfm-json-schema.patch), so both can be applied together if needed.
 

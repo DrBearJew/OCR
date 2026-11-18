@@ -171,4 +171,4 @@ Custom variables in `.env` survive reruns; direct edits to downloaded Compose fi
 | `/ready` is OK but OCR or metadata fails | `/ready` only checks the API and database. Inspect `backend`, `worker`, and `metadata` logs, then test with a small document in the UI. |
 | Document lands in **Needs review** | Normal when extracted fields are missing or low-confidence—review and approve them in the UI. |
 
-Looking to develop from source? See [`app/README.md`](../app/README.md). For legacy host/OpenVINO sidecar setups, see [`deploy/paddlevl/README-llama-swap-openvino-sidecar.md`](../deploy/paddlevl/README-llama-swap-openvino-sidecar.md).
+Looking to develop from source? See [`app/README.md`](../app/README.md).
