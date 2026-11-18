@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Download, FileText, Maximize2, Minus, Plus, RefreshCw, Search, Trash2, UploadCloud } from 'lucide-react'
-import type { KeyboardEvent, MouseEvent, ReactNode } from 'react'
+import { Download, FileText, Maximize2, Minus, Plus, RefreshCw, Search, Trash2, UploadCloud } from 'lucide-react'
+import type { KeyboardEvent, MouseEvent } from 'react'
 import { api, downloadUrl, previewUrl, thumbnailUrl } from '../api/client'
 import SavedViewsBar from '../components/SavedViewsBar'
 import StatusBadge from '../components/StatusBadge'
@@ -11,7 +11,7 @@ const DOCUMENT_PAGE_LIMIT = 50
 const DOCUMENT_PAGE_LIMIT_OPTIONS = [25, 50, 100]
 const DOCUMENT_BULK_FILTER_LIMIT = 1000
 
-export default function DocumentsPage({ onOpenDocument }: { onOpenDocument: (id: string) => void }) {
+export default function DocumentsPage({ onOpenDocument, onUpload }: { onOpenDocument: (id: string) => void; onUpload?: () => void }) {
   const { t } = useI18n()
   const [documents, setDocuments] = useState<Document[]>([])
   const [selectedId, setSelectedId] = useState('')
@@ -268,28 +268,27 @@ export default function DocumentsPage({ onOpenDocument }: { onOpenDocument: (id:
   return (
     <main className="documents-console">
       <header className="page-header console-header">
-        <div>
+        <div className="console-title-group">
           <h1>{t('documents.title')}</h1>
-          <p>{t('documents.subtitle')}</p>
+          <div className="doc-stats-strip" aria-label={t('documents.title')}>
+            <span><strong>{stats.total.toLocaleString()}</strong> {t('documents.kpiTotal')}</span>
+            {stats.processing > 0 && <span className="tone-blue"><strong>{stats.processing.toLocaleString()}</strong> {t('documents.kpiProcessing')}</span>}
+            {stats.needsReview > 0 && <span className="tone-orange"><strong>{stats.needsReview.toLocaleString()}</strong> {t('documents.kpiNeedsReview')}</span>}
+            {stats.failed > 0 && <span className="tone-red"><strong>{stats.failed.toLocaleString()}</strong> {t('documents.kpiFailedOcr')}</span>}
+            <span className="tone-green"><strong>{stats.synced.toLocaleString()}</strong> {t('documents.kpiSynced')}</span>
+          </div>
         </div>
         <div className="button-row">
-          <button className="primary"><UploadCloud size={18} /> {t('documents.upload')}</button>
-          <button className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={18} /></button>
+          <button type="button" className="primary" onClick={() => onUpload?.()}><UploadCloud size={16} /> {t('documents.upload')}</button>
+          <button type="button" className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={16} /></button>
         </div>
       </header>
       {error && <p className="warning">{error}</p>}
       {message && <p className="success-message">{message}</p>}
-      <section className="doc-kpi-grid">
-        <KpiCard icon={<FileText size={25} />} label={t('documents.kpiTotal')} value={stats.total} detail={t('documents.kpiTotalDetail')} tone="green" />
-        <KpiCard icon={<RefreshCw size={25} />} label={t('documents.kpiProcessing')} value={stats.processing} detail={t('documents.kpiProcessingDetail')} tone="blue" />
-        <KpiCard icon={<AlertTriangle size={25} />} label={t('documents.kpiNeedsReview')} value={stats.needsReview} detail={t('documents.kpiNeedsReviewDetail')} tone="orange" />
-        <KpiCard icon={<AlertTriangle size={25} />} label={t('documents.kpiFailedOcr')} value={stats.failed} detail={t('documents.kpiFailedOcrDetail')} tone="red" />
-        <KpiCard icon={<CheckCircle2 size={25} />} label={t('documents.kpiSynced')} value={stats.synced} detail={t('documents.kpiSyncedDetail')} tone="green" />
-      </section>
       <section className="documents-console-grid">
         <section className="document-table-panel workflow-card">
           <div className="document-toolbar">
-            <label className="toolbar-search"><Search size={17} /><input placeholder={t('documents.searchPlaceholder')} value={filters.title || ''} onChange={(event) => updateFilter('title', event.target.value)} /></label>
+            <label className="toolbar-search"><Search size={16} /><input placeholder={t('documents.searchPlaceholder')} value={filters.title || ''} onChange={(event) => updateFilter('title', event.target.value)} /></label>
             <select value={filters.collection_name || ''} onChange={(event) => updateFilter('collection_name', event.target.value)}>
               <option value="">{t('dashboard.collection')}</option>
               <option>Eingangsrechnung</option>
@@ -314,7 +313,7 @@ export default function DocumentsPage({ onOpenDocument }: { onOpenDocument: (id:
             <button disabled={bulkActionDisabled()} onClick={() => void bulk('reextract')}>{t('common.reextract')}</button>
             <button disabled={bulkActionDisabled()} onClick={() => void bulk('set_review_state', { review_state: 'needs_review', review_reason: 'Bulk marked for review' })}>{t('common.needsReview')}</button>
             <button disabled={bulkActionDisabled()} onClick={() => void bulk('set_review_state', { review_state: 'reviewed', review_reason: null })}>{t('common.reviewed')}</button>
-            <button className="danger-button" disabled={Boolean(busyAction) || !Array.from(selectedIds).filter((id) => !id.startsWith('demo-')).length} onClick={() => void deleteSelectedDocuments()}><Trash2 size={16} /> {t('documents.deleteSelected')}</button>
+            <button className="danger-button" disabled={Boolean(busyAction) || !Array.from(selectedIds).filter((id) => !id.startsWith('demo-')).length} onClick={() => void deleteSelectedDocuments()}><Trash2 size={15} /> {t('documents.deleteSelected')}</button>
           </div>
           <div className="document-console-table">
             <div className="doc-table-head">
@@ -324,7 +323,6 @@ export default function DocumentsPage({ onOpenDocument }: { onOpenDocument: (id:
               <span>{t('fields.status')}</span>
               <span>{t('fields.date')}</span>
               <span>{t('fields.amount')}</span>
-              <span>{t('documents.ocrConfidenceShort')}</span>
             </div>
             {documents.map((document) => (
               <div
@@ -342,12 +340,11 @@ export default function DocumentsPage({ onOpenDocument }: { onOpenDocument: (id:
                   else next.delete(document.id)
                   setSelectedIds(next)
                 }} />
-                <span className="doc-title-cell"><FileText size={17} /><strong>{document.manual_title_override || document.extracted_title || document.original_filename}</strong><small>{document.original_filename}</small></span>
+                <span className="doc-title-cell"><FileText size={16} /><strong>{document.manual_title_override || document.extracted_title || document.original_filename}</strong><small>{document.original_filename}</small></span>
                 <span className="pill">{document.collection_name}</span>
                 <StatusBadge value={document.processing_state === 'complete' && document.review_state === 'needs_review' ? 'needs_review' : document.processing_state} />
                 <span>{document.extracted_date || new Date(document.created_at).toLocaleDateString()}</span>
-                <span>{document.extracted_amount || 'NA'}</span>
-                <span className={document.processing_state === 'failed' ? 'ocr-low' : 'ocr-good'}>{document.processing_state === 'failed' ? '-' : `${document.id.startsWith('demo-') ? '98' : '95'}%`}</span>
+                <span>{document.extracted_amount || '—'}</span>
               </div>
             ))}
           </div>
@@ -435,18 +432,16 @@ function DocumentPreviewPanel({ document, pages, loading, onOpenDocument }: { do
       <div className="card-title-row">
         <h2>{document.original_filename}</h2>
         <div className="button-row preview-zoom-controls">
-          {isPdf ? (
-            <small className="native-pdf-toolbar-note">Use the PDF toolbar for pages and zoom.</small>
-          ) : (
+          {!isPdf && (
             <>
-              <button type="button" className="icon-button" title={t('common.zoomOut')} onClick={() => adjustZoom(-20)}><Minus size={16} /></button>
+              <button type="button" className="icon-button" title={t('common.zoomOut')} onClick={() => adjustZoom(-20)}><Minus size={15} /></button>
               <button type="button" className="zoom-value" title={t('common.resetZoom')} onClick={resetZoom}>{zoom}%</button>
-              <button type="button" className="icon-button" title={t('common.zoomIn')} onClick={() => adjustZoom(20)}><Plus size={16} /></button>
+              <button type="button" className="icon-button" title={t('common.zoomIn')} onClick={() => adjustZoom(20)}><Plus size={15} /></button>
             </>
           )}
-          <button type="button" className="icon-button" title={t('documents.largePreview')} onClick={() => setLargePreviewOpen(true)}><Maximize2 size={16} /></button>
-          <a className="icon-button" href={downloadUrl(document.id)} title={t('common.download')}><Download size={17} /></a>
-          <button className="icon-button" onClick={() => onOpenDocument(document.id)} title={t('common.open')}><FileText size={17} /></button>
+          <button type="button" className="icon-button" title={t('documents.largePreview')} onClick={() => setLargePreviewOpen(true)}><Maximize2 size={15} /></button>
+          <a className="icon-button" href={downloadUrl(document.id)} title={t('common.download')}><Download size={16} /></a>
+          <button className="icon-button" onClick={() => onOpenDocument(document.id)} title={t('common.open')}><FileText size={16} /></button>
         </div>
       </div>
       <div ref={previewSurfaceRef} className="document-preview-surface console-preview zoomable-preview" onClick={handlePreviewClick} title={isPdf ? 'Use the PDF toolbar for pages and zoom.' : 'Click image to zoom around that point'}>
@@ -464,7 +459,6 @@ function DocumentPreviewPanel({ document, pages, loading, onOpenDocument }: { do
       {activeTab === 'ocr' && <pre className="ocr-preview console-ocr">{document.ocr_text || document.ocr_snippet || 'Open the document detail page to load full OCR text.'}</pre>}
       {activeTab === 'raw' && <pre className="ocr-preview console-ocr json-preview">{formatJson(document.raw_ocr_json, 'No raw OCR JSON stored for this document yet.')}</pre>}
       {activeTab === 'layout' && <LayoutPreview pages={pages} loading={loading} />}
-      <span className="confidence-pill">{t('documents.ocrConfidence')}: {document.processing_state === 'failed' ? 'NA' : '98%'}</span>
       {largePreviewOpen && <LargePreviewModal document={document} onClose={() => setLargePreviewOpen(false)} />}
     </section>
   )
@@ -650,10 +644,6 @@ function formatJson(value: unknown, fallback: string) {
   } catch {
     return String(value)
   }
-}
-
-function KpiCard({ icon, label, value, detail, tone }: { icon: ReactNode; label: string; value: number; detail: string; tone: string }) {
-  return <div className={`doc-kpi doc-kpi-${tone}`}><span>{icon}</span><div><strong>{value.toLocaleString()}</strong><small>{label}</small><em>{detail}</em></div></div>
 }
 
 function buildStats(documents: Document[]) {

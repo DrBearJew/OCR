@@ -87,7 +87,7 @@ export default function App() {
         {route.name === 'folders' && <FoldersPage onOpenDocument={(id) => navigate(`/documents/${id}`)} />}
         {route.name === 'batches' && <BatchListPage onOpenBatch={(id) => navigate(`/batches/${id}`)} />}
         {route.name === 'batch' && <BatchDetailPage id={route.id} onOpenDocument={(id) => navigate(`/documents/${id}`)} />}
-        {route.name === 'documents' && <DocumentsPage onOpenDocument={(id) => navigate(`/documents/${id}`)} />}
+        {route.name === 'documents' && <DocumentsPage onOpenDocument={(id) => navigate(`/documents/${id}`)} onUpload={() => navigate('/dashboard')} />}
         {route.name === 'document' && <DocumentDetailPage id={route.id} />}
         {route.name === 'search' && <SearchPage onOpenDocument={(id) => navigate(`/documents/${id}`)} />}
         {route.name === 'processing' && <ProcessingPage onOpenDocument={(id) => navigate(`/documents/${id}`)} />}
