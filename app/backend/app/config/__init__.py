@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     paddle_vl_llamacpp_base_url: str = "http://model-runtime:8092/v1"
     paddle_vl_model_path: str = "paddleocr-vl"
     paddle_vl_mmproj_path: str = "/llm-models/paddleocr-vl-mmproj.gguf"
+    paddle_vl_ik_profile: bool = False
 
     ppocrv6_tier: str = Field(default="medium", pattern="^(tiny|small|medium)$")
     ppocrv6_engine: str = "onnxruntime"

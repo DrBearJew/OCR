@@ -170,20 +170,26 @@ class PaddleVLLlamaCppOCRProvider:
         if not path.exists():
             raise OCRProviderError(f"File not found: {file_path}")
         self._validate_multimodal_config()
-        prompt = self.prompt_loader.render("ocr_prompt.tmpl")
-        mime_type, data = _image_data_for_llama(path)
+        ik = self.settings.paddle_vl_ik_profile
+        prompt = self.prompt_loader.render("paddle_vl_ocr_prompt.tmpl" if ik else "ocr_prompt.tmpl")
+        if ik:
+            from app.services.paddle_vl_ik import image_data_url
+
+            try:
+                image_url = image_data_url(path)
+            except (OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+                raise OCRProviderError("Unable to prepare image for PaddleOCR-VL ik") from exc
+        else:
+            mime_type, data = _image_data_for_llama(path)
+            image_url = f"data:{mime_type};base64,{data}"
+        image_part = {"type": "image_url", "image_url": {"url": image_url}}
+        text_part = {"type": "text", "text": prompt.text}
         payload = {
             "model": self.settings.paddle_vl_model_name,
             "messages": [
                 {
                     "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt.text},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{mime_type};base64,{data}"},
-                        },
-                    ],
+                    "content": [image_part, text_part] if ik else [text_part, image_part],
                 }
             ],
             "temperature": 0.0,
@@ -194,6 +200,8 @@ class PaddleVLLlamaCppOCRProvider:
             "repeat_penalty": 1.18,
             "repeat_last_n": 512,
         }
+        if ik:
+            payload.update(repeat_penalty=1.0, seed=42, cache_prompt=False)
         headers = {"Content-Type": "application/json"}
         url = llama_chat_completions_url(self.settings.paddle_vl_llamacpp_base_url)
         try:
@@ -218,8 +226,12 @@ class PaddleVLLlamaCppOCRProvider:
         if not choices:
             raise OCRProviderError("PaddleOCR-VL returned no choices")
         message = choices[0].get("message") or {}
-        text = _compact_repeated_ocr_lines(str(message.get("content") or "").strip())
-        text = _format_diagram_ocr_markdown_if_needed(text)
+        text = str(message.get("content") or "").strip()
+        if ik:
+            if choices[0].get("finish_reason") == "length":
+                raise OCRProviderError("PaddleOCR-VL ik reached the generation limit")
+        else:
+            text = _format_diagram_ocr_markdown_if_needed(_compact_repeated_ocr_lines(text))
         if not text:
             raise OCRProviderError("PaddleOCR-VL returned empty text")
         return OCRResult(
@@ -237,8 +249,8 @@ class PaddleVLLlamaCppOCRProvider:
         paths = [Path(file_path) for file_path in file_paths]
         if not paths:
             return []
-        if len(paths) == 1:
-            return [self.extract_text(str(paths[0]))]
+        if len(paths) == 1 or self.settings.paddle_vl_ik_profile:
+            return [self.extract_text(str(path)) for path in paths]
         for path in paths:
             if not path.exists():
                 raise OCRProviderError(f"File not found: {path}")

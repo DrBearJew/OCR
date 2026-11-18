@@ -1,0 +1,1900 @@
+diff --git a/common/chat.cpp b/common/chat.cpp
+index 08dbf15..02b6181 100644
+--- a/common/chat.cpp
++++ b/common/chat.cpp
+@@ -1669,9 +1669,10 @@ static common_chat_params common_chat_params_init_lfm2_5(const common_chat_templ
+         "</think>",
+     };
+ 
+-    auto has_tools         = inputs.tools.is_array() && !inputs.tools.empty();
+-    auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
+-    auto include_grammar   = has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE;
++    auto has_tools           = inputs.tools.is_array() && !inputs.tools.empty();
++    auto has_response_format = !inputs.json_schema.is_null() && inputs.json_schema.is_object();
++    auto extract_reasoning   = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
++    auto include_grammar     = has_response_format || (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE);
+ 
+     const std::string THINK_START     = "<think>";
+     const std::string THINK_END       = "</think>";
+@@ -1690,6 +1691,11 @@ static common_chat_params common_chat_params_init_lfm2_5(const common_chat_templ
+             reasoning = p.optional(THINK_START + p.reasoning(p.until(THINK_END)) + THINK_END);
+         }
+ 
++        if (has_response_format) {
++            auto content = p.content(p.schema(p.json(), "response-format-schema", inputs.json_schema));
++            return generation_prompt + reasoning + p.space() + content + p.space() + end;
++        }
++
+         if (!has_tools || inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_NONE) {
+             return generation_prompt + reasoning + p.content(p.rest()) + end;
+         }
+@@ -1709,13 +1715,17 @@ static common_chat_params common_chat_params_init_lfm2_5(const common_chat_templ
+     data.parser = parser.save();
+ 
+     if (include_grammar) {
+-        data.grammar_lazy = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
++        data.grammar_lazy = !has_response_format && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
+         data.grammar      = build_grammar([&](const common_grammar_builder & builder) {
+             foreach_function(inputs.tools, [&](const json & tool) {
+                 const auto & function = tool.at("function");
+                 auto         schema   = function.at("parameters");
+                 builder.resolve_refs(schema);
+             });
++            if (has_response_format) {
++                auto schema = inputs.json_schema;
++                builder.resolve_refs(schema);
++            }
+             parser.build_grammar(builder, data.grammar_lazy);
+         });
+         foreach_function(inputs.tools, [&](const json & tool) {
+diff --git a/examples/mtmd/CMakeLists.txt b/examples/mtmd/CMakeLists.txt
+index 2381012..2702c0f 100644
+--- a/examples/mtmd/CMakeLists.txt
++++ b/examples/mtmd/CMakeLists.txt
+@@ -11,6 +11,7 @@ add_library(mtmd
+             clip-impl.h
+             mtmd-helper.cpp
+             mtmd-helper.h
++            mtmd-helper-internal.h
+             )
+ 
+ target_link_libraries     (mtmd PUBLIC ggml llama)
+@@ -60,3 +61,10 @@ if(LLAMA_TOOLS_INSTALL)
+ endif()
+ target_link_libraries  (${TARGET} PRIVATE common mtmd Threads::Threads)
+ target_compile_features(${TARGET} PRIVATE cxx_std_17)
++
++if (LLAMA_BUILD_TESTS)
++    add_executable(test-mtmd-positions ../../tests/test-mtmd-positions.cpp)
++    target_link_libraries(test-mtmd-positions PRIVATE mtmd common)
++    target_compile_features(test-mtmd-positions PRIVATE cxx_std_17)
++    add_test(NAME test-mtmd-positions COMMAND $<TARGET_FILE:test-mtmd-positions>)
++endif()
+diff --git a/examples/mtmd/clip-impl.h b/examples/mtmd/clip-impl.h
+index 958a0d0..8ed4a68 100644
+--- a/examples/mtmd/clip-impl.h
++++ b/examples/mtmd/clip-impl.h
+@@ -184,6 +184,7 @@ enum projector_type {
+     PROJECTOR_TYPE_VOXTRAL,
+     PROJECTOR_TYPE_LFM2,
+     PROJECTOR_TYPE_KIMIVL,
++    PROJECTOR_TYPE_PADDLEOCR,
+     PROJECTOR_TYPE_KIMIK25,
+     PROJECTOR_TYPE_LIGHTONOCR,
+     PROJECTOR_TYPE_COGVLM,
+@@ -218,6 +219,7 @@ static std::map<projector_type, std::string> PROJECTOR_TYPE_NAMES = {
+     { PROJECTOR_TYPE_VOXTRAL,   "voxtral"},
+     { PROJECTOR_TYPE_LFM2,      "lfm2"},
+     { PROJECTOR_TYPE_KIMIVL,    "kimivl"},
++    { PROJECTOR_TYPE_PADDLEOCR, "paddleocr"},
+     { PROJECTOR_TYPE_KIMIK25,   "kimik25"},
+     { PROJECTOR_TYPE_LIGHTONOCR,"lightonocr"},
+     { PROJECTOR_TYPE_COGVLM,    "cogvlm"},
+diff --git a/examples/mtmd/clip.cpp b/examples/mtmd/clip.cpp
+index 37ea4f4..38b89c8 100644
+--- a/examples/mtmd/clip.cpp
++++ b/examples/mtmd/clip.cpp
+@@ -2037,6 +2037,57 @@ struct clip_graph {
+         return gf;
+     }
+ 
++    ggml_cgraph * build_paddleocr() {
++        GGML_ASSERT(img.nx % (patch_size * hparams.n_merge) == 0);
++        GGML_ASSERT(img.ny % (patch_size * hparams.n_merge) == 0);
++        const int n_pos            = n_patches;
++        const int num_position_ids = n_pos * 4; // m-rope requires 4 dim per position
++
++        int mrope_sections[4] = {d_head/4, d_head/4, d_head/4, d_head/4};
++
++        ggml_tensor * positions = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, num_position_ids);
++        ggml_set_name(positions, "positions");
++        ggml_set_input(positions);
++
++        auto add_pos = [&](ggml_tensor * cur, const clip_layer &) {
++            return ggml_rope_multi(
++                ctx0, cur, positions, nullptr,
++                d_head/2, mrope_sections, GGML_ROPE_TYPE_VISION,
++                32768, 10000, 1, 0, 1, 32, 1);
++        };
++
++        ggml_tensor * learned_pos_embd = resize_position_embeddings(GGML_SCALE_MODE_BILINEAR);
++        ggml_tensor * inp = build_inp();
++        ggml_tensor * cur = build_vit(
++                                inp, n_patches,
++                                NORM_TYPE_NORMAL,
++                                hparams.ffn_op,
++                                learned_pos_embd,
++                                add_pos);
++
++        cb(cur, "vit_out", -1);
++
++        {
++            // mlp_AR paddleocr projector
++            const float proj_norm_eps = 1e-5f;
++            cur = build_norm(cur,
++                        model.mm_input_norm_w, model.mm_input_norm_b,
++                        NORM_TYPE_NORMAL, proj_norm_eps, -1);
++
++            const int scale_factor = model.hparams.n_merge;
++            cur = build_patch_merge_permute(cur, scale_factor);
++            cur = build_ffn(cur,
++                        model.mm_1_w, model.mm_1_b,
++                        nullptr, nullptr,
++                        model.mm_2_w, model.mm_2_b,
++                        hparams.ffn_op, -1);
++            cb(cur, "mlp_out", -1);
++        }
++
++        ggml_build_forward_expand(gf, cur);
++        return gf;
++    }
++
+     ggml_cgraph * build_kimik25() {
+         ggml_tensor * pos_h = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_patches);
+         ggml_set_name(pos_h, "pos_h");
+@@ -2710,6 +2761,11 @@ private:
+         pos_embd = ggml_reshape_3d(ctx0, pos_embd, n_embd, n_per_side, n_per_side);  // -> (n_embd, n_per_side, n_per_side)
+         pos_embd = ggml_permute(ctx0, pos_embd, 2, 0, 1, 3);                         // -> (n_per_side, n_per_side, n_embd)
+         pos_embd = ggml_interpolate(ctx0, pos_embd, width, height, n_embd, 1, mode); // -> (width, height, n_embd)
++        if (model.proj_type == PROJECTOR_TYPE_PADDLEOCR) {
++            // ponytail: accelerator resize kernels still copy nearest indices; keep Paddle's
++            // learned-position resize on CPU until those kernels implement real bilinear.
++            ggml_backend_sched_set_tensor_backend(ctx->sched.get(), pos_embd, ctx->backend_cpu);
++        }
+         pos_embd = ggml_permute(ctx0, pos_embd, 1, 2, 0, 3);                         // -> (n_embd, width, height)
+         pos_embd = ggml_cont_2d(ctx0, pos_embd, n_embd, width * height);             // -> (n_embd, width * height)
+ 
+@@ -3385,6 +3441,10 @@ static ggml_cgraph * clip_image_build_graph(clip_ctx * ctx, const clip_image_f32
+             {
+                 res = graph.build_kimivl();
+             } break;
++        case PROJECTOR_TYPE_PADDLEOCR:
++            {
++                res = graph.build_paddleocr();
++            } break;
+         case PROJECTOR_TYPE_KIMIK25:
+             {
+                 res = graph.build_kimik25();
+@@ -3752,6 +3812,13 @@ struct clip_model_loader {
+                         hparams.set_limit_image_tokens(8, 1024);
+                         hparams.set_warmup_n_tokens(256); // avoid OOM on warmup
+                     } break;
++                case PROJECTOR_TYPE_PADDLEOCR:
++                    {
++                        hparams.n_merge = 2;
++                        get_u32(KEY_IMAGE_MIN_PIXELS, hparams.image_min_pixels);
++                        get_u32(KEY_IMAGE_MAX_PIXELS, hparams.image_max_pixels);
++                        hparams.set_warmup_n_tokens(28*28); // avoid OOM on warmup
++                    } break;
+                 case PROJECTOR_TYPE_KIMIK25:
+                     {
+                         hparams.rope_theta = 10000.0f;
+@@ -4256,6 +4323,7 @@ struct clip_model_loader {
+                 } break;
+             case PROJECTOR_TYPE_LFM2:
+             case PROJECTOR_TYPE_KIMIVL:
++            case PROJECTOR_TYPE_PADDLEOCR:
+             case PROJECTOR_TYPE_KIMIK25:
+                 {
+                     model.mm_input_norm_w = get_tensor(TN_MM_INP_NORM);
+@@ -5273,6 +5341,21 @@ bool clip_image_preprocess(struct clip_ctx * ctx, const clip_image_u8 * img, str
+                 res_imgs->grid_y = inst.grid_size.height;
+             } break;
+ 
++        case PROJECTOR_TYPE_PADDLEOCR:
++            {
++                GGML_ASSERT(params.image_min_pixels > 0 && params.image_max_pixels > 0);
++                clip_image_u8 resized;
++                const clip_image_size new_size = img_tool::calc_size_preserved_ratio(
++                    original_size,
++                    params.patch_size * params.n_merge,
++                    params.image_min_pixels,
++                    params.image_max_pixels);
++                img_tool::resize(*img, resized, new_size, img_tool::RESIZE_ALGO_BICUBIC, false);
++                clip_image_f32_ptr img_f32(clip_image_f32_init());
++                normalize_image_u8_to_f32(resized, *img_f32, params.image_mean, params.image_std);
++                res_imgs->entries.push_back(std::move(img_f32));
++            } break;
++
+         case PROJECTOR_TYPE_QWEN2VL:
+         case PROJECTOR_TYPE_QWEN25VL:
+         case PROJECTOR_TYPE_QWEN3VL:
+@@ -5723,7 +5806,7 @@ const char * clip_patch_merge_type(const struct clip_ctx * ctx) {
+ int clip_n_output_tokens_x(const struct clip_ctx * ctx, struct clip_image_f32 * img) {
+     const auto & params = ctx->model.hparams;
+     const int n_total = clip_n_output_tokens(ctx, img);
+-    if (ctx->proj_type() == PROJECTOR_TYPE_QWEN2VL || ctx->proj_type() == PROJECTOR_TYPE_QWEN25VL || ctx->proj_type() == PROJECTOR_TYPE_QWEN3VL || ctx->proj_type() == PROJECTOR_TYPE_LING3VL || ctx->proj_type() == PROJECTOR_TYPE_MINIMAX_M3_VL) {
++    if (ctx->proj_type() == PROJECTOR_TYPE_QWEN2VL || ctx->proj_type() == PROJECTOR_TYPE_QWEN25VL || ctx->proj_type() == PROJECTOR_TYPE_QWEN3VL || ctx->proj_type() == PROJECTOR_TYPE_LING3VL || ctx->proj_type() == PROJECTOR_TYPE_MINIMAX_M3_VL || ctx->proj_type() == PROJECTOR_TYPE_PADDLEOCR) {
+         return img->nx / (params.patch_size * 2);
+     }
+     return n_total;
+@@ -5731,7 +5814,7 @@ int clip_n_output_tokens_x(const struct clip_ctx * ctx, struct clip_image_f32 *
+ 
+ int clip_n_output_tokens_y(const struct clip_ctx * ctx, struct clip_image_f32 * img) {
+     const auto & params = ctx->model.hparams;
+-    if (ctx->proj_type() == PROJECTOR_TYPE_QWEN2VL || ctx->proj_type() == PROJECTOR_TYPE_QWEN25VL || ctx->proj_type() == PROJECTOR_TYPE_QWEN3VL || ctx->proj_type() == PROJECTOR_TYPE_LING3VL || ctx->proj_type() == PROJECTOR_TYPE_MINIMAX_M3_VL) {
++    if (ctx->proj_type() == PROJECTOR_TYPE_QWEN2VL || ctx->proj_type() == PROJECTOR_TYPE_QWEN25VL || ctx->proj_type() == PROJECTOR_TYPE_QWEN3VL || ctx->proj_type() == PROJECTOR_TYPE_LING3VL || ctx->proj_type() == PROJECTOR_TYPE_MINIMAX_M3_VL || ctx->proj_type() == PROJECTOR_TYPE_PADDLEOCR) {
+         return img->ny / (params.patch_size * 2);
+     }
+     return 1;
+@@ -5817,6 +5900,12 @@ int clip_n_output_tokens(const struct clip_ctx * ctx, struct clip_image_f32 * im
+                 int y_patch = CLIP_ALIGN(img->ny, out_patch_size) / out_patch_size;
+                 n_patches = x_patch * y_patch;
+             } break;
++        case PROJECTOR_TYPE_PADDLEOCR:
++            {
++                int n_merge = ctx->model.hparams.n_merge;
++                int stride = n_merge * n_merge;
++                n_patches = CLIP_ALIGN(n_patches, stride) / stride;
++            } break;
+         case PROJECTOR_TYPE_PIXTRAL:
+         case PROJECTOR_TYPE_LIGHTONOCR:
+             {
+@@ -6254,6 +6343,19 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
+                 }
+                 set_input_i32("pos_w", pos_data);
+             } break;
++        case PROJECTOR_TYPE_PADDLEOCR:
++            {
++                const int pw = image_size_width / patch_size;
++                std::vector<int> positions(n_pos * 4);
++                // Paddle patches remain in row-major order, unlike Qwen's merge blocks.
++                for (int i = 0; i < n_pos; ++i) {
++                    positions[              i] = i / pw;
++                    positions[    n_pos + i] = i % pw;
++                    positions[2 * n_pos + i] = i / pw;
++                    positions[3 * n_pos + i] = i % pw;
++                }
++                set_input_i32("positions", positions);
++            } break;
+         case PROJECTOR_TYPE_MINIMAX_M3_VL:
+             {
+                 // 3-axis (T|H|W) NEOX RoPE. Still images use t=0, so the T
+@@ -6497,6 +6599,7 @@ int clip_n_mmproj_embd(const struct clip_ctx * ctx) {
+         case PROJECTOR_TYPE_LFM2:
+         case PROJECTOR_TYPE_KIMIVL:
+         case PROJECTOR_TYPE_KIMIK25:
++        case PROJECTOR_TYPE_PADDLEOCR:
+         case PROJECTOR_TYPE_DEEPSEEK4V:
+         case PROJECTOR_TYPE_DEEPSEEK41:
+             return ctx->model.mm_2_w->ne[1];
+@@ -6522,7 +6625,8 @@ bool clip_is_qwen2vl(const struct clip_ctx * ctx) {
+     return ctx->proj_type() == PROJECTOR_TYPE_QWEN2VL
+         || ctx->proj_type() == PROJECTOR_TYPE_QWEN25VL
+         || ctx->proj_type() == PROJECTOR_TYPE_QWEN3VL
+-        || ctx->proj_type() == PROJECTOR_TYPE_LING3VL;
++        || ctx->proj_type() == PROJECTOR_TYPE_LING3VL
++        || ctx->proj_type() == PROJECTOR_TYPE_PADDLEOCR;
+ }
+ 
+ bool clip_is_llava(const struct clip_ctx * ctx) {
+diff --git a/examples/mtmd/mtmd-helper.cpp b/examples/mtmd/mtmd-helper.cpp
+index b487f5c..4be3463 100644
+--- a/examples/mtmd/mtmd-helper.cpp
++++ b/examples/mtmd/mtmd-helper.cpp
+@@ -9,6 +9,7 @@
+ 
+ #include "mtmd.h"
+ #include "mtmd-helper.h"
++#include "mtmd-helper-internal.h"
+ #include "llama.h"
+ 
+ #include <algorithm>
+@@ -56,117 +57,6 @@ llama_pos mtmd_helper_get_n_pos(const mtmd_input_chunks * chunks) {
+     return n_pos;
+ }
+ 
+-// helper struct to make working with embd batch easier
+-// note: this will be removed after llama_batch_ext refactoring
+-struct decode_embd_batch {
+-    int n_pos_per_embd;
+-    int n_mmproj_embd;
+-    std::vector<llama_pos>      pos;
+-    std::vector<llama_pos>      pos_view; // used by mrope
+-    std::vector<int32_t>        n_seq_id;
+-    std::vector<llama_seq_id>   seq_id_0;
+-    std::vector<llama_seq_id *> seq_ids;
+-    std::vector<int8_t>         logits;
+-    llama_batch batch;
+-    decode_embd_batch(float * embd, int32_t n_tokens, int n_pos_per_embd, int n_mmproj_embd) : n_pos_per_embd(n_pos_per_embd), n_mmproj_embd(n_mmproj_embd) {
+-        pos     .resize(n_tokens * n_pos_per_embd);
+-        n_seq_id.resize(n_tokens);
+-        seq_ids .resize(n_tokens + 1);
+-        logits  .resize(n_tokens);
+-        seq_id_0.resize(1);
+-        seq_ids [n_tokens] = nullptr;
+-        batch = {
+-            /*n_tokens       =*/ n_tokens,
+-            /*tokens         =*/ nullptr,
+-            /*embd           =*/ embd,
+-            /*pos            =*/ pos.data(),
+-            /*n_seq_id       =*/ n_seq_id.data(),
+-            /*seq_id         =*/ seq_ids.data(),
+-            /*logits         =*/ logits.data(),
+-        };
+-    }
+-
+-    void set_position_normal(llama_pos pos_0, llama_seq_id seq_id) {
+-        seq_id_0[0] = seq_id;
+-        for (int i = 0; i < batch.n_tokens; i++) {
+-            batch.pos     [i] = pos_0 + i;
+-            batch.n_seq_id[i] = 1;
+-            batch.seq_id  [i] = seq_id_0.data();
+-            batch.logits  [i] = false;
+-        }
+-    }
+-
+-    // M-RoPE for image
+-    void set_position_mrope_2d(llama_pos pos_0, int nx, int ny, llama_seq_id seq_id) {
+-        GGML_ASSERT(n_pos_per_embd == 4);
+-        seq_id_0[0] = seq_id;
+-        for (int y = 0; y < ny; y++) {
+-            for (int x = 0; x < nx; x++) {
+-                int i = y * nx + x;
+-                pos[i                     ] = pos_0;
+-                pos[i + batch.n_tokens    ] = pos_0 + y;
+-                pos[i + batch.n_tokens * 2] = pos_0 + x;
+-                pos[i + batch.n_tokens * 3] = 0; // last pos dim is unused
+-            }
+-        }
+-        for (int i = 0; i < batch.n_tokens; i++) {
+-            batch.n_seq_id[i] = 1;
+-            batch.seq_id  [i] = seq_id_0.data();
+-            batch.logits  [i] = false;
+-        }
+-    }
+-
+-    // M-RoPE for audio
+-    void set_position_mrope_1d(llama_pos pos_0, llama_seq_id seq_id) {
+-        GGML_ASSERT(n_pos_per_embd == 4);
+-        seq_id_0[0] = seq_id;
+-        for (int i = 0; i < batch.n_tokens; i++) {
+-            pos[i                     ] = pos_0 + i;
+-            pos[i + batch.n_tokens    ] = pos_0 + i;
+-            pos[i + batch.n_tokens * 2] = pos_0 + i;
+-            pos[i + batch.n_tokens * 3] = 0; // last pos dim is unused
+-        }
+-        for (int i = 0; i < batch.n_tokens; i++) {
+-            batch.n_seq_id[i] = 1;
+-            batch.seq_id  [i] = seq_id_0.data();
+-            batch.logits  [i] = false;
+-        }
+-    }
+-
+-    llama_batch get_view(int offset, int n_tokens) {
+-        llama_pos * pos_ptr;
+-        pos_view.clear();
+-        pos_view.reserve(n_tokens * n_pos_per_embd);
+-        if (n_pos_per_embd > 1) {
+-            // mrope
+-            // for example, with layout of src: 1234...1234...1234...1234...
+-            //       offset 2 will give us dst: 34...34...34...34...
+-            for (int i = 0; i < n_pos_per_embd; i++) {
+-                // assume n_tokens is less than or equal to batch.n_tokens
+-                // batch.n_tokens is number of **total** tokens
+-                // n_tokens is number of viewed token
+-                size_t src_idx = i * batch.n_tokens + offset;
+-                pos_view.insert(pos_view.end(),
+-                    pos.data() + src_idx,
+-                    pos.data() + src_idx + n_tokens);
+-            }
+-            pos_ptr = pos_view.data();
+-        } else {
+-            // normal
+-            pos_ptr = pos.data() + offset;
+-        }
+-        return {
+-            /*n_tokens       =*/ n_tokens,
+-            /*tokens         =*/ nullptr,
+-            /*embd           =*/ batch.embd     + offset * n_mmproj_embd,
+-            /*pos            =*/ pos_ptr,
+-            /*n_seq_id       =*/ batch.n_seq_id + offset,
+-            /*seq_id         =*/ batch.seq_id   + offset,
+-            /*logits         =*/ batch.logits   + offset,
+-        };
+-    }
+-};
+-
+ static int32_t mtmd_helper_decode_image_chunk_impl(
+         mtmd_context * ctx,
+         struct llama_context * lctx,
+diff --git a/examples/mtmd/mtmd.cpp b/examples/mtmd/mtmd.cpp
+index f0c9caf..bf2ef7c 100644
+--- a/examples/mtmd/mtmd.cpp
++++ b/examples/mtmd/mtmd.cpp
+@@ -25,7 +25,7 @@ struct mtmd_bitmap {
+ struct mtmd_image_tokens {
+     uint32_t nx; // number of tokens in x direction
+     uint32_t ny; // number of tokens in y direction
+-    bool use_mrope_pos = false; // use M-RoPE position counting (the whole image is 1 temporal position)
++    bool use_mrope_pos = false; // M-RoPE position span is max(nx, ny)
+     uint32_t n_tokens() const { return nx * ny; }
+     clip_image_f32_batch batch_f32; // preprocessed image patches
+     std::string id; // optional user-defined ID, useful for KV cache tracking
+@@ -138,7 +138,7 @@ struct mtmd_context {
+     bool        tok_row_end_trail = false;
+     bool        ov_img_first      = false;
+ 
+-    bool use_mrope = false; // for Qwen2VL, we need to use M-RoPE
++    bool use_mrope = false; // Qwen2VL and PaddleOCR use four-plane M-RoPE positions
+ 
+     // string template for slice image delimiters with row/col (idefics3)
+     std::string sli_img_start_tmpl;
+@@ -168,7 +168,7 @@ struct mtmd_context {
+         clip_context_params ctx_clip_params {
+             /* use_gpu           */ ctx_params.use_gpu,
+             /* verbosity         */ ctx_params.verbosity,
+-            /* flash_attn_type   */ CLIP_FLASH_ATTN_TYPE_DISABLED,
++            /* flash_attn_type   */ mtmd_get_clip_flash_attn_type(ctx_params.flash_attn_type),
+             /* image_min_tokens  */ ctx_params.image_min_tokens,
+             /* image_max_tokens  */ ctx_params.image_max_tokens,
+             /* kq_type           */ ctx_params.kq_type,
+@@ -305,6 +305,11 @@ struct mtmd_context {
+             img_beg = "<|im_start|>";
+             img_end = "<|im_end|>";
+ 
++        } else if (proj == PROJECTOR_TYPE_PADDLEOCR) {
++            // <|IMAGE_START|> ... (image embeddings) ... <|IMAGE_END|>
++            img_beg = "<|IMAGE_START|>";
++            img_end = "<|IMAGE_END|>";
++
+         }
+         else if (proj == PROJECTOR_TYPE_GEMMA4V) {
+             // <|image> ... (image embeddings) ... <image|>
+@@ -647,7 +652,7 @@ struct mtmd_tokenizer {
+ 
+                 mtmd_image_tokens_ptr image_tokens(new mtmd_image_tokens);
+                 if (ctx->use_mrope) {
+-                    // for Qwen2VL, we need this information for M-RoPE decoding positions
++                    // retain the merged 2D grid for M-RoPE decoding positions
+                     image_tokens->nx = clip_n_output_tokens_x(ctx->ctx_v, batch_f32.entries[0].get());
+                     image_tokens->ny = clip_n_output_tokens_y(ctx->ctx_v, batch_f32.entries[0].get());
+                     image_tokens->use_mrope_pos = true;
+@@ -1123,7 +1128,7 @@ const char * mtmd_image_tokens_get_id(const mtmd_image_tokens * image_tokens) {
+ 
+ llama_pos mtmd_image_tokens_get_n_pos(const mtmd_image_tokens * image_tokens) {
+     if (image_tokens->use_mrope_pos) {
+-        return 1; // for M-RoPE, the whole image is 1 in temporal dimension
++        return std::max(image_tokens->nx, image_tokens->ny);
+     }
+     return image_tokens->n_tokens();
+ }
+diff --git a/examples/mtmd/mtmd.h b/examples/mtmd/mtmd.h
+index 5c1141f..c001317 100644
+--- a/examples/mtmd/mtmd.h
++++ b/examples/mtmd/mtmd.h
+@@ -162,7 +162,7 @@ MTMD_API const mtmd_image_tokens *  mtmd_input_chunk_get_tokens_image(const mtmd
+ MTMD_API size_t                     mtmd_input_chunk_get_n_tokens    (const mtmd_input_chunk * chunk);
+ // returns nullptr for ID on text chunk
+ MTMD_API const char *               mtmd_input_chunk_get_id          (const mtmd_input_chunk * chunk);
+-// number of temporal positions (always 1 for M-RoPE, n_tokens otherwise)
++// decoder position span (max(nx, ny) for M-RoPE images, n_tokens otherwise)
+ MTMD_API llama_pos                  mtmd_input_chunk_get_n_pos       (const mtmd_input_chunk * chunk);
+ 
+ // in case you want to use custom logic to handle the chunk (i.e. KV cache management)
+@@ -183,7 +183,7 @@ MTMD_API size_t       mtmd_image_tokens_get_n_tokens(const mtmd_image_tokens * i
+ MTMD_API size_t       mtmd_image_tokens_get_nx      (const mtmd_image_tokens * image_tokens);
+ MTMD_API size_t       mtmd_image_tokens_get_ny      (const mtmd_image_tokens * image_tokens);
+ MTMD_API const char * mtmd_image_tokens_get_id      (const mtmd_image_tokens * image_tokens); // TODO: deprecate
+-// number of temporal positions (always 1 for M-RoPE, n_tokens otherwise)
++// decoder position span (max(nx, ny) for M-RoPE, n_tokens otherwise)
+ MTMD_API llama_pos    mtmd_image_tokens_get_n_pos   (const mtmd_image_tokens * image_tokens); // TODO: deprecate
+ 
+ // tokenize an input text prompt and a list of bitmaps (images/audio)
+diff --git a/ggml/src/ggml.c b/ggml/src/ggml.c
+index c5fd7ec..a53439f 100644
+--- a/ggml/src/ggml.c
++++ b/ggml/src/ggml.c
+@@ -22947,7 +22947,7 @@ static void ggml_compute_forward_upscale_f32(
+         sf1 = ne1 > 1 && ne01 > 1 ? (float)(ne1 - 1) / (ne01 - 1) : sf1;
+     }
+ 
+-    if (mode == GGML_SCALE_MODE_NEAREST || mode == GGML_SCALE_MODE_BILINEAR) {
++    if (mode == GGML_SCALE_MODE_NEAREST) {
+         for (int64_t i3 = 0; i3 < ne3; i3++) {
+             const int64_t i03 = i3 / sf3;
+             for (int64_t i2 = ith; i2 < ne2; i2 += nth) {
+@@ -22965,6 +22965,35 @@ static void ggml_compute_forward_upscale_f32(
+                 }
+             }
+         }
++    } else if (mode == GGML_SCALE_MODE_BILINEAR) {
++        for (int64_t i3 = 0; i3 < ne3; i3++) {
++            const int64_t i03 = i3 / sf3;
++            for (int64_t i2 = ith; i2 < ne2; i2 += nth) {
++                const int64_t i02 = i2 / sf2;
++                for (int64_t i1 = 0; i1 < ne1; i1++) {
++                    const float y = ((float)i1 + pixel_offset) / sf1 - pixel_offset;
++                    const int64_t y0 = (int64_t)floorf(y);
++                    const float dy = y - (float)y0;
++                    const int64_t sy0 = GGML_CLAMP(y0,     0, ne01 - 1);
++                    const int64_t sy1 = GGML_CLAMP(y0 + 1, 0, ne01 - 1);
++                    for (int64_t i0 = 0; i0 < ne0; i0++) {
++                        const float x = ((float)i0 + pixel_offset) / sf0 - pixel_offset;
++                        const int64_t x0 = (int64_t)floorf(x);
++                        const float dx = x - (float)x0;
++                        const int64_t sx0 = GGML_CLAMP(x0,     0, ne00 - 1);
++                        const int64_t sx1 = GGML_CLAMP(x0 + 1, 0, ne00 - 1);
++                        const char * plane = (const char *)src0->data + i02*nb02 + i03*nb03;
++                        const float p00 = *(const float *)(plane + sx0*nb00 + sy0*nb01);
++                        const float p10 = *(const float *)(plane + sx1*nb00 + sy0*nb01);
++                        const float p01 = *(const float *)(plane + sx0*nb00 + sy1*nb01);
++                        const float p11 = *(const float *)(plane + sx1*nb00 + sy1*nb01);
++                        float * dst_ptr = (float *)((char *)dst->data + i0*nb0 + i1*nb1 + i2*nb2 + i3*nb3);
++                        *dst_ptr = (1.0f - dy)*((1.0f - dx)*p00 + dx*p10)
++                                 + dy*((1.0f - dx)*p01 + dx*p11);
++                    }
++                }
++            }
++        }
+     } else if (mode == GGML_SCALE_MODE_BICUBIC) {
+         // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
+         const float a = -0.75f; // use alpha = -0.75 (same as PyTorch)
+diff --git a/ggml/src/iqk/fa/iqk_fa_96_96.cpp b/ggml/src/iqk/fa/iqk_fa_96_96.cpp
+index 345f290..677942c 100644
+--- a/ggml/src/iqk/fa/iqk_fa_96_96.cpp
++++ b/ggml/src/iqk/fa/iqk_fa_96_96.cpp
+@@ -4,6 +4,31 @@
+ 
+ #include "iqk/fa/iqk_fa_templates.h"
+ 
++#ifdef __AVX512F__
++void iqk_fa_vision_v72(int nq, int nk, const float * q, const void * k, const void * v,
++                       const void * mask, float scale, float * result) {
++    constexpr int stride = 96*sizeof(ggml_fp16_t);
++    HelperVisionV72 vh(static_cast<const char *>(v), stride);
++    auto run = [&](auto & kh) {
++        auto tile_run = [&](auto tile) {
++            iqk_flash_helper<96, 96, decltype(tile)::value>(kh, vh, nq, nk, 96, 0, 96, q,
++                    static_cast<const char *>(mask), scale, 0, result, nullptr, 0, nullptr, nullptr);
++        };
++        if (nk%128 == 0) tile_run(std::integral_constant<int, 128>{});
++        else if (nk%64 == 0) tile_run(std::integral_constant<int, 64>{});
++        else tile_run(std::integral_constant<int, 32>{});
++    };
++    // Pack only when there are enough queries to amortize the transpose.
++    if (nq >= 512 && nk >= 512 && nk <= 8192) {
++        HelperVisionK72 kh(static_cast<const char *>(k), nk, stride);
++        run(kh);
++    } else {
++        HelperF16 kh(static_cast<const char *>(k), stride);
++        run(kh);
++    }
++}
++#endif
++
+ IQK_FA_CASE(iqk_fa_96_96) {
+ 
+     auto type_k = ggml_type(int_type_k);
+diff --git a/ggml/src/iqk/fa/iqk_fa_templates.h b/ggml/src/iqk/fa/iqk_fa_templates.h
+index 9b7f8b0..ef9e8bf 100644
+--- a/ggml/src/iqk/fa/iqk_fa_templates.h
++++ b/ggml/src/iqk/fa/iqk_fa_templates.h
+@@ -207,6 +207,113 @@ struct HelperF16 final : public BaseHelper {
+     }
+ };
+ 
++#ifdef __AVX512F__
++// Prepack the original four-key GEMM layout once per vision head so every
++// query tile can reuse the conversion and transpose. Use only five vectors of
++// features (72 live, 8 zeros), not the original six (72 live, 24 zeros).
++struct HelperVisionK72 : BaseHelper {
++    static constexpr int width = 80, keys = 4;
++    std::vector<float> packed;
++
++    HelperVisionK72(const char * k, int nk, int row_stride)
++        : BaseHelper(nullptr, width*sizeof(float)), packed(size_t(nk)*width) {
++        for (int i = 0; i < nk; i += keys) {
++            const auto * src = k + size_t(i)*row_stride;
++            auto * dst = packed.data() + size_t(i)*width;
++            for (int d = 0; d < width; d += 16) {
++                auto a = F16::load(src + 0*row_stride, d/16);
++                auto b = F16::load(src + 1*row_stride, d/16);
++                auto c = F16::load(src + 2*row_stride, d/16);
++                auto e = F16::load(src + 3*row_stride, d/16);
++                auto ab0 = _mm512_unpacklo_ps(a, b), ab1 = _mm512_unpackhi_ps(a, b);
++                auto ce0 = _mm512_unpacklo_ps(c, e), ce1 = _mm512_unpackhi_ps(c, e);
++                _mm512_storeu_ps(dst + 0*16, _mm512_castpd_ps(_mm512_unpacklo_pd(_mm512_castps_pd(ab0), _mm512_castps_pd(ce0))));
++                _mm512_storeu_ps(dst + 1*16, _mm512_castpd_ps(_mm512_unpackhi_pd(_mm512_castps_pd(ab0), _mm512_castps_pd(ce0))));
++                _mm512_storeu_ps(dst + 2*16, _mm512_castpd_ps(_mm512_unpacklo_pd(_mm512_castps_pd(ab1), _mm512_castps_pd(ce1))));
++                _mm512_storeu_ps(dst + 3*16, _mm512_castpd_ps(_mm512_unpackhi_pd(_mm512_castps_pd(ab1), _mm512_castps_pd(ce1))));
++                dst += keys*16;
++            }
++        }
++        data = block = reinterpret_cast<const char *>(packed.data());
++    }
++
++    template <int rows>
++    static IQK_ALWAYS_INLINE void score_tile(const float * k0, const float * k1, const float * q,
++                                  int stride_q, float * scores, int stride_scores) {
++        __m512 s0[rows]{}, s1[rows]{};
++        for (int d = 0; d < 64; d += 16) {
++            const auto * a = k0 + d*keys;
++            const auto * b = k1 + d*keys;
++#pragma GCC unroll 8
++            for (int r = 0; r < rows; ++r) {
++                auto qr = _mm512_loadu_ps(q + r*stride_q + d);
++                auto w0 = _mm512_shuffle_ps(qr, qr, 0x00), w1 = _mm512_shuffle_ps(qr, qr, 0x55);
++                auto w2 = _mm512_shuffle_ps(qr, qr, 0xaa), w3 = _mm512_shuffle_ps(qr, qr, 0xff);
++                s0[r] = _mm512_fmadd_ps(_mm512_loadu_ps(a + 0*16), w0, s0[r]);
++                s1[r] = _mm512_fmadd_ps(_mm512_loadu_ps(b + 0*16), w0, s1[r]);
++                s0[r] = _mm512_fmadd_ps(_mm512_loadu_ps(a + 1*16), w1, s0[r]);
++                s1[r] = _mm512_fmadd_ps(_mm512_loadu_ps(b + 1*16), w1, s1[r]);
++                s0[r] = _mm512_fmadd_ps(_mm512_loadu_ps(a + 2*16), w2, s0[r]);
++                s1[r] = _mm512_fmadd_ps(_mm512_loadu_ps(b + 2*16), w2, s1[r]);
++                s0[r] = _mm512_fmadd_ps(_mm512_loadu_ps(a + 3*16), w3, s0[r]);
++                s1[r] = _mm512_fmadd_ps(_mm512_loadu_ps(b + 3*16), w3, s1[r]);
++            }
++        }
++        // Only two quarters have live features in the 64:80 block. Update
++        // those with 256-bit FMAs and reduce in the original pairwise order.
++        auto sum = [](__m512 s, __m256 tail) {
++            auto u = _mm_add_ps(_mm256_castps256_ps128(tail), _mm256_extractf128_ps(tail, 1));
++            auto v = _mm_add_ps(_mm512_extractf32x4_ps(s, 2), _mm512_extractf32x4_ps(s, 3));
++            return _mm_add_ps(u, v);
++        };
++        const auto * a = k0 + 64*keys;
++        const auto * b = k1 + 64*keys;
++#pragma GCC unroll 8
++        for (int r = 0; r < rows; ++r) {
++            const auto qr = _mm256_loadu_ps(q + r*stride_q + 64);
++            const auto w0 = _mm256_permute_ps(qr, 0x00), w1 = _mm256_permute_ps(qr, 0x55);
++            const auto w2 = _mm256_permute_ps(qr, 0xaa), w3 = _mm256_permute_ps(qr, 0xff);
++            auto u = _mm512_castps512_ps256(s0[r]), v = _mm512_castps512_ps256(s1[r]);
++            u = _mm256_fmadd_ps(_mm256_loadu_ps(a + 0*16), w0, u);
++            v = _mm256_fmadd_ps(_mm256_loadu_ps(b + 0*16), w0, v);
++            u = _mm256_fmadd_ps(_mm256_loadu_ps(a + 1*16), w1, u);
++            v = _mm256_fmadd_ps(_mm256_loadu_ps(b + 1*16), w1, v);
++            u = _mm256_fmadd_ps(_mm256_loadu_ps(a + 2*16), w2, u);
++            v = _mm256_fmadd_ps(_mm256_loadu_ps(b + 2*16), w2, v);
++            u = _mm256_fmadd_ps(_mm256_loadu_ps(a + 3*16), w3, u);
++            v = _mm256_fmadd_ps(_mm256_loadu_ps(b + 3*16), w3, v);
++            _mm_storeu_ps(scores + r*stride_scores, sum(s0[r], u));
++            _mm_storeu_ps(scores + r*stride_scores + keys, sum(s1[r], v));
++        }
++    }
++
++#if defined(__GNUC__) && !defined(__clang__)
++    __attribute__((noipa)) // Keep one microkernel for all outer tile shapes (32/64/128).
++#endif
++    IQK_NOINLINE void score(int nq, int nk, const float * q, int stride_q, float * scores) const {
++        const auto * k = reinterpret_cast<const float *>(block);
++        for (int i = 0; i < nk; i += 2*keys) {
++            const auto * k0 = k + i*width;
++            const auto * k1 = k0 + keys*width;
++            int q0 = 0;
++            for (; q0 + 8 <= nq; q0 += 8)
++                score_tile<8>(k0, k1, q + q0*stride_q, stride_q, scores + q0*nk + i, nk);
++            for (; q0 < nq; ++q0)
++                score_tile<1>(k0, k1, q + q0*stride_q, stride_q, scores + q0*nk + i, nk);
++        }
++    }
++};
++
++// Only the first five SIMD vectors contain live Paddle vision values.
++struct HelperVisionV72 : BaseHelper {
++    using BaseHelper::BaseHelper;
++    inline void load(int l, int i, F16::Data & a, F16::Data & b) const {
++        a = F16::load(lblock(l), i);
++        b = F16::load(lblock(l), i + 1);
++    }
++};
++#endif
++
+ template <int D> struct block_q8_KV {
+     float d;
+     int   s;
+@@ -1017,6 +1124,27 @@ struct FlashQKV {
+         for (int i = 0; i < D/F16::block_size; ++i) F16::store(qkv_cache + F16::block_size*i, vq[i]);
+     }
+ 
++#ifdef __AVX512F__
++    template <typename FMS>
++    inline void accumulate_vision_tail(int nq, const HelperVisionV72 & vh, const FMS & fms) {
++        // Preserve each lane's FP32 FMA order; omit the entirely padded sixth vector.
++        for (int l = 0; l < k_step; l += 4) {
++            const auto v0 = F16::load(vh.lblock(l + 0), 4), v1 = F16::load(vh.lblock(l + 1), 4);
++            const auto v2 = F16::load(vh.lblock(l + 2), 4), v3 = F16::load(vh.lblock(l + 3), 4);
++            for (int j = 0; j < nq; ++j) {
++                auto * out = qkv_cache + D*j + 64;
++                const float * w = fms.cache + k_step*j + l;
++                auto acc = F16::load(out);
++                acc = F16::fmadd(acc, v0, F16::set1(w[0]));
++                acc = F16::fmadd(acc, v1, F16::set1(w[1]));
++                acc = F16::fmadd(acc, v2, F16::set1(w[2]));
++                acc = F16::fmadd(acc, v3, F16::set1(w[3]));
++                F16::store(out, acc);
++            }
++        }
++    }
++#endif
++
+     // This fails for head sizes of 80 and 112 as D/16 is odd, so we cannot do steps of 2
+     // Hence, for now, we will not handle head sizes of 80 and 112
+     template <typename VHelper, typename FMS>
+@@ -1075,7 +1203,15 @@ struct FlashQKV {
+ #ifdef __AVX2__
+         F16::Data vs[4];
+ #endif
+-        for (int i = 0; i < D/F16::block_size; i += 2) {
++#ifdef __AVX512F__
++        constexpr bool vision72 = std::is_same_v<VHelper, HelperVisionV72>;
++        static_assert(!vision72 || D == 96);
++        if constexpr (vision72) accumulate_vision_tail(q_step, vh, fms);
++        constexpr int pairs_end = vision72 ? 4 : D/F16::block_size;
++#else
++        constexpr int pairs_end = D/F16::block_size;
++#endif
++        for (int i = 0; i < pairs_end; i += 2) {
+             for (int l = 0; l < k_step; l += 4) {
+                 vh.load(l+0, i, v[0], v[4]);
+                 vh.load(l+1, i, v[1], v[5]);
+@@ -1129,7 +1265,15 @@ struct FlashQKV {
+                 }
+             }
+         }
+-        for (int i = 0; i < D/F16::block_size; i += 2) {
++#ifdef __AVX512F__
++        constexpr bool vision72 = std::is_same_v<VHelper, HelperVisionV72>;
++        static_assert(!vision72 || D == 96);
++        if constexpr (vision72) accumulate_vision_tail(nq1, vh, fms);
++        constexpr int pairs_end = vision72 ? 4 : D/F16::block_size;
++#else
++        constexpr int pairs_end = D/F16::block_size;
++#endif
++        for (int i = 0; i < pairs_end; i += 2) {
+             for (int l = 0; l < k_step; l += 4) {
+                 vh.load(l+0, i, v[0], v[4]);
+                 vh.load(l+1, i, v[1], v[5]);
+@@ -1258,6 +1402,19 @@ struct FlashQKfp32 {
+     static_assert(k_step%F16::block_size == 0);
+     static_assert(q_step <= 4 || q_step%4 == 0);
+ 
++    template <typename KHelper, typename q_float>
++    static inline void dot_scores(int nq, const KHelper & kh, int stride_q, const q_float * q, float * scores) {
++#ifdef __AVX512F__
++        if constexpr (std::is_same_v<KHelper, HelperVisionK72>) {
++            static_assert(k_step%32 == 0);
++            kh.score(nq, k_step, q, stride_q, scores);
++            return;
++        }
++#endif
++        DataInfo info{scores, (const char *)q, k_step, stride_q*sizeof(q_float), 0, 1, nullptr};
++        iqk_gemm_default_floats(D, nq, kh.block, kh.stride, info, k_step);
++    }
++
+     template <typename KHelper, typename q_float>
+     static inline void multiply_mask_kq(const KHelper& kh, int stride_q, int stride_m, const q_float * q, const char * mask,
+             FlashMS<q_step, k_step>& fms) {
+@@ -1265,8 +1422,7 @@ struct FlashQKfp32 {
+         constexpr int nrc_k = 8;
+         static_assert(k_step%nrc_k == 0);
+ #endif
+-        DataInfo info{fms.cache, (const char *)q, k_step, stride_q*sizeof(q_float), 0, 1, nullptr};
+-        iqk_gemm_default_floats(D, q_step, kh.block, kh.stride, info, k_step);
++        dot_scores(q_step, kh, stride_q, q, fms.cache);
+ #ifdef __AVX2__
+         F16::Data vk[k_step/F16::block_size];
+ #else
+@@ -1284,8 +1440,7 @@ struct FlashQKfp32 {
+         constexpr int nrc_k = 8;
+         static_assert(k_step%nrc_k == 0);
+ #endif
+-        DataInfo info{fms.cache, (const char *)q, k_step, stride_q*sizeof(q_float), 0, 1, nullptr};
+-        iqk_gemm_default_floats(D, nq, kh.block, kh.stride, info, k_step);
++        dot_scores(nq, kh, stride_q, q, fms.cache);
+ #ifdef __AVX2__
+         F16::Data vk[k_step/F16::block_size];
+ #else
+diff --git a/ggml/src/iqk/iqk_flash_attn.cpp b/ggml/src/iqk/iqk_flash_attn.cpp
+index 6b6bbd7..2653b3c 100644
+--- a/ggml/src/iqk/iqk_flash_attn.cpp
++++ b/ggml/src/iqk/iqk_flash_attn.cpp
+@@ -17,6 +17,7 @@
+ #include <cstdint>
+ #include <cstring>
+ #include <cmath>
++#include <limits>
+ #include <unordered_set>
+ 
+ namespace {
+@@ -162,6 +163,65 @@ extern "C" IQK_API bool iqk_flash_attn_noalibi(int type_q, int type_mask, float
+ 
+     if (type_q != 0 || type_mask != 1 || max_bias > 0) return false;
+ 
++    if (Dk == 72 && Dv == 72) {
++#if defined(__AVX2__)
++        // ponytail: only positive-scale, unmasked, non-GQA vision attention uses this adapter.
++        // Keep other layouts/features on their existing fallback paths.
++        if (int_type_k_in != GGML_TYPE_F16 || int_type_v != GGML_TYPE_F16 ||
++            mask || sinks || indexer || !(scale > 0) || max_bias != 0 || softcap != 0 || n_swa != 0 ||
++            neq2 != nek2 || neq2 != nev2 || neq3 != nek3 || neq3 != nev3 ||
++            ne1 != neq2 || ne2 != neq1 || nb1 != 72*sizeof(float) ||
++            neq1 <= 0 || nek1 <= 0 || neq2 <= 0 || neq3 <= 0 ||
++            nek1 > std::numeric_limits<int>::max() - 31 ||
++            stride_q < int(72*sizeof(float)) || stride_k < int(72*sizeof(ggml_fp16_t)) ||
++            stride_v < int(72*sizeof(ggml_fp16_t)) ||
++            nbq2 < long(72*sizeof(float)) || nbq3 < long(72*sizeof(float)) ||
++            nbk2 < long(72*sizeof(ggml_fp16_t)) || nbk3 < long(72*sizeof(ggml_fp16_t)) ||
++            nbv2 < long(72*sizeof(ggml_fp16_t)) || nbv3 < long(72*sizeof(ggml_fp16_t)) ||
++            nth <= 0 || ith < 0 || ith >= nth) return false;
++
++        const int64_t nheads = int64_t(neq2)*neq3;
++        if (ith >= nheads) return true; // No scratch for idle workers.
++        const int nk_pad = 32*((nek1 + 31)/32);
++        // Private scratch is linear in NQ/NK and reused across this worker's heads.
++        std::vector<float> qp(size_t(neq1)*96, 0), result(size_t(neq1)*96);
++        std::vector<ggml_fp16_t> kp(size_t(nk_pad)*96, 0), vp(size_t(nk_pad)*96, 0);
++        std::vector<ggml_fp16_t> mp(nk_pad, ggml_fp32_to_fp16(-INFINITY));
++        std::fill(mp.begin(), mp.begin() + nek1, ggml_fp32_to_fp16(0));
++        for (int64_t head = ith; head < nheads; head += nth) {
++            const int64_t h = head%neq2, b = head/neq2;
++            const auto qh = (const char *)q + h*nbq2 + b*nbq3;
++            const auto kh = (const char *)k + h*nbk2 + b*nbk3;
++            const auto vh = (const char *)v + h*nbv2 + b*nbv3;
++            for (int64_t r = 0; r < neq1; ++r)
++                std::memcpy(qp.data() + r*96, qh + r*stride_q, 72*sizeof(float));
++            for (int64_t r = 0; r < nek1; ++r) {
++                std::memcpy(kp.data() + r*96, kh + r*stride_k, 72*sizeof(ggml_fp16_t));
++                std::memcpy(vp.data() + r*96, vh + r*stride_v, 72*sizeof(ggml_fp16_t));
++            }
++#ifdef __AVX512F__
++            iqk_fa_vision_v72(neq1, nk_pad, qp.data(), kp.data(), vp.data(), mp.data(), scale, result.data());
++#else
++            // F16/F16, 96x96, a non-null mask and NK%32 == 0 cannot be
++            // rejected by iqk_fa_96_96. Never return false after publishing a head:
++            // another worker may already have returned true to the caller.
++            const bool ok = iqk_flash_attn_impl(GGML_TYPE_F16, GGML_TYPE_F16,
++                96, 96, neq1, nk_pad, 96*sizeof(float), 96*sizeof(ggml_fp16_t),
++                96*sizeof(ggml_fp16_t), 0, 96, qp.data(), kp.data(), vp.data(), mp.data(),
++                nullptr, 0, scale, 0, result.data(), nullptr, nullptr);
++            GGML_ASSERT(ok);
++#endif
++            // Preserve the original scale (D=72) and [Dv, heads, queries, batch].
++            auto dst = (char *)qkv + (b*ne2*ne1 + h)*nb1;
++            for (int64_t r = 0; r < neq1; ++r)
++                std::memcpy(dst + r*ne1*nb1, result.data() + r*96, 72*sizeof(float));
++        }
++        return true;
++#else
++        return false;
++#endif
++    }
++
+     if (indexer && indexer->type == GGML_TYPE_I32) {
+         //if (indexer->ne[0] < nek1 && neq1 >= nth && neq3 == 1 && nek3 == 1 && nev3 == 1 && nek2 == 1) {
+         if (indexer->ne[0] < nek1 && neq3 == 1 && nek3 == 1 && nev3 == 1 && nek2 == 1) {
+diff --git a/ggml/src/iqk/iqk_flash_impl.h b/ggml/src/iqk/iqk_flash_impl.h
+index 211b337..bcc96c0 100644
+--- a/ggml/src/iqk/iqk_flash_impl.h
++++ b/ggml/src/iqk/iqk_flash_impl.h
+@@ -31,5 +31,10 @@ bool iqk_flash_attn_impl(int type_k,             // type of k
+                          float       * M,
+                          float       * S);
+ 
++#ifdef __AVX512F__
++void iqk_fa_vision_v72(int nq, int nk, const float * q, const void * k, const void * v,
++                       const void * mask, float scale, float * result);
++#endif
++
+ void * iqk_repack_k(int type_k, int nek0, int nek1, int nek2, int nek3, long nbk1, long nbk2, long nbk3,
+         const void * k, void * work, int ith, int nth, int& repacked_type, uint64_t& row_size);
+diff --git a/ggml/src/iqk/iqk_gemm_floats.cpp b/ggml/src/iqk/iqk_gemm_floats.cpp
+index 5cb5d2d..7e5aed5 100644
+--- a/ggml/src/iqk/iqk_gemm_floats.cpp
++++ b/ggml/src/iqk/iqk_gemm_floats.cpp
+@@ -612,10 +612,13 @@ bool iqk_set_kernels_float(int ne00, int typeA, int typeB, std::array<mul_mat_t,
+         switch (typeB) {
+ #ifdef __AVX512BF16__
+             case GGML_TYPE_BF16: {
+-                if (ne00 % 16 == 0) {
++                // Native BF16 kernels have no tail loop; match their full step.
++                if (ne00 % QFBaseBF16::k_step == 0) {
+                     set_mul_mat_bf16(kernels);
+-                } else {
++                } else if (ne00 % QFBaseBF16x8::k_step == 0) {
+                     set_mul_mat_bf16x8(kernels);
++                } else {
++                    set_mul_mat_f<ggml_bf16_t, ggml_bf16_t>(kernels);
+                 }
+             } break;
+ #else
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index ff3fef6..671cccd 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -131,6 +131,7 @@ add_library(llama
+             graphs/build_chatglm.cpp
+             graphs/build_dots1.cpp
+             graphs/build_ernie45.cpp
++            graphs/build_paddleocr.cpp
+             graphs/build_hunyuan.cpp
+             graphs/build_mimo2.cpp
+             graphs/build_openai.cpp
+diff --git a/src/llama-arch.cpp b/src/llama-arch.cpp
+index 3f2c5b6..3c91e2c 100644
+--- a/src/llama-arch.cpp
++++ b/src/llama-arch.cpp
+@@ -74,6 +74,7 @@ static const std::map<llm_arch, const char *> LLM_ARCH_NAMES = {
+     { LLM_ARCH_DOTS1,           "dots1"        },
+     { LLM_ARCH_ERNIE4_5,        "ernie4_5"     },
+     { LLM_ARCH_ERNIE4_5_MOE,    "ernie4_5-moe" },
++    { LLM_ARCH_PADDLEOCR,       "paddleocr"    },
+     { LLM_ARCH_HUNYUAN_MOE,     "hunyuan-moe"  },
+     { LLM_ARCH_OPENAI_MOE,      "gpt-oss"      },
+     { LLM_ARCH_BAILINGMOE2,     "bailingmoe2"  },
+diff --git a/src/llama-arch.h b/src/llama-arch.h
+index 8673898..ee56555 100644
+--- a/src/llama-arch.h
++++ b/src/llama-arch.h
+@@ -72,6 +72,7 @@ enum llm_arch {
+     LLM_ARCH_DOTS1,
+     LLM_ARCH_ERNIE4_5,
+     LLM_ARCH_ERNIE4_5_MOE,
++    LLM_ARCH_PADDLEOCR,
+     LLM_ARCH_HUNYUAN_MOE,
+     LLM_ARCH_OPENAI_MOE,
+     LLM_ARCH_BAILINGMOE2,
+diff --git a/src/llama-build-context.cpp b/src/llama-build-context.cpp
+index 4a1a851..f7c9395 100644
+--- a/src/llama-build-context.cpp
++++ b/src/llama-build-context.cpp
+@@ -3161,6 +3161,10 @@ ggml_cgraph * llm_build_context::llama_build_graph(
+         {
+             result = llm.build_ernie4_5_moe();
+         } break;
++        case LLM_ARCH_PADDLEOCR:
++        {
++            result = llm.build_paddleocr();
++        } break;
+         case LLM_ARCH_HUNYUAN_MOE:
+             {
+                 result = llm.build_hunyuan_moe();
+diff --git a/src/llama-build-context.h b/src/llama-build-context.h
+index d981f70..0bd398d 100644
+--- a/src/llama-build-context.h
++++ b/src/llama-build-context.h
+@@ -429,6 +429,8 @@ struct llm_build_context {
+ 
+     ggml_cgraph * build_ernie4_5_moe();
+ 
++    ggml_cgraph * build_paddleocr();
++
+     ggml_cgraph * build_hunyuan_moe();
+ 
+     ggml_cgraph * build_openai_moe();
+diff --git a/src/llama-hparams.cpp b/src/llama-hparams.cpp
+index 10f1605..53f954d 100644
+--- a/src/llama-hparams.cpp
++++ b/src/llama-hparams.cpp
+@@ -1753,8 +1753,12 @@ void llm_load_hparams(
+             } break;
+         case LLM_ARCH_ERNIE4_5:
+         case LLM_ARCH_ERNIE4_5_MOE:
++        case LLM_ARCH_PADDLEOCR:
+         {
+             ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS, hparams.f_norm_rms_eps);
++            if (model.arch == LLM_ARCH_PADDLEOCR) {
++                ml.get_key_or_arr(LLM_KV_ROPE_DIMENSION_SECTIONS, hparams.rope_sections, 4, true);
++            }
+             if (model.arch == LLM_ARCH_ERNIE4_5_MOE) {
+                 ml.get_key(LLM_KV_EXPERT_FEED_FORWARD_LENGTH, hparams.n_ff_exp);
+                 ml.get_key(LLM_KV_EXPERT_SHARED_FEED_FORWARD_LENGTH, hparams.n_ff_shexp, false);
+diff --git a/src/llama-load-tensors.cpp b/src/llama-load-tensors.cpp
+index 3db4883..d531b11 100644
+--- a/src/llama-load-tensors.cpp
++++ b/src/llama-load-tensors.cpp
+@@ -6022,6 +6022,7 @@ bool create_tensors_helper::create_tensors() {
+             use_mmap_buffer = create_dots1_tensors(tn); break;
+         case LLM_ARCH_ERNIE4_5:
+         case LLM_ARCH_ERNIE4_5_MOE:
++        case LLM_ARCH_PADDLEOCR:
+             use_mmap_buffer = create_ernie45_tensors(tn); break;
+         case LLM_ARCH_HUNYUAN_MOE:
+             use_mmap_buffer = create_hunyuan_tensors(tn); break;
+diff --git a/src/llama-model.cpp b/src/llama-model.cpp
+index f37f64f..2e5c389 100644
+--- a/src/llama-model.cpp
++++ b/src/llama-model.cpp
+@@ -1834,6 +1834,23 @@ static const std::map<llm_arch, std::map<llm_tensor, std::string>> LLM_TENSOR_NA
+             { LLM_TENSOR_FFN_UP,             "blk.%d.ffn_up" },
+         },
+     },
++    {
++        LLM_ARCH_PADDLEOCR,
++        {
++            { LLM_TENSOR_TOKEN_EMBD,         "token_embd" },
++            { LLM_TENSOR_OUTPUT_NORM,        "output_norm" },
++            { LLM_TENSOR_OUTPUT,             "output" },
++            { LLM_TENSOR_ATTN_NORM,          "blk.%d.attn_norm" },
++            { LLM_TENSOR_ATTN_Q,             "blk.%d.attn_q" },
++            { LLM_TENSOR_ATTN_K,             "blk.%d.attn_k" },
++            { LLM_TENSOR_ATTN_V,             "blk.%d.attn_v" },
++            { LLM_TENSOR_ATTN_OUT,           "blk.%d.attn_output" },
++            { LLM_TENSOR_FFN_NORM,           "blk.%d.ffn_norm" },
++            { LLM_TENSOR_FFN_GATE,           "blk.%d.ffn_gate" },
++            { LLM_TENSOR_FFN_DOWN,           "blk.%d.ffn_down" },
++            { LLM_TENSOR_FFN_UP,             "blk.%d.ffn_up" },
++        },
++    },
+     {
+         LLM_ARCH_ERNIE4_5_MOE,
+         {
+diff --git a/src/llama.cpp b/src/llama.cpp
+index e170df2..4915604 100644
+--- a/src/llama.cpp
++++ b/src/llama.cpp
+@@ -10248,6 +10248,7 @@ enum llama_rope_type llama_rope_type(const struct llama_model * model) {
+             return LLAMA_ROPE_TYPE_NEOX;
+ 
+         case LLM_ARCH_QWEN2VL:
++        case LLM_ARCH_PADDLEOCR:
+             return LLAMA_ROPE_TYPE_MROPE;
+ 
+         case LLM_ARCH_QWEN3VL:
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index a0f93a3..722a914 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -189,6 +189,8 @@ endif()
+ llama_build_and_test(test-jinja.cpp)
+ llama_test(test-jinja NAME test-jinja-py ARGS -py LABEL python)
+ llama_build_and_test(test-chat-auto-parser.cpp WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
++llama_build_and_test(test-lfm-json-schema.cpp WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
++llama_build_and_test(test-paddleocr.cpp)
+ llama_build_and_test(test-chat-template.cpp )
+ llama_build_and_test(test-json-partial.cpp )
+ llama_build_and_test(test-cpu-affinity.cpp )
+diff --git a/examples/mtmd/mtmd-helper-internal.h b/examples/mtmd/mtmd-helper-internal.h
+new file mode 100644
+index 0000000..0589db9
+--- /dev/null
++++ b/examples/mtmd/mtmd-helper-internal.h
+@@ -0,0 +1,119 @@
++#ifndef MTMD_HELPER_INTERNAL_H
++#define MTMD_HELPER_INTERNAL_H
++
++#include "llama.h"
++
++#include <vector>
++
++// helper struct to make working with embd batch easier
++// note: this will be removed after llama_batch_ext refactoring
++struct decode_embd_batch {
++    int n_pos_per_embd;
++    int n_mmproj_embd;
++    std::vector<llama_pos>      pos;
++    std::vector<llama_pos>      pos_view; // used by mrope
++    std::vector<int32_t>        n_seq_id;
++    std::vector<llama_seq_id>   seq_id_0;
++    std::vector<llama_seq_id *> seq_ids;
++    std::vector<int8_t>         logits;
++    llama_batch batch;
++    decode_embd_batch(float * embd, int32_t n_tokens, int n_pos_per_embd, int n_mmproj_embd) : n_pos_per_embd(n_pos_per_embd), n_mmproj_embd(n_mmproj_embd) {
++        pos     .resize(n_tokens * n_pos_per_embd);
++        n_seq_id.resize(n_tokens);
++        seq_ids .resize(n_tokens + 1);
++        logits  .resize(n_tokens);
++        seq_id_0.resize(1);
++        seq_ids [n_tokens] = nullptr;
++        batch = {
++            /*n_tokens       =*/ n_tokens,
++            /*tokens         =*/ nullptr,
++            /*embd           =*/ embd,
++            /*pos            =*/ pos.data(),
++            /*n_seq_id       =*/ n_seq_id.data(),
++            /*seq_id         =*/ seq_ids.data(),
++            /*logits         =*/ logits.data(),
++        };
++    }
++
++    void set_position_normal(llama_pos pos_0, llama_seq_id seq_id) {
++        seq_id_0[0] = seq_id;
++        for (int i = 0; i < batch.n_tokens; i++) {
++            batch.pos     [i] = pos_0 + i;
++            batch.n_seq_id[i] = 1;
++            batch.seq_id  [i] = seq_id_0.data();
++            batch.logits  [i] = false;
++        }
++    }
++
++    // M-RoPE for image
++    void set_position_mrope_2d(llama_pos pos_0, int nx, int ny, llama_seq_id seq_id) {
++        GGML_ASSERT(n_pos_per_embd == 4);
++        seq_id_0[0] = seq_id;
++        for (int y = 0; y < ny; y++) {
++            for (int x = 0; x < nx; x++) {
++                int i = y * nx + x;
++                pos[i                     ] = pos_0;
++                pos[i + batch.n_tokens    ] = pos_0 + y;
++                pos[i + batch.n_tokens * 2] = pos_0 + x;
++                pos[i + batch.n_tokens * 3] = 0; // last pos dim is unused
++            }
++        }
++        for (int i = 0; i < batch.n_tokens; i++) {
++            batch.n_seq_id[i] = 1;
++            batch.seq_id  [i] = seq_id_0.data();
++            batch.logits  [i] = false;
++        }
++    }
++
++    // M-RoPE for audio
++    void set_position_mrope_1d(llama_pos pos_0, llama_seq_id seq_id) {
++        GGML_ASSERT(n_pos_per_embd == 4);
++        seq_id_0[0] = seq_id;
++        for (int i = 0; i < batch.n_tokens; i++) {
++            pos[i                     ] = pos_0 + i;
++            pos[i + batch.n_tokens    ] = pos_0 + i;
++            pos[i + batch.n_tokens * 2] = pos_0 + i;
++            pos[i + batch.n_tokens * 3] = 0; // last pos dim is unused
++        }
++        for (int i = 0; i < batch.n_tokens; i++) {
++            batch.n_seq_id[i] = 1;
++            batch.seq_id  [i] = seq_id_0.data();
++            batch.logits  [i] = false;
++        }
++    }
++
++    llama_batch get_view(int offset, int n_tokens) {
++        llama_pos * pos_ptr;
++        pos_view.clear();
++        pos_view.reserve(n_tokens * n_pos_per_embd);
++        if (n_pos_per_embd > 1) {
++            // mrope
++            // for example, with layout of src: 1234...1234...1234...1234...
++            //       offset 2 will give us dst: 34...34...34...34...
++            for (int i = 0; i < n_pos_per_embd; i++) {
++                // assume n_tokens is less than or equal to batch.n_tokens
++                // batch.n_tokens is number of **total** tokens
++                // n_tokens is number of viewed token
++                size_t src_idx = i * batch.n_tokens + offset;
++                pos_view.insert(pos_view.end(),
++                    pos.data() + src_idx,
++                    pos.data() + src_idx + n_tokens);
++            }
++            pos_ptr = pos_view.data();
++        } else {
++            // normal
++            pos_ptr = pos.data() + offset;
++        }
++        return {
++            /*n_tokens       =*/ n_tokens,
++            /*tokens         =*/ nullptr,
++            /*embd           =*/ batch.embd     + offset * n_mmproj_embd,
++            /*pos            =*/ pos_ptr,
++            /*n_seq_id       =*/ batch.n_seq_id + offset,
++            /*seq_id         =*/ batch.seq_id   + offset,
++            /*logits         =*/ batch.logits   + offset,
++        };
++    }
++};
++
++#endif
+diff --git a/src/graphs/build_paddleocr.cpp b/src/graphs/build_paddleocr.cpp
+new file mode 100644
+index 0000000..1b52d4a
+--- /dev/null
++++ b/src/graphs/build_paddleocr.cpp
+@@ -0,0 +1,97 @@
++#include "../llama-build-context.h"
++#include "../llama-model.h"
++#include "../llama-context.h"
++
++#include <algorithm>
++#include <cmath>
++
++// PaddleOCR-VL text backbone. It reuses ERNIE4.5 tensor loading, but applies
++// multi-dimensional RoPE like the upstream PaddleOCR graph.
++ggml_cgraph * llm_build_context::build_paddleocr() {
++    ggml_cgraph * gf = new_graph_custom();
++    const int64_t n_embd_head = hparams.n_embd_head_v(0);
++
++    GGML_ASSERT(n_embd_head == hparams.n_embd_head_k(0));
++    GGML_ASSERT(n_embd_head == hparams.n_rot);
++
++    ggml_tensor * cur;
++    ggml_tensor * inpL = llm_build_inp_embd(ctx0, lctx, hparams, batch, model.tok_embd, cb);
++
++    int sections[4];
++    std::copy(hparams.rope_sections.begin(), hparams.rope_sections.begin() + GGML_MROPE_SECTIONS, sections);
++
++    ggml_tensor * inp_pos     = build_inp_pos();
++    ggml_tensor * KQ_mask     = build_inp_KQ_mask();
++    ggml_tensor * inp_out_ids = build_inp_out_ids();
++
++    for (int il = 0; il < n_layer; ++il) {
++        ggml_tensor * inpSA = inpL;
++
++        cur = llm_build_norm(ctx0, inpL, hparams, model.layers[il].attn_norm, NULL, LLM_NORM_RMS, cb, il);
++        cb(cur, "attn_norm", il);
++
++        {
++            ggml_tensor * Qcur = llm_build_lora_mm(lctx, ctx0, model.layers[il].wq, cur);
++            if (model.layers[il].bq) {
++                Qcur = ggml_add(ctx0, Qcur, model.layers[il].bq);
++            }
++            ggml_tensor * Kcur = llm_build_lora_mm(lctx, ctx0, model.layers[il].wk, cur);
++            if (model.layers[il].bk) {
++                Kcur = ggml_add(ctx0, Kcur, model.layers[il].bk);
++            }
++            ggml_tensor * Vcur = llm_build_lora_mm(lctx, ctx0, model.layers[il].wv, cur);
++            if (model.layers[il].bv) {
++                Vcur = ggml_add(ctx0, Vcur, model.layers[il].bv);
++            }
++
++            Qcur = ggml_reshape_3d(ctx0, Qcur, n_embd_head, n_head,    n_tokens);
++            Kcur = ggml_reshape_3d(ctx0, Kcur, n_embd_head, n_head_kv, n_tokens);
++
++            Qcur = ggml_rope_multi(ctx0, Qcur, inp_pos, nullptr,
++                    n_rot, sections, rope_type, n_ctx_orig, freq_base, freq_scale,
++                    ext_factor, attn_factor, beta_fast, beta_slow);
++            Kcur = ggml_rope_multi(ctx0, Kcur, inp_pos, nullptr,
++                    n_rot, sections, rope_type, n_ctx_orig, freq_base, freq_scale,
++                    ext_factor, attn_factor, beta_fast, beta_slow);
++
++            cb(Qcur, "Qcur", il);
++            cb(Kcur, "Kcur", il);
++            cb(Vcur, "Vcur", il);
++
++            cur = llm_build_kv(ctx0, lctx, kv_self, gf,
++                    model.layers[il].wo, model.layers[il].bo,
++                    Kcur, Vcur, Qcur, KQ_mask,
++                    n_tokens, kv_head, n_kv,
++                    1.0f / sqrtf(float(n_embd_head)), cb, il);
++        }
++
++        if (il == n_layer - 1 && inp_out_ids) {
++            cur   = ggml_get_rows(ctx0, cur,   inp_out_ids);
++            inpSA = ggml_get_rows(ctx0, inpSA, inp_out_ids);
++        }
++
++        ggml_tensor * ffn_inp = ggml_add(ctx0, cur, inpSA);
++        cb(ffn_inp, "ffn_inp", il);
++
++        cur = llm_build_ffn(ctx0, lctx, model.layers[il].ffn_norm, ffn_inp,
++                model.layers[il].ffn_up,   NULL, NULL,
++                model.layers[il].ffn_gate, NULL, NULL,
++                model.layers[il].ffn_down, NULL, NULL,
++                NULL,
++                LLM_FFN_SILU, LLM_FFN_PAR, cb, il);
++        cb(cur, "ffn_out", il);
++
++        cur = ggml_add(ctx0, cur, ffn_inp);
++        cur = lctx.cvec.apply_to(ctx0, cur, il);
++        cb(cur, "l_out", il);
++        inpL = cur;
++    }
++
++    cur = llm_build_norm(ctx0, inpL, hparams, model.output_norm, NULL, LLM_NORM_RMS, cb, -1);
++    cb(cur, "result_norm", -1);
++    cur = llm_build_lora_mm(lctx, ctx0, model.output, cur);
++    cb(cur, "result_output", -1);
++
++    ggml_build_forward_expand(gf, cur);
++    return gf;
++}
+diff --git a/tests/test-lfm-json-schema.cpp b/tests/test-lfm-json-schema.cpp
+new file mode 100644
+index 0000000..fda6b82
+--- /dev/null
++++ b/tests/test-lfm-json-schema.cpp
+@@ -0,0 +1,40 @@
++#include "chat.h"
++#include <fstream>
++#include <iostream>
++#include <iterator>
++#include <stdexcept>
++
++int main() {
++    try {
++        for (const char * path : {"models/templates/LFM2.5-Instruct.jinja", "models/templates/google-gemma-4-31B-it.jinja"}) {
++            std::ifstream file(path);
++            if (!file) throw std::runtime_error("missing template fixture");
++            const std::string source((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
++            auto templates = common_chat_templates_ptr(common_chat_templates_init(nullptr, source));
++            common_chat_templates_inputs inputs;
++            common_chat_msg user;
++            user.role = "user";
++            user.content = "Extract invoice metadata.";
++            inputs.messages = {user};
++            inputs.use_jinja = true;
++            inputs.enable_thinking = true;
++            inputs.reasoning_format = COMMON_REASONING_FORMAT_AUTO;
++            for (const char * schema : {"{}", R"({"type":"object","properties":{"invoice_number":{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}},"required":["invoice_number"],"additionalProperties":false})"}) {
++                inputs.json_schema = schema;
++                const auto result = common_chat_templates_apply(templates.get(), inputs);
++                if (result.grammar.empty()) throw std::runtime_error("schema grammar was ignored");
++                if (result.grammar_lazy) throw std::runtime_error("schema grammar must apply immediately, not wait for a tool trigger");
++                if (!result.supports_thinking) throw std::runtime_error("reasoning support was lost");
++            }
++            inputs.json_schema.clear();
++            if (!common_chat_templates_apply(templates.get(), inputs).grammar.empty()) {
++                throw std::runtime_error("plain chat unexpectedly constrained");
++            }
++        }
++        std::cout << "PASS: LFM2.5 and Gemma JSON mode, typed schema, reasoning, and unconstrained chat\n";
++        return 0;
++    } catch (const std::exception & error) {
++        std::cerr << error.what() << '\n';
++        return 1;
++    }
++}
+diff --git a/tests/test-mtmd-positions.cpp b/tests/test-mtmd-positions.cpp
+new file mode 100644
+index 0000000..06cda54
+--- /dev/null
++++ b/tests/test-mtmd-positions.cpp
+@@ -0,0 +1,158 @@
++#include "mtmd.h"
++#include "mtmd-helper-internal.h"
++
++#include <algorithm>
++#include <cstdio>
++#include <cstdlib>
++#include <vector>
++
++static void check(bool ok, const char * message) {
++    if (!ok) {
++        fprintf(stderr, "%s\n", message);
++        std::exit(1);
++    }
++}
++
++static constexpr int nx = 30;
++static constexpr int ny = 41;
++static constexpr int n_tokens = nx * ny;
++static constexpr int n_embd = 5;
++static constexpr llama_pos base = 17;
++static constexpr llama_seq_id sequence = 23;
++
++static void check_batch(const llama_batch & view, const decode_embd_batch & owner,
++                        int offset, int count, bool mrope) {
++    check(view.n_tokens == count && view.token == nullptr, "view token metadata changed");
++    check(view.embd == owner.batch.embd + offset * n_embd, "view embedding pointer offset incorrect");
++    check(view.n_seq_id == owner.batch.n_seq_id + offset, "view n_seq_id pointer offset incorrect");
++    check(view.seq_id == owner.batch.seq_id + offset, "view seq_id pointer offset incorrect");
++    check(view.logits == owner.batch.logits + offset, "view logits pointer offset incorrect");
++    check(view.pos == (mrope ? owner.pos_view.data() : owner.pos.data() + offset),
++          "view position pointer incorrect");
++    check(owner.pos_view.size() == (mrope ? 4 * size_t(count) : 0), "view position plane size incorrect");
++
++    // Read the outer view at the decoder's 512-token microbatch boundaries.
++    // Expectations use global row/column formulas, independent of the producer's nested loops.
++    for (int begin = 0; begin < count; begin += 512) {
++        const int end = std::min(begin + 512, count);
++        for (int i = begin; i < end; ++i) {
++            const int global = offset + i;
++            check(view.n_seq_id[i] == 1 && view.seq_id[i] == owner.seq_id_0.data()
++                  && view.seq_id[i][0] == sequence, "view sequence metadata incorrect");
++            check(view.logits[i] == 0, "image view unexpectedly requests logits");
++            for (int d = 0; d < n_embd; ++d) {
++                check(view.embd[i * n_embd + d] == float(global * n_embd + d),
++                      "view embedding data offset incorrect");
++            }
++            if (mrope) {
++                check(view.pos[i] == base, "temporal plane incorrect");
++                check(view.pos[count + i] == base + global / nx, "row plane incorrect");
++                check(view.pos[2 * count + i] == base + global % nx, "column plane incorrect");
++                check(view.pos[3 * count + i] == 0, "unused fourth plane incorrect");
++            } else {
++                check(view.pos[i] == base + global, "scalar position changed");
++            }
++        }
++    }
++}
++
++static void test_batches(bool mrope) {
++    std::vector<float> embeddings(n_tokens * n_embd);
++    for (size_t i = 0; i < embeddings.size(); ++i) {
++        embeddings[i] = float(i);
++    }
++    decode_embd_batch batch(embeddings.data(), n_tokens, mrope ? 4 : 1, n_embd);
++    if (mrope) {
++        batch.set_position_mrope_2d(base, nx, ny, sequence);
++    } else {
++        batch.set_position_normal(base, sequence);
++    }
++    check(batch.pos.size() == size_t(n_tokens * (mrope ? 4 : 1)), "position allocation size incorrect");
++    check(batch.batch.pos == batch.pos.data(), "batch position pointer incorrect");
++    check(batch.seq_ids[n_tokens] == nullptr, "sequence pointer sentinel missing");
++    for (int i = 0; i < n_tokens; ++i) {
++        if (mrope) {
++            check(batch.pos[i] == base && batch.pos[n_tokens + i] == base + i / nx
++                  && batch.pos[2 * n_tokens + i] == base + i % nx
++                  && batch.pos[3 * n_tokens + i] == 0, "full image position planes incorrect");
++        } else {
++            check(batch.pos[i] == base + i, "full scalar positions changed");
++        }
++    }
++    check_batch(batch.get_view(0, n_tokens), batch, 0, n_tokens, mrope);
++    check_batch(batch.get_view(0, 1024), batch, 0, 1024, mrope);
++    check_batch(batch.get_view(1024, 206), batch, 1024, 206, mrope);
++}
++
++static mtmd::input_chunk_ptr image_chunk(int width, int height, bool mrope) {
++    json fixture = {
++        {"type", MTMD_INPUT_CHUNK_TYPE_IMAGE},
++        {"tokens_image", {{"nx", width}, {"ny", height}, {"use_mrope_pos", mrope}, {"id", "grid"}}}
++    };
++    return mtmd::input_chunk_ptr(mtmd_input_chunk_from_json(fixture));
++}
++
++static void check_image(const mtmd_input_chunk * chunk, int width, int height, bool mrope) {
++    check(mtmd_input_chunk_get_type(chunk) == MTMD_INPUT_CHUNK_TYPE_IMAGE, "image chunk type changed");
++    const auto * image = mtmd_input_chunk_get_tokens_image(chunk);
++    check(image != nullptr, "image tokens missing");
++    check(mtmd_image_tokens_get_nx(image) == size_t(width)
++          && mtmd_image_tokens_get_ny(image) == size_t(height), "merged 2D grid lost");
++    check(mtmd_image_tokens_get_n_tokens(image) == size_t(width * height)
++          && mtmd_input_chunk_get_n_tokens(chunk) == size_t(width * height), "image token count changed");
++    const llama_pos span = mrope ? std::max(width, height) : width * height;
++    check(mtmd_image_tokens_get_n_pos(image) == span, "image position span incorrect");
++    check(mtmd_input_chunk_get_n_pos(chunk) == span, "chunk position span incorrect");
++}
++
++static void test_chunk_positions() {
++    for (bool mrope : {false, true}) {
++        for (bool transpose : {false, true}) {
++            const int width = transpose ? ny : nx;
++            const int height = transpose ? nx : ny;
++            auto chunk = image_chunk(width, height, mrope);
++            check_image(chunk.get(), width, height, mrope);
++            mtmd::input_chunk_ptr copy(mtmd_input_chunk_copy(chunk.get()));
++            chunk.reset();
++            check_image(copy.get(), width, height, mrope);
++            // Cache interruption: geometry must survive raw-data release and JSON restore.
++            mtmd_input_chunk_free_raw_data(copy.get());
++            json saved;
++            mtmd_input_chunk_to_json(copy.get(), saved);
++            check(saved["tokens_image"]["use_mrope_pos"].is_boolean()
++                  && saved["tokens_image"]["use_mrope_pos"].get<bool>() == mrope, "MRoPE flag not preserved");
++            copy.reset();
++            mtmd::input_chunk_ptr restored(mtmd_input_chunk_from_json(saved));
++            check_image(restored.get(), width, height, mrope);
++        }
++
++        auto first = image_chunk(nx, ny, mrope);
++        auto second = image_chunk(ny, nx, mrope);
++        json text_fixture = {{"type", MTMD_INPUT_CHUNK_TYPE_TEXT}, {"tokens_text", {7, 8, 9}}};
++        mtmd::input_chunk_ptr text(mtmd_input_chunk_from_json(text_fixture));
++        llama_pos next = base;
++        next += mtmd_input_chunk_get_n_pos(first.get());
++        check(next == base + (mrope ? 41 : 1230), "second image start incorrect");
++        next += mtmd_input_chunk_get_n_pos(second.get());
++        check(next == base + (mrope ? 82 : 2460), "following text start incorrect");
++        float embeddings[3] = {};
++        decode_embd_batch text_positions(embeddings, 3, 1, 1);
++        text_positions.set_position_normal(next, sequence);
++        for (int i = 0; i < 3; ++i) {
++            check(text_positions.pos[i] == base + (mrope ? 82 : 2460) + i,
++                  "following text scalar positions incorrect");
++        }
++        check(mtmd_input_chunk_get_n_tokens(text.get()) == 3
++              && mtmd_input_chunk_get_n_pos(text.get()) == 3, "text position count changed");
++        next += mtmd_input_chunk_get_n_pos(text.get());
++        check(next == base + (mrope ? 85 : 2463), "two-image plus text advance incorrect");
++    }
++}
++
++int main() {
++    test_batches(true);
++    test_batches(false);
++    test_chunk_positions();
++    puts("PASS: four-plane MRoPE grids, 1024/206 views, 512 microbatch boundaries, scalar positions, clone/JSON, and following text");
++    return 0;
++}
+diff --git a/tests/test-paddleocr.cpp b/tests/test-paddleocr.cpp
+new file mode 100644
+index 0000000..9b478d0
+--- /dev/null
++++ b/tests/test-paddleocr.cpp
+@@ -0,0 +1,389 @@
++#include "../src/llama-model.h"
++
++#include <algorithm>
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <vector>
++
++// IQK is optional and its build defines are private to ggml. Inspect the existing
++// dispatcher on ELF builds without making non-IQK test builds depend on it.
++#if defined(__ELF__) && defined(__GNUC__)
++#include "../ggml/src/iqk/iqk_mul_mat.h"
++#pragma weak iqk_flash_attn_noalibi
++#pragma weak iqk_mul_mat
++#define TEST_IQK_DISPATCH
++#endif
++
++static void check(bool ok, const char * message) {
++    if (!ok) {
++        fprintf(stderr, "%s\n", message);
++        std::exit(1);
++    }
++}
++
++static void close(float actual, double expected, double tolerance, const char * message) {
++    if (!std::isfinite(actual) || std::abs(actual - expected) > tolerance) {
++        fprintf(stderr, "%s: got %.9g, expected %.9g\n", message, actual, expected);
++        std::exit(1);
++    }
++}
++
++static ggml_context * context() {
++    return ggml_init({16 * 1024 * 1024, nullptr, false});
++}
++
++static void compute(ggml_context * ctx, ggml_tensor * out, int threads) {
++    auto * graph = ggml_new_graph(ctx);
++    ggml_build_forward_expand(graph, out);
++    check(ggml_graph_compute_with_ctx(ctx, graph, threads) == GGML_STATUS_SUCCESS, "graph compute failed");
++}
++
++static bool test_bf16_matmul(int k, int nx, int ny, int threads, bool tail_only) {
++    auto * ctx = context();
++    auto * a = ggml_new_tensor_2d(ctx, GGML_TYPE_BF16, k, nx);
++    auto * b = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, k, ny);
++    auto * av = static_cast<ggml_bf16_t *>(a->data);
++    auto * bv = static_cast<float *>(b->data);
++    std::vector<ggml_bf16_t> bf16_b(k*ny);
++    // Isolate the previously dropped 8/16 terms, including the aligned control.
++    const int tail = k % 32 ? k % 32 : 16;
++    for (int i = 0; i < nx; ++i) for (int d = 0; d < k; ++d) {
++        const float value = tail_only ? float(d >= k - tail) : float((i + 3*d)%5 - 2);
++        av[i*k + d] = ggml_fp32_to_bf16(value);
++    }
++    for (int j = 0; j < ny; ++j) for (int d = 0; d < k; ++d) {
++        const float value = tail_only ? float(d >= k - tail) : float((2*j + d)%7 - 3);
++        bv[j*k + d] = value;
++        bf16_b[j*k + d] = ggml_fp32_to_bf16(value);
++    }
++    auto * out = ggml_mul_mat(ctx, a, b);
++    compute(ctx, out, threads); // Exercise the F32-activation conversion and normal fallback too.
++    const auto * result = static_cast<float *>(out->data);
++    std::vector<float> direct(nx*ny, -12345.0f);
++    bool accepted = false;
++#ifdef TEST_IQK_DISPATCH
++    if (iqk_mul_mat) {
++        for (int ith = 0; ith < threads; ++ith) {
++            const bool supported = iqk_mul_mat(nx, ny, k, GGML_TYPE_BF16, av, a->nb[1],
++                GGML_TYPE_BF16, bf16_b.data(), k*sizeof(ggml_bf16_t), direct.data(), nx, ith, threads);
++            if (ith == 0) accepted = supported;
++            check(supported == accepted, "IQK BF16 acceptance differs between workers");
++        }
++        if (!accepted) check(std::all_of(direct.begin(), direct.end(), [](float f) { return f == -12345.0f; }),
++            "rejected BF16 matmul wrote output");
++    }
++#endif
++    for (int j = 0; j < ny; ++j) for (int i = 0; i < nx; ++i) {
++        double expected = 0;
++        for (int d = 0; d < k; ++d) expected += double(ggml_bf16_to_fp32(av[i*k + d]))*bv[j*k + d];
++        // Small integer inputs and sums are exact in BF16/F32: no tolerance can hide a lost tail.
++        close(result[j*nx + i], expected, 0, "BF16 matmul scalar reference");
++        if (accepted) close(direct[j*nx + i], expected, 0, "IQK BF16 matmul scalar reference");
++    }
++    ggml_free(ctx);
++    return accepted;
++}
++
++static void test_dispatch() {
++    const auto arch = llm_arch_from_string("paddleocr");
++    check(arch == LLM_ARCH_PADDLEOCR, "Paddle architecture dispatch");
++    check(std::strcmp(llama_model_arch_name(arch), "paddleocr") == 0, "Paddle architecture name");
++    check(LLM_KV(arch)(LLM_KV_ROPE_DIMENSION_SECTIONS) == "paddleocr.rope.dimension_sections", "Paddle metadata namespace");
++    const LLM_TN tn(arch);
++    check(tn(LLM_TENSOR_ATTN_Q, "weight", 2) == "blk.2.attn_q.weight", "Paddle tensor namespace");
++    check(llm_tensor_type(arch, "blk.2.ffn_up.weight", 2) == LLM_TENSOR_FFN_UP, "Paddle tensor dispatch");
++    llama_model model;
++    model.arch = arch;
++    check(llama_rope_type(&model) == LLAMA_ROPE_TYPE_MROPE, "Paddle text RoPE dispatch");
++}
++
++static double sample(int x, int y, int channel, int batch) {
++    return x*x + 7*y*y + x*y + 100*channel + 1000*batch;
++}
++
++static void test_resize(int iw, int ih, int ow, int oh, int mode, bool align, int threads) {
++    auto * ctx = context();
++    // Match the non-contiguous [width, height, channels] view used by CLIP.
++    auto * storage = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 3, iw, ih, 2);
++    auto * data = static_cast<float *>(storage->data);
++    for (int b = 0; b < 2; ++b)
++        for (int y = 0; y < ih; ++y)
++            for (int x = 0; x < iw; ++x)
++                for (int c = 0; c < 3; ++c)
++                    *data++ = sample(x, y, c, b);
++    auto * src = ggml_permute(ctx, storage, 2, 0, 1, 3);
++    auto * out = ggml_interpolate(ctx, src, ow, oh, 3, 2,
++        mode | (align ? GGML_SCALE_FLAG_ALIGN_CORNERS : 0));
++    compute(ctx, out, threads);
++    const double sx = align && iw > 1 && ow > 1 ? double(iw - 1)/(ow - 1) : double(iw)/ow;
++    const double sy = align && ih > 1 && oh > 1 ? double(ih - 1)/(oh - 1) : double(ih)/oh;
++    data = static_cast<float *>(out->data);
++    for (int b = 0; b < 2; ++b) {
++        for (int c = 0; c < 3; ++c) {
++            for (int y = 0; y < oh; ++y) {
++                for (int x = 0; x < ow; ++x) {
++                    double expected;
++                    if (mode == GGML_SCALE_MODE_NEAREST) {
++                        expected = sample(int(x*sx), int(y*sy), c, b);
++                    } else {
++                        double px = align ? x*sx : (x + 0.5)*sx - 0.5;
++                        double py = align ? y*sy : (y + 0.5)*sy - 0.5;
++                        px = std::max(0.0, std::min(px, double(iw - 1)));
++                        py = std::max(0.0, std::min(py, double(ih - 1)));
++                        const int x0 = int(px), y0 = int(py);
++                        const int x1 = std::min(x0 + 1, iw - 1), y1 = std::min(y0 + 1, ih - 1);
++                        const double dx = px - x0, dy = py - y0;
++                        expected = (1 - dy)*((1 - dx)*sample(x0, y0, c, b) + dx*sample(x1, y0, c, b))
++                                 + dy*((1 - dx)*sample(x0, y1, c, b) + dx*sample(x1, y1, c, b));
++                    }
++                    close(*data++, expected, 3e-4, "resize scalar reference");
++                }
++            }
++        }
++    }
++    ggml_free(ctx);
++}
++
++static void test_rope(bool vision, int threads) {
++    auto * ctx = context();
++    const int dim = vision ? 72 : 64;
++    const int n_rot = vision ? dim/2 : dim;
++    const int np = 6, nh = 2;
++    auto * src = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, dim, nh, np);
++    auto * pos = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 4*np);
++    auto * p = static_cast<int32_t *>(pos->data);
++    for (int i = 0; i < np; ++i) {
++        p[i] = vision ? i/3 : 7;
++        p[np + i] = vision ? i%3 : 7 + i/3;
++        p[2*np + i] = vision ? i/3 : 7 + i%3;
++        p[3*np + i] = vision ? i%3 : 0;
++    }
++    auto * x = static_cast<float *>(src->data);
++    for (int i = 0; i < dim*nh*np; ++i) x[i] = std::sin(i*0.13f);
++    int sections[4] = {vision ? 18 : 8, vision ? 18 : 12, vision ? 18 : 12, vision ? 18 : 0};
++    auto * out = ggml_rope_multi(ctx, src, pos, nullptr, n_rot, sections,
++        vision ? GGML_ROPE_TYPE_VISION : GGML_ROPE_TYPE_MROPE,
++        32768, 10000, 1, 0, 1, 32, 1);
++    compute(ctx, out, threads);
++    const auto * y = static_cast<float *>(out->data);
++    const int half = dim/2;
++    for (int i = 0; i < np; ++i) {
++        for (int h = 0; h < nh; ++h) {
++            const int row = dim*(h + nh*i);
++            for (int d = 0; d < half; ++d) {
++                const int axis = vision ? d/18 : (d < 8 ? 0 : d < 20 ? 1 : 2);
++                const int frequency = vision ? d%18 : d;
++                const double angle = p[axis*np + i]*std::pow(10000.0, -2.0*frequency/n_rot);
++                const double a = x[row + d], b = x[row + d + half];
++                close(y[row + d], a*std::cos(angle) - b*std::sin(angle), 3e-6, "RoPE first half");
++                close(y[row + d + half], a*std::sin(angle) + b*std::cos(angle), 3e-6, "RoPE second half");
++            }
++        }
++    }
++    ggml_free(ctx);
++}
++
++#ifdef TEST_IQK_DISPATCH
++static bool dispatch_attention(const ggml_tensor * q, const ggml_tensor * k, const ggml_tensor * v,
++        ggml_tensor * out, const void * mask, float scale, int ith, int nth,
++        float max_bias = 0, float softcap = 0, const void * sinks = nullptr, ggml_tensor * indexer = nullptr) {
++    return iqk_flash_attn_noalibi(q->type, GGML_TYPE_F16, max_bias,
++        q->ne[3], q->ne[2], q->nb[3], q->nb[2],
++        k->ne[3], k->ne[2], k->nb[3], k->nb[2],
++        v->ne[3], v->ne[2], v->nb[3], v->nb[2],
++        out->ne[2], out->ne[1], out->nb[1], k->type, v->type,
++        k->ne[0], v->ne[0], q->ne[1], k->ne[1], q->nb[1], k->nb[1], v->nb[1],
++        mask ? k->ne[1]*sizeof(ggml_fp16_t) : 0, q->data, k->data, v->data, mask, sinks,
++        scale, softcap, static_cast<float *>(out->data), nullptr, nullptr, nullptr, ith, nth, 0, indexer);
++}
++
++static bool has_iqk_attention() {
++    if (!ggml_cpu_has_avx2() || !iqk_flash_attn_noalibi) return false;
++    // The 96-wide masked F16 kernel predates the adapter. This distinguishes
++    // IQK FA being disabled from the adapter incorrectly rejecting a 72 case.
++    auto * ctx = context();
++    auto * q = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 96, 1, 1, 1);
++    auto * k = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 96, 32, 1, 1);
++    auto * v = ggml_dup_tensor(ctx, k);
++    auto * out = ggml_dup_tensor(ctx, q);
++    std::memset(q->data, 0, ggml_nbytes(q));
++    std::memset(k->data, 0, ggml_nbytes(k));
++    std::memset(v->data, 0, ggml_nbytes(v));
++    ggml_fp16_t mask[32] = {};
++    const bool supported = dispatch_attention(q, k, v, out, mask, 1, 0, 1);
++    ggml_free(ctx);
++    return supported;
++}
++
++static void test_attention_guards(const ggml_tensor * q, const ggml_tensor * k, const ggml_tensor * v,
++        ggml_tensor * out, float scale) {
++    std::vector<float> sentinel(ggml_nelements(out), -12345.0f);
++    for (int guard = 0; guard < 14; ++guard) {
++        ggml_tensor dst = *out;
++        dst.data = sentinel.data();
++        ggml_tensor qt = *q, kt = *k, vt = *v;
++        ggml_tensor indexer = {};
++        const void * mask = nullptr;
++        const void * sinks = nullptr;
++        float max_bias = 0, softcap = 0, test_scale = scale;
++        switch (guard) {
++            case 0: mask = sentinel.data(); break;
++            case 1: max_bias = 1; break;
++            case 2: max_bias = -1; break;
++            case 3: softcap = 1; break;
++            case 4: sinks = sentinel.data(); break;
++            case 5: break; // Even a non-I32 indexer is outside this adapter.
++            case 6: qt.type = GGML_TYPE_F16; break;
++            case 7: kt.type = GGML_TYPE_F32; break;
++            case 8: vt.type = GGML_TYPE_F32; break;
++            case 9: kt.ne[2] = 1; break; // GQA
++            case 10: vt.ne[3] = 1; break; // batch broadcast
++            case 11: dst.ne[1] = q->ne[2] + 1; break;
++            case 12: test_scale = 0; break;
++            case 13: test_scale = -scale; break;
++        }
++        for (int ith = 0; ith < 4; ++ith) {
++            check(!dispatch_attention(&qt, &kt, &vt, &dst, mask, test_scale, ith, 4,
++                max_bias, softcap, sinks, guard == 5 ? &indexer : nullptr), "ineligible D=72 dispatcher accepted");
++        }
++        check(std::all_of(sentinel.begin(), sentinel.end(), [](float f) { return f == -12345.0f; }),
++            "rejected attention wrote output");
++    }
++}
++#endif
++
++static void test_attention(int nq, int nk, int nh, int nb, bool interleaved, int threads,
++        bool iqk, int dim = 72, bool masked = false, float scale_factor = 1) {
++    auto * ctx = context();
++    // Gaps in feature storage and batch stride; Q/V interleave heads, K does not.
++    auto input = [&](ggml_type type, int nr, bool interleave) {
++        if (!interleaved) return ggml_new_tensor_4d(ctx, type, dim, nr, nh, nb);
++        auto * storage = ggml_new_tensor_4d(ctx, type, dim + 8, interleave ? nh : nr,
++            interleave ? nr + 1 : nh + 1, nb);
++        if (interleave) storage = ggml_permute(ctx, storage, 0, 2, 1, 3);
++        return ggml_view_4d(ctx, storage, dim, nr, nh, nb, storage->nb[1], storage->nb[2], storage->nb[3], 0);
++    };
++    auto * q = input(GGML_TYPE_F32, nq, true);
++    auto * k = input(GGML_TYPE_F16, nk, false);
++    auto * v = input(GGML_TYPE_F16, nk, true);
++    auto row = [](const ggml_tensor * t, int r, int h, int b) {
++        return static_cast<char *>(t->data) + r*t->nb[1] + h*t->nb[2] + b*t->nb[3];
++    };
++    for (int b = 0; b < nb; ++b) for (int h = 0; h < nh; ++h) {
++        for (int r = 0; r < nq; ++r) for (int d = 0; d < dim; ++d)
++            reinterpret_cast<float *>(row(q, r, h, b))[d] = std::sin((d + dim*(r + nq*(h + nh*b)))*0.17f);
++        for (int r = 0; r < nk; ++r) for (int d = 0; d < dim; ++d) {
++            int i = d + dim*(r + nk*(h + nh*b));
++            reinterpret_cast<ggml_fp16_t *>(row(k, r, h, b))[d] = ggml_fp32_to_fp16(std::cos(i*0.11f));
++            reinterpret_cast<ggml_fp16_t *>(row(v, r, h, b))[d] = ggml_fp32_to_fp16(std::sin(i*0.07f));
++        }
++    }
++    ggml_tensor * mask = nullptr;
++    if (masked) {
++        mask = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, nk, GGML_PAD(nq, GGML_KQ_MASK_PAD));
++        auto * m = static_cast<ggml_fp16_t *>(mask->data);
++        for (int r = 0; r < mask->ne[1]; ++r) for (int j = 0; j < nk; ++j)
++            m[r*nk + j] = ggml_fp32_to_fp16(j > r ? -INFINITY : 0);
++    }
++    const float scale = scale_factor/std::sqrt(float(dim));
++    auto * out = ggml_flash_attn_ext(ctx, q, k, v, mask, scale, 0, 0);
++    ggml_flash_attn_ext_set_prec(out, GGML_PREC_F32);
++    compute(ctx, out, threads);
++    const auto * result = static_cast<float *>(out->data);
++    std::vector<float> direct(ggml_nelements(out), -12345.0f);
++#ifdef TEST_IQK_DISPATCH
++    if (iqk) {
++        ggml_tensor dst = *out;
++        dst.data = direct.data();
++        for (int ith = 0; ith < threads; ++ith) {
++            check(dispatch_attention(q, k, v, &dst, mask ? mask->data : nullptr, scale, ith, threads),
++                "eligible attention dispatcher rejected");
++            for (int b = 0; b < nb; ++b) for (int r = 0; r < nq; ++r) for (int h = 0; h < nh; ++h) {
++                if (dim == 72 && (b*nh + h)%threads > ith) {
++                    check(direct[dim*(h + nh*(r + nq*b))] == -12345.0f, "dispatcher wrote another worker's head");
++                }
++            }
++        }
++        if (dim == 72 && nh == 2 && nb == 2) test_attention_guards(q, k, v, out, scale);
++    }
++#endif
++    // Also exercise CLIP's non-flash F32 attention path with the same inputs.
++    auto * kq = ggml_mul_mat(ctx, ggml_cast(ctx, k, GGML_TYPE_F32), q);
++    auto * float_mask = mask ? ggml_cast(ctx, mask, GGML_TYPE_F32) : nullptr;
++    kq = ggml_soft_max_ext(ctx, kq, float_mask, scale, 0);
++    auto * vt = ggml_cont(ctx, ggml_transpose(ctx, ggml_cast(ctx, v, GGML_TYPE_F32)));
++    auto * plain = ggml_mul_mat(ctx, vt, kq);
++    compute(ctx, plain, threads);
++    const auto * plain_result = static_cast<float *>(plain->data);
++    std::vector<double> scores(nk);
++    for (int b = 0; b < nb; ++b) for (int h = 0; h < nh; ++h) {
++        for (int iq = 0; iq < nq; ++iq) {
++            double maximum = -INFINITY, sum = 0;
++            for (int ik = 0; ik < nk; ++ik) {
++                double dot = 0;
++                for (int d = 0; d < dim; ++d) {
++                    dot += double(reinterpret_cast<float *>(row(q, iq, h, b))[d]) *
++                        ggml_fp16_to_fp32(reinterpret_cast<ggml_fp16_t *>(row(k, ik, h, b))[d]);
++                }
++                scores[ik] = masked && ik > iq ? -INFINITY : dot*scale;
++                maximum = std::max(maximum, scores[ik]);
++            }
++            for (double & score : scores) { score = std::exp(score - maximum); sum += score; }
++            for (int d = 0; d < dim; ++d) {
++                double expected = 0;
++                for (int ik = 0; ik < nk; ++ik)
++                    expected += scores[ik]*ggml_fp16_to_fp32(reinterpret_cast<ggml_fp16_t *>(row(v, ik, h, b))[d])/sum;
++                const int index = d + dim*(h + nh*(iq + nq*b));
++                close(result[index], expected, 2e-3, "flash attention scalar reference");
++                if (iqk) close(direct[index], expected, 3e-6, "IQK attention scalar reference");
++                close(plain_result[d + dim*(iq + nq*(h + nh*b))], expected, 3e-6, "non-flash attention scalar reference");
++            }
++        }
++    }
++    ggml_free(ctx);
++}
++
++int main(int argc, char ** argv) {
++    test_dispatch();
++    bool iqk = false;
++#ifdef TEST_IQK_DISPATCH
++    iqk = has_iqk_attention();
++#endif
++    if (argc == 2 && std::strcmp(argv[1], "--require-iqk") == 0) check(iqk, "IQK attention unavailable");
++    printf("IQK dispatcher checks: %s\n", iqk ? "enabled" : "unavailable (graph references only)");
++    printf("BF16 matmul AVX512BF16 build: %s\n", ggml_cpu_has_avx512_bf16() ? "yes" : "no");
++    for (int k : {32, 40, 48, 4304}) {
++        int accepted = 0, cases = 0;
++        const int shapes[][2] = {{32, 16}, {7, 3}, {65, 17}, {1, 1}};
++        for (int threads : {1, 2, 4}) for (const auto & shape : shapes) for (bool tail_only : {true, false}) {
++            accepted += test_bf16_matmul(k, shape[0], shape[1], threads, tail_only);
++            ++cases;
++        }
++        printf("BF16 k=%d exact references passed, IQK direct accepted %d/%d cases\n", k, accepted, cases);
++    }
++    for (int threads : {1, 2, 4}) {
++        test_rope(false, threads);
++        test_rope(true, threads);
++        test_attention(7, 7, 2, 1, false, threads, iqk);
++        test_attention(113, 113, 2, 1, false, threads, iqk);
++        for (int nk : {31, 32, 33, 113}) {
++            test_attention(9, nk, 2, 2, true, threads, iqk, 72, false, 0.73f);
++            test_attention(3, nk, 1, 1, true, threads, iqk); // Idle workers.
++        }
++        test_attention(7, 32, 2, 1, true, threads, iqk, 64, true); // Existing masked/text kernel.
++        for (bool align : {false, true}) {
++            for (int mode : {GGML_SCALE_MODE_NEAREST, GGML_SCALE_MODE_BILINEAR}) {
++                test_resize(2, 3, 5, 7, mode, align, threads);
++                test_resize(5, 7, 2, 3, mode, align, threads);
++                test_resize(3, 2, 3, 2, mode, align, threads);
++                test_resize(1, 3, 4, 1, mode, align, threads);
++                test_resize(3, 1, 1, 4, mode, align, threads);
++            }
++        }
++        // At integer coordinates bicubic must preserve endpoints.
++        test_resize(3, 3, 2, 2, GGML_SCALE_MODE_BICUBIC, true, threads);
++    }
++    puts("Paddle dispatch, RoPE, D=72 attention and resize references passed");
++}
