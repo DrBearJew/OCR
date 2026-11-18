@@ -1,13 +1,30 @@
-# One ik runtime for PaddleOCR-VL and LFM
+# Unified ik_llama.cpp runtime (PaddleOCR-VL + LFM2.5)
 
-Use the [Docker installer](../../docs/INSTALL.md) with `--metadata-runtime unified`. It starts one private inference container with one `llama-server` binary. llama-swap runs either PaddleOCR-VL or LFM in a child process, never both at once. The Paddle process enables the OCR-specific Q8_0 activation profile; LFM uses the standard ik path and the LFM JSON-schema fix.
+This image packages **one** `ik_llama.cpp` `llama-server` binary and `llama-swap` into a single private container serving both:
 
-The installer fetches the pinned, verified weights into the existing model volume. It downloads the official PaddleOCR-VL 1.6 checkpoint and prepares the Q8_0 checkpoint with the bundled quantizer. No host ik/llama-swap install and no manual model setup are required. This release targets x86-64 CPUs with AVX-512 BF16, VBMI and VNNI. The default PP-OCRv6 install and the existing metadata-only CPU/GPU modes are unaffected.
+- **PaddleOCR-VL 1.6** (`paddleocr-vl`) for document OCR, with the Q8_0 FP16-activation profile enabled
+- **LFM2.5-8B-A1B Q5_K_M** (`metadata`) for metadata extraction, with JSON-schema enforcement
 
-For maintainers, from the repository root:
+`llama-swap` loads whichever model is requested, swaps out the other so only one sits in memory at a time, and unloads on idle.
+
+## Usage
+
+Install through the standard Docker installer on an x86_64 CPU with **AVX-512 BF16, VBMI, and VNNI**:
 
 ```bash
-docker build -f deploy/paddle-ik/Dockerfile --target unified -t dokocr-unified deploy
+bash install-docker.sh --metadata-runtime unified
 ```
 
-The `runtime` target remains available for existing Paddle-only gateways. Production updates should compare full-page and crop OCR and metadata JSON from the same image, not just gateway health.
+On first startup, the container downloads and SHA-256-verifies the public PaddleOCR-VL 1.6 and LFM2.5 weights (~7.85 GB total) into the shared `/models` volume and quantizes the OCR weights with the bundled `llama-quantize`. No host runtime installation or manual model setup is needed.
+
+## Building from source (maintainers)
+
+From the repository root:
+
+```bash
+# Full unified gateway image (llama-server + llama-quantize + llama-swap + prompt template)
+docker build -f deploy/paddle-ik/Dockerfile --target unified -t dokocr-unified deploy
+
+# Standalone runtime target for existing Paddle-only gateways
+docker build -f deploy/paddle-ik/Dockerfile --target runtime -t dokocr-paddle-ik deploy
+```

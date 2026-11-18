@@ -1,22 +1,35 @@
 # Published Docker install
 
-Use the [installation guide](../../docs/INSTALL.md) for requirements, security, GPU drivers, and operating instructions. No source build or source-tree mount is needed.
+Quick reference for the standalone Compose files in this directory. For full setup, hardware requirements, and HTTPS configuration, see [`docs/INSTALL.md`](../../docs/INSTALL.md).
+
+## Commands
 
 ```bash
-bash install-docker.sh                             # Real CPU PP-OCRv6; no model AI
-bash install-docker.sh --metadata-runtime unified   # PaddleOCR-VL + LFM on one ik runtime (AVX-512)
-bash install-docker.sh --metadata-runtime cpu       # Optional local LFM metadata
-bash install-docker.sh --metadata-runtime cuda      # NVIDIA, automatic ik fitting
-bash install-docker.sh --metadata-runtime vulkan    # Compatible AMD/Intel Vulkan GPU
-bash install-docker.sh --metadata-runtime external --metadata-url http://inference.example.local:8080/v1 --metadata-model metadata
+bash install-docker.sh                             # Standard: local CPU PP-OCRv6
+bash install-docker.sh --metadata-runtime unified  # Unified: PaddleOCR-VL + LFM2.5 (AVX-512 CPU)
+bash install-docker.sh --metadata-runtime cpu      # PP-OCRv6 + CPU LFM2.5 metadata
+bash install-docker.sh --metadata-runtime cuda     # PP-OCRv6 + NVIDIA CUDA metadata
+bash install-docker.sh --metadata-runtime vulkan   # PP-OCRv6 + AMD/Intel Vulkan metadata
+bash install-docker.sh --metadata-runtime external \
+  --metadata-url http://inference.example.local:8080/v1 \
+  --metadata-model metadata
 ```
 
-`unified` selects PaddleOCR-VL and LFM together; the other modes keep PP-OCRv6 as the OCR provider. `--metadata` enables the saved runtime (CPU on a new install); `--no-metadata` disables it without deleting the selection or data. External mode starts/downloads no local metadata image or weights. Use a trusted, compatible endpoint: document text is sent there.
+## Compose files
 
-The installer fetches the base Compose file and selected GPU override from the same trusted image/repository ref, or uses its checkout's files when run from source. GPU overrides are recorded through `COMPOSE_FILE` in the private install `.env`, so ordinary `docker compose` commands retain the selection. CUDA requests NVIDIA GPUs; Vulkan maps `/dev/dri` without privileged mode. Optional GPU controls and driver/hardware limitations are in the [metadata runtime guide](../metadata/README.md).
+- `compose.yml` — Core stack (`postgres`, `redis`, `migrate`, `backend`, `worker`, `worker-beat`, `frontend`) plus the optional `metadata` profile service.
+- `compose.metadata-unified.yml` — Switches to `ocr-metadata:unified-<tag>` and routes both PaddleOCR-VL and LFM2.5 metadata through one container.
+- `compose.metadata-cuda.yml` — Requests NVIDIA GPU access and sets `DOKOCR_METADATA_COMPUTE=cuda`.
+- `compose.metadata-vulkan.yml` — Maps `/dev/dri` without privileged mode and sets `DOKOCR_METADATA_COMPUTE=vulkan`.
 
-Defaults: directory `./dokocr`, image/ref `main`, project `dokocr`, frontend `127.0.0.1:3001`, API `127.0.0.1:8001`. Docker Engine, Compose v2 or newer, curl, OpenSSL, and Linux x86_64 are required. Local metadata images also require AVX2/FMA/F16C. The pinned local LFM download is 6.03 GB, checksum-verified and shared across CPU/GPU modes.
+When run remotely, `install-docker.sh` fetches the base file and the matching override from the same `--image-tag` ref (when run inside a local checkout, it copies the local files). It writes `COMPOSE_FILE` into the install directory's `.env` (`0600`), so plain `docker compose` commands keep the active override.
 
-Generated credentials/settings live in `<directory>/.env` (directory `0700`, file `0600`). Reruns preserve them, ports, selected runtime and named volumes unless explicitly changed. Existing project renames are refused to avoid selecting different volumes. PostgreSQL, Redis, source documents, consume files and model data persist; there is no automatic destructive cleanup. Do not use `down -v` for routine operations.
+## Defaults and persistence
 
-PostgreSQL/Redis have no published ports. Logs rotate at 10 MB with three files retained. Successful migrations gate the API/workers; `/ready` checks API/database readiness, not inference correctness. Review extraction results before relying on AI metadata. The live deployment is separate from this installer.
+- Install directory: `./dokocr` (`0700`), Compose project: `dokocr`, tag: `main`
+- Published ports: `127.0.0.1:3001` (UI) and `127.0.0.1:8001` (API); PostgreSQL and Redis are internal-only
+- Persistent volumes: database, Redis, uploaded files, consume folder, and downloaded model weights (shared across CPU/GPU metadata modes)
+- Reruns preserve credentials, ports, runtime selection, and volumes; renaming an existing project is blocked to avoid detaching volumes
+- Use `docker compose stop` / `start` for routine control—avoid `docker compose down -v`, which deletes volumes
+
+See [`deploy/metadata/README.md`](../metadata/README.md) for GPU environment variables and [`deploy/paddle-ik/README.md`](../paddle-ik/README.md) for the unified runtime image.

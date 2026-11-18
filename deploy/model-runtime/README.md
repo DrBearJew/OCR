@@ -1,40 +1,42 @@
-# Smart model-runtime: maintainer reference
+# Custom model-runtime container (maintainer recipe)
 
-This is a **reference recipe**, not a verified, published turnkey image. No registry tag or model downloader is supplied. The runnable app quickstart remains in [the app guide](../../app/README.md); an existing compatible model endpoint can be configured in Admin.
+This directory contains the packaging contract for operators who build and host their own multi-model `llama-swap` image (used with `app/docker-compose.smart.yml`). Unlike the prebuilt Docker installer in [`docs/INSTALL.md`](../../docs/INSTALL.md), this recipe has no public registry tag and does not download models on startup—you supply the binaries and model volume yourself.
 
-## Prepared image and assets
+For most users who want PaddleOCR-VL and LFM2.5 in one container, use `bash install-docker.sh --metadata-runtime unified` instead (see [`deploy/paddle-ik/README.md`](../paddle-ik/README.md)).
 
-Maintainers must supply CPU/architecture/ABI-compatible binaries and shared libraries in a checksummed tarball. Extracting it under `/opt/dokocr` must provide:
+## Expected binaries
 
-| Path | Purpose |
+Package your prebuilt binaries and their shared libraries into a tarball that extracts under `/opt/dokocr`:
+
+| Path | Role |
 | --- | --- |
-| `ik-paddle/bin/llama-server` | Existing custom Paddle/OpenVINO build |
-| `ik-paddle/bin/llama-paddleocr-openvino-dry-run` | Managed vision helper, with its OpenVINO dependencies |
-| `ik-lfm/bin/llama-server` | [Pinned, schema-patched LFM metadata build](../metadata/README.md) |
-| `ik/bin/llama-server` | Retained Gemma rollback build |
-| `glm/bin/llama-server` | Optional GLM-compatible multimodal build; only needed for the GLM route |
+| `ik-paddle/bin/llama-server` | Custom PaddleOCR-VL / OpenVINO build |
+| `ik-paddle/bin/llama-paddleocr-openvino-dry-run` | Managed vision helper + OpenVINO libraries |
+| `ik-lfm/bin/llama-server` | Schema-patched LFM2.5 build ([`deploy/metadata/README.md`](../metadata/README.md)) |
+| `ik/bin/llama-server` | Optional Gemma rollback build |
+| `glm/bin/llama-server` | Optional GLM-OCR build (only needed if using the `glm` route) |
 
-Preserve the binaries' shared-library layout; do not assume a copied executable is self-contained. Never replace the custom Paddle build with the metadata build.
+Preserve each binary's shared-library layout.
 
-The config defines a fixed `/models` layout. Provision these files into the model volume before starting:
+## Expected `/models` layout
+
+Populate the model volume before starting the container:
 
 ```text
 paddleocr-vl/paddleocr-vl-q8_0.gguf
 paddleocr-vl/paddleocr-vl-mmproj.gguf
 paddleocr-vl/paddleocr-vl-chat_template.jinja
-paddleocr-vl-openvino-direct-pos-0049/model/manifest.json
+paddleocr-vl-openvino-direct-pos-0049/model/manifest.json   # full vision model directory
 lfm2.5-8b-a1b/LFM2.5-8B-A1B-Q5_K_M.gguf
 gemma-4-E2B-it-qat-q4_0-gguf/gemma-4-E2B_q4_0-it.gguf
 gemma-4-E2B-it-qat-q4_0-gguf/google-gemma4-E2B-chat_template-main.jinja
 ```
 
-To use optional GLM OCR, also provision `/opt/dokocr/glm/bin/llama-server`, `/models/glm/glm.gguf`, and `/models/glm/glm-mmproj.gguf`. Neither startup checks nor the doctor require GLM. Its alias remains in the reference config; selecting it without provisioning the runtime/assets will fail to load.
+For optional GLM OCR, also add `/opt/dokocr/glm/bin/llama-server`, `/models/glm/glm.gguf`, and `/models/glm/glm-mmproj.gguf`. Startup checks and the doctor script do not require GLM.
 
-The OpenVINO directory needs the complete matching patched vision model, not just its manifest. Check model provenance, licenses and checksums when provisioning. Weights and runtime libraries are not in this repository. There is no first-start download or conversion step.
+## Build and run
 
-## Build and use
-
-From the repository root, build your prepared artifact with:
+From the repository root, pass the official `llama-swap` v228 checksum and your runtime tarball URL + SHA-256:
 
 ```bash
 docker build deploy/model-runtime -t dokocr-model-runtime:local \
@@ -43,9 +45,9 @@ docker build deploy/model-runtime -t dokocr-model-runtime:local \
   --build-arg DOKOCR_IK_RUNTIME_TARBALL_SHA256="$DOKOCR_IK_RUNTIME_TARBALL_SHA256"
 ```
 
-Use the official checksum for the llama-swap v228 archive matching the target architecture, plus the checksum of your prepared runtime archive. Archives are verified before extraction. Do not put credentials into artifact URLs/build arguments or publish private production assets.
+Both archives are checksum-verified before extraction. Do not embed secrets in build arguments.
 
-After provisioning and testing the image/models:
+Start the app with the overlay and run the health check:
 
 ```bash
 cd app
@@ -54,16 +56,14 @@ docker compose -f docker-compose.yml -f docker-compose.smart.yml up -d
 python ../scripts/doctor-smart-runtime.py --base-url http://127.0.0.1:8092/v1
 ```
 
-The overlay requires an explicit image and publishes the gateway on loopback. App services use `http://model-runtime:8092/v1` internally. The named model volume can be replaced with an operator-managed bind mount at `/models`.
+The gateway binds to loopback on the host and serves app containers at `http://model-runtime:8092/v1`. You can replace the named model volume with a host bind mount at `/models`.
 
-## Runtime contract
+## Exposed model IDs
 
-- `paddleocr-vl`: strict PaddleOCR-VL OCR; custom OpenVINO build remains separate.
-- `metadata`: LFM2.5 Q5, no speculation/DSpark, thinking budget 3072 within the app's 4096 completion tokens.
-- `metadata-gemma`: optional operational rollback route, provisioned in this reference layout.
-- `glm`: optional OCR fallback; provision its runtime and assets only when needed.
-- Legacy `metadata-model`, `qwen-mtp`, `qwen3.5-2b`, `qwen`, Gemma and GLM aliases remain compatible.
+- `paddleocr-vl` — PaddleOCR-VL OCR
+- `metadata` — LFM2.5-8B-A1B Q5_K_M (thinking budget 3072 / 4096 max tokens, no speculation)
+- `metadata-gemma` — optional Gemma rollback
+- `glm` — optional GLM OCR fallback
+- Compatibility aliases: `metadata-model`, `qwen-mtp`, `qwen3.5-2b`, `qwen`, `glm-ocr`
 
-The app owns prompts, decoding requests, JSON schema, metadata validation and Redis inference coordination. llama-swap only loads/unloads/proxies models.
-
-`/health`, image healthchecks and the doctor script establish availability/model discovery, **not inference correctness**. Before publishing an image, test real metadata and image inference, model switching, library loading and the actual target CPU. This repository update does not publish or deploy such an image.
+`llama-swap` only loads, unloads, and proxies requests; the Dok OCR backend owns prompts, JSON schemas, validation, and Redis locking. Test real OCR and metadata requests on your target hardware before rolling out an image—`/health` and the doctor script only verify startup and model discovery.
