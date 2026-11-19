@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { Download, ExternalLink, FileText, FolderOpen, MoreHorizontal, RefreshCw, Search, Settings2, Tag } from 'lucide-react'
 import { api, downloadUrl, previewPageUrl, previewUrl, thumbnailUrl } from '../api/client'
+import PdfPageViewer from '../components/PdfPageViewer'
 import SavedViewsBar from '../components/SavedViewsBar'
 import StatusBadge from '../components/StatusBadge'
 import type { CollectionPageData, Document } from '../types'
@@ -425,7 +426,6 @@ function CollectionPeekPanel({ document, busy, onOpenDocument, onMarkReviewed, o
 
   const previewSource = collectionDocumentPreviewUrl(document)
   const isPdf = document.mime_type === 'application/pdf' && !document.id.startsWith('demo-')
-  const pdfPreviewSource = isPdf ? `${previewUrl(document.id)}#page=1&navpanes=0` : null
   const title = document.manual_title_override || document.extracted_title || document.original_filename
   const updated = new Date(document.updated_at).toLocaleString(language === 'de' ? 'de-DE' : undefined)
   const snippet = (document.ocr_text || document.ocr_snippet || '').trim()
@@ -438,18 +438,24 @@ function CollectionPeekPanel({ document, busy, onOpenDocument, onMarkReviewed, o
           <h2>{title}</h2>
           <small>{document.original_filename}</small>
         </div>
-        <div className="button-row">
-          {isPdf && (
-            <>
-              <a className="icon-button" href={previewUrl(document.id)} target="_blank" rel="noreferrer" title={t('collectionDetail.openFullPdf', 'Open full PDF')}><ExternalLink size={15} /></a>
-              <a className="icon-button" href={downloadUrl(document.id)} title={t('common.download')}><Download size={15} /></a>
-            </>
-          )}
-        </div>
+        {!isPdf && !document.id.startsWith('demo-') && (
+          <div className="button-row">
+            <a className="icon-button" href={downloadUrl(document.id)} title={t('common.download')}><Download size={15} /></a>
+          </div>
+        )}
       </header>
-      <div className={`collection-page-preview ${isPdf ? 'collection-pdf-preview' : ''}`}>
-        {pdfPreviewSource ? <iframe className="collection-native-pdf-preview" src={pdfPreviewSource} title={`${document.original_filename} PDF preview`} /> : previewSource ? <img src={previewSource} alt={`${document.original_filename} page 1`} /> : <div className="file-icon">{document.original_filename.split('.').pop()?.toUpperCase() || 'DOC'}</div>}
-      </div>
+      {isPdf ? (
+        <PdfPageViewer
+          documentId={document.id}
+          filename={document.original_filename}
+          pageCount={document.page_count}
+          height="min(46vh, 480px)"
+        />
+      ) : (
+        <div className="collection-page-preview">
+          {previewSource ? <img src={previewSource} alt={`${document.original_filename} page 1`} /> : <div className="file-icon">{document.original_filename.split('.').pop()?.toUpperCase() || 'DOC'}</div>}
+        </div>
+      )}
       <dl className="collection-peek-fields">
         <div><dt>{t('fields.sender')}</dt><dd>{document.extracted_sender || '—'}</dd></div>
         <div><dt>{t('fields.recipient')}</dt><dd>{document.extracted_recipient || '—'}</dd></div>

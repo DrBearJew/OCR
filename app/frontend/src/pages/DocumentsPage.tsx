@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Download, FileText, Maximize2, Minus, Plus, RefreshCw, Search, Trash2, UploadCloud } from 'lucide-react'
 import type { KeyboardEvent, MouseEvent } from 'react'
 import { api, downloadUrl, previewUrl, thumbnailUrl } from '../api/client'
+import PdfPageViewer from '../components/PdfPageViewer'
 import SavedViewsBar from '../components/SavedViewsBar'
 import StatusBadge from '../components/StatusBadge'
 import type { Document, DocumentEvent, DocumentPage } from '../types'
@@ -457,13 +458,20 @@ function DocumentPreviewPanel({ document, pages, loading, onOpenDocument }: { do
           <button className="icon-button" onClick={() => onOpenDocument(document.id)} title={t('common.open')}><FileText size={15} /></button>
         </div>
       </div>
-      <div ref={previewSurfaceRef} className={`document-preview-surface console-preview zoomable-preview ${isPdf ? 'pdf-preview-surface' : ''}`} onClick={handlePreviewClick} title={isPdf ? 'Use the PDF toolbar for pages and zoom.' : 'Click image to zoom around that point'}>
-        {canPreview && !document.id.startsWith('demo-') ? (
-          isPdf
-            ? <iframe className="zoomable-preview-media document-native-pdf-preview" style={mediaStyle} src={`${previewUrl(document.id)}#navpanes=0`} title={t('documents.preview')} />
-            : <img className="zoomable-preview-media" style={mediaStyle} src={previewUrl(document.id)} alt={document.original_filename} />
-        ) : document.thumbnail_path && !document.id.startsWith('demo-') ? <img className="zoomable-preview-media" style={mediaStyle} src={thumbnailUrl(document.id)} alt={document.original_filename} /> : <InvoiceMockup />}
-      </div>
+      {canPreview && !document.id.startsWith('demo-') && isPdf ? (
+        <PdfPageViewer
+          documentId={document.id}
+          filename={document.original_filename}
+          pageCount={document.page_count}
+          height="min(48vh, 520px)"
+        />
+      ) : (
+        <div ref={previewSurfaceRef} className="document-preview-surface console-preview zoomable-preview" onClick={handlePreviewClick} title={t('documents.clickToZoom', 'Click image to zoom around that point')}>
+          {canPreview && !document.id.startsWith('demo-') ? (
+            <img className="zoomable-preview-media" style={mediaStyle} src={previewUrl(document.id)} alt={document.original_filename} />
+          ) : document.thumbnail_path && !document.id.startsWith('demo-') ? <img className="zoomable-preview-media" style={mediaStyle} src={thumbnailUrl(document.id)} alt={document.original_filename} /> : <InvoiceMockup />}
+        </div>
+      )}
       <details className="sheet-ocr-disclosure">
         <summary>{t('documents.ocrText')}</summary>
         <div className="ocr-tabs">
@@ -495,9 +503,7 @@ function LargePreviewModal({ document, onClose }: { document: Document; onClose:
         <header>
           <strong>{document.original_filename}</strong>
           <div className="button-row">
-            {isPdf ? (
-              <small className="native-pdf-toolbar-note">Use the PDF toolbar for pages and zoom.</small>
-            ) : (
+            {!isPdf && (
               <>
                 <button type="button" className="icon-button" onClick={() => setZoom((value) => Math.max(50, value - 20))}><Minus size={16} /></button>
                 <button type="button" className="zoom-value" onClick={() => setZoom(100)}>{zoom}%</button>
@@ -510,7 +516,7 @@ function LargePreviewModal({ document, onClose }: { document: Document; onClose:
         <div className="large-preview-surface">
           {source ? (
             isPdf
-              ? <iframe className="large-native-pdf-preview" style={mediaStyle} src={source} title={t('documents.preview')} />
+              ? <PdfPageViewer documentId={document.id} filename={document.original_filename} pageCount={document.page_count} height="min(78vh, 860px)" />
               : <img style={mediaStyle} src={source} alt={document.original_filename} />
           ) : <InvoiceMockup />}
         </div>

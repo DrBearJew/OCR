@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { Download, Maximize2, Minus, Plus, RefreshCw, RotateCcw, Save, Sparkles, Trash2 } from 'lucide-react'
 import { api, downloadUrl, previewUrl, thumbnailUrl } from '../api/client'
+import PdfPageViewer from '../components/PdfPageViewer'
 import StatusBadge from '../components/StatusBadge'
 import type { Document, DocumentCustomFieldValue, DocumentEvent, DocumentPage } from '../types'
 import { useI18n } from '../i18n'
@@ -222,30 +223,33 @@ export default function DocumentDetailPage({ id }: { id: string }) {
         <section className="document-detail-preview-card">
           <div className="preview-toolbar">
             <strong>{t('documents.preview')}</strong>
-            <div className="button-row">
-              {isPdf ? (
-                <small className="native-pdf-toolbar-note">Use the PDF toolbar for pages and zoom.</small>
-              ) : (
-                <>
-                  <button type="button" className="icon-button" title={t('common.zoomOut')} onClick={() => adjustPreviewZoom(-20)}><Minus size={16} /></button>
-                  <button type="button" className="zoom-value" title={t('common.resetZoom')} onClick={() => setPreviewZoom(100)}>{previewZoom}%</button>
-                  <button type="button" className="icon-button" title={t('common.zoomIn')} onClick={() => adjustPreviewZoom(20)}><Plus size={16} /></button>
-                  <button type="button" className="icon-button" title={t('documentDetail.readableSize')} onClick={() => setPreviewZoom((current) => current >= 160 ? 100 : 160)}><Maximize2 size={16} /></button>
-                </>
-              )}
-            </div>
-          </div>
-          <div className={`preview-pane document-detail-preview-pane ${isPdf ? 'pdf-preview-surface' : ''}`}>
-            {document.thumbnail_path && !canPreview ? (
-              <img className="document-detail-preview-media" style={previewMediaStyle} src={thumbnailUrl(document.id)} alt={document.original_filename} />
-            ) : canPreview ? (
-              isPdf
-                ? <iframe className="document-detail-preview-media document-native-pdf-preview" style={previewMediaStyle} src={`${previewUrl(document.id)}#navpanes=0`} title={t('documents.preview')} />
-                : <img className="document-detail-preview-media" style={previewMediaStyle} src={previewUrl(document.id)} alt={document.original_filename} />
-            ) : (
-              <a href={downloadUrl(document.id)}>{t('common.download')} {document.original_filename}</a>
+            {!isPdf && (
+              <div className="button-row">
+                <button type="button" className="icon-button" title={t('common.zoomOut')} onClick={() => adjustPreviewZoom(-20)}><Minus size={16} /></button>
+                <button type="button" className="zoom-value" title={t('common.resetZoom')} onClick={() => setPreviewZoom(100)}>{previewZoom}%</button>
+                <button type="button" className="icon-button" title={t('common.zoomIn')} onClick={() => adjustPreviewZoom(20)}><Plus size={16} /></button>
+                <button type="button" className="icon-button" title={t('documentDetail.readableSize')} onClick={() => setPreviewZoom((current) => current >= 160 ? 100 : 160)}><Maximize2 size={16} /></button>
+              </div>
             )}
           </div>
+          {canPreview && isPdf ? (
+            <PdfPageViewer
+              documentId={document.id}
+              filename={document.original_filename}
+              pageCount={document.page_count}
+              height="min(76vh, 880px)"
+            />
+          ) : (
+            <div className="preview-pane document-detail-preview-pane">
+              {document.thumbnail_path && !canPreview ? (
+                <img className="document-detail-preview-media" style={previewMediaStyle} src={thumbnailUrl(document.id)} alt={document.original_filename} />
+              ) : canPreview ? (
+                <img className="document-detail-preview-media" style={previewMediaStyle} src={previewUrl(document.id)} alt={document.original_filename} />
+              ) : (
+                <a href={downloadUrl(document.id)}>{t('common.download')} {document.original_filename}</a>
+              )}
+            </div>
+          )}
         </section>
         <form className="metadata-form" onSubmit={save}>
           <label>{t('documentDetail.manualTitleOverride')}<input value={form.manual_title_override ?? ''} onChange={(e) => setForm({ ...form, manual_title_override: e.target.value })} /></label>

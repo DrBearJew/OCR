@@ -2,6 +2,7 @@ import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState
 import type { MouseEvent, MutableRefObject, ReactNode } from 'react'
 import { ArrowUpRight, Check, ChevronDown, ClipboardCheck, CloudUpload, Copy, FileImage, FileText, Layers, Maximize2, Minus, Plus, RefreshCw, RotateCcw, Save, Search, Sparkles, Trash2, UploadCloud, XCircle } from 'lucide-react'
 import { api, previewUrl as documentPreviewUrl, thumbnailUrl as documentThumbnailUrl } from '../api/client'
+import PdfPageViewer from '../components/PdfPageViewer'
 import StatusBadge from '../components/StatusBadge'
 import type { Collection, CustomFieldDefinition, DashboardSummary, Document } from '../types'
 import { useI18n } from '../i18n'
@@ -22,6 +23,7 @@ interface UploadDraftFile {
   thumbnailUrl: string | null
   serverPreviewUrl: string | null
   mimeType: string | null
+  pageCount?: number | null
   kind: 'pdf' | 'image' | 'text'
   ocrStatus: 'completed' | 'running' | 'failed' | 'queued'
   extractedTitle: string
@@ -771,7 +773,8 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
   const previewSurfaceRef = useRef<HTMLDivElement | null>(null)
   const [basePreviewWidth, setBasePreviewWidth] = useState(820)
   const isPdf = selected?.kind === 'pdf'
-  const nativePdfPreviewUrl = selected?.kind === 'pdf' ? selected.previewUrl || selected.serverPreviewUrl : null
+  const usesServerPdfPageViewer = Boolean(selected?.kind === 'pdf' && selected.documentId && !selected.previewUrl)
+  const nativePdfPreviewUrl = selected?.kind === 'pdf' && !usesServerPdfPageViewer ? selected.previewUrl || selected.serverPreviewUrl : null
   const usesNativePdfViewer = Boolean(nativePdfPreviewUrl)
   const effectiveZoom = usesNativePdfViewer ? 100 : zoom
   const zoomedPreviewWidth = Math.round(basePreviewWidth * effectiveZoom / 100)
@@ -874,7 +877,7 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
         <h2>{t('dashboard.filePreview')}</h2>
         <span>{selected?.filename || t('dashboard.noFileSelected')}</span>
       </div>
-      {selected && (
+      {selected && !usesServerPdfPageViewer && (
         <div className="document-preview-toolbar upload-preview-toolbar">
           {usesNativePdfViewer ? (
             <>
@@ -898,14 +901,26 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
       )}
       <div className="document-preview-layout">
         <AttachmentStrip files={files} selectedId={selectedId} onSelect={setSelectedId} onAddMore={onAddMore} />
-        <div ref={previewSurfaceRef} className={`document-preview-surface upload-zoomable-preview ${usesNativePdfViewer ? 'pdf-preview-surface' : ''} ${effectiveZoom <= 100 ? 'fit-preview' : 'zoomed-preview'} ${showOcr ? 'show-ocr-overlay' : ''}`} onClick={handlePreviewClick}>
-          <div className={`document-preview-stage ${usesNativePdfViewer ? 'pdf-preview-stage' : ''}`}>
-            <div className="document-preview-object" style={previewObjectStyle}>
-              {preview}
-            </div>
+        {usesServerPdfPageViewer && selected?.documentId ? (
+          <div className="dashboard-pdf-viewer-wrap">
+            <PdfPageViewer
+              documentId={selected.documentId}
+              filename={selected.filename}
+              pageCount={selected.pageCount}
+              height="min(62vh, 620px)"
+            />
+            {showOcr && selected.ocrSnippet && <pre className="document-preview-ocr-overlay">{selected.ocrSnippet}</pre>}
           </div>
-          {showOcr && selected?.ocrSnippet && <pre className="document-preview-ocr-overlay">{selected.ocrSnippet}</pre>}
-        </div>
+        ) : (
+          <div ref={previewSurfaceRef} className={`document-preview-surface upload-zoomable-preview ${usesNativePdfViewer ? 'pdf-preview-surface' : ''} ${effectiveZoom <= 100 ? 'fit-preview' : 'zoomed-preview'} ${showOcr ? 'show-ocr-overlay' : ''}`} onClick={handlePreviewClick}>
+            <div className={`document-preview-stage ${usesNativePdfViewer ? 'pdf-preview-stage' : ''}`}>
+              <div className="document-preview-object" style={previewObjectStyle}>
+                {preview}
+              </div>
+            </div>
+            {showOcr && selected?.ocrSnippet && <pre className="document-preview-ocr-overlay">{selected.ocrSnippet}</pre>}
+          </div>
+        )}
       </div>
     </section>
   )
@@ -1098,6 +1113,7 @@ function draftFromDocument(document: Document, index: number, previous?: UploadD
     thumbnailUrl: document.thumbnail_path ? documentThumbnailUrl(document.id) : null,
     serverPreviewUrl: documentPreviewUrl(document.id),
     mimeType: document.mime_type,
+    pageCount: document.page_count,
     kind,
     ocrStatus: document.processing_state === 'failed' ? 'failed' : document.ocr_state === 'done' || document.ocr_state === 'skipped' ? 'completed' : document.processing_state === 'queued_for_ocr' ? 'queued' : 'running',
     extractedTitle: document.manual_title_override || document.extracted_title || document.original_filename,
