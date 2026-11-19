@@ -676,10 +676,10 @@ index c5fd7ec..a53439f 100644
          // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
          const float a = -0.75f; // use alpha = -0.75 (same as PyTorch)
 diff --git a/ggml/src/iqk/fa/iqk_fa_96_96.cpp b/ggml/src/iqk/fa/iqk_fa_96_96.cpp
-index 345f290..761414e 100644
+index 345f290..b0e2e1a 100644
 --- a/ggml/src/iqk/fa/iqk_fa_96_96.cpp
 +++ b/ggml/src/iqk/fa/iqk_fa_96_96.cpp
-@@ -3,6 +3,80 @@
+@@ -3,6 +3,113 @@
  #if defined IQK_IMPLEMENT && defined GGML_IQK_FLASH_ATTENTION
  
  #include "iqk/fa/iqk_fa_templates.h"
@@ -687,7 +687,7 @@ index 345f290..761414e 100644
 +
 +#ifdef __AVX512F__
 +void iqk_fa_vision_v72(int nq, int nk, const float * q, const void * k, const void * v,
-+                       const void * mask, float scale, float * result) {
++                       const void * mask, float scale, float * result, bool pack_k) {
 +    constexpr int stride = 96*sizeof(ggml_fp16_t);
 +    HelperVisionV72 vh(static_cast<const char *>(v), stride);
 +    auto run = [&](auto & kh) {
@@ -700,7 +700,7 @@ index 345f290..761414e 100644
 +        else tile_run(std::integral_constant<int, 32>{});
 +    };
 +    // Pack only when there are enough queries to amortize the transpose.
-+    if (nq >= 512 && nk >= 512 && nk <= 8192) {
++    if (pack_k && nk >= 512 && nk <= 8192) {
 +        HelperVisionK72 kh(static_cast<const char *>(k), nk, stride);
 +        run(kh);
 +    } else {
@@ -729,6 +729,39 @@ index 345f290..761414e 100644
 +    void load(int l, int i, F16::Data & a, F16::Data & b) const {
 +        a = F16::load(lblock(l), i);
 +        b = F16::load(lblock(l), i+1);
++    }
++
++    template <int nq, int nk>
++    void accumulate(float * out, const float * weights) const {
++        static_assert(nq % 4 == 0 && nk % 32 == 0);
++        // Convert each V vector once per 32 keys. Keep four query accumulators
++        // in registers across the subtile, visiting keys in the original order.
++        alignas(32) float packed[32][72];
++        for (int first = 0; first < nk; first += 32) {
++            for (int k = 0; k < 32; ++k) {
++                const auto * v = lblock(first + k);
++                for (int d = 0; d < 9; ++d) _mm256_store_ps(packed[k] + 8*d, F16::load(v, d));
++            }
++            for (int q = 0; q < nq; q += 4) {
++                const auto * w = weights + q*nk + first;
++                for (int d = 0; d < 72; d += 8) {
++                    auto * r = out + 72*q + d;
++                    auto s0 = _mm256_loadu_ps(r), s1 = _mm256_loadu_ps(r + 72);
++                    auto s2 = _mm256_loadu_ps(r + 144), s3 = _mm256_loadu_ps(r + 216);
++                    for (int k = 0; k < 32; ++k) {
++                        const auto vv = _mm256_load_ps(packed[k] + d);
++                        s0 = _mm256_fmadd_ps(vv, _mm256_broadcast_ss(w + k), s0);
++                        s1 = _mm256_fmadd_ps(vv, _mm256_broadcast_ss(w + nk + k), s1);
++                        s2 = _mm256_fmadd_ps(vv, _mm256_broadcast_ss(w + 2*nk + k), s2);
++                        s3 = _mm256_fmadd_ps(vv, _mm256_broadcast_ss(w + 3*nk + k), s3);
++                    }
++                    _mm256_storeu_ps(r, s0);
++                    _mm256_storeu_ps(r + 72, s1);
++                    _mm256_storeu_ps(r + 144, s2);
++                    _mm256_storeu_ps(r + 216, s3);
++                }
++            }
++        }
 +    }
 +};
 +}
@@ -761,7 +794,7 @@ index 345f290..761414e 100644
  IQK_FA_CASE(iqk_fa_96_96) {
  
 diff --git a/ggml/src/iqk/fa/iqk_fa_templates.h b/ggml/src/iqk/fa/iqk_fa_templates.h
-index 9b7f8b0..6da514d 100644
+index 9b7f8b0..036f449 100644
 --- a/ggml/src/iqk/fa/iqk_fa_templates.h
 +++ b/ggml/src/iqk/fa/iqk_fa_templates.h
 @@ -207,6 +207,196 @@ struct HelperF16 final : public BaseHelper {
@@ -1030,7 +1063,18 @@ index 9b7f8b0..6da514d 100644
      // This fails for head sizes of 80 and 112 as D/16 is odd, so we cannot do steps of 2
      // Hence, for now, we will not handle head sizes of 80 and 112
      template <typename VHelper, typename FMS>
-@@ -1075,7 +1318,18 @@ struct FlashQKV {
+@@ -1070,12 +1313,29 @@ struct FlashQKV {
+             }
+             return;
+         }
++#endif
++#if defined(__AVX2__) && !defined(__AVX512F__)
++        if constexpr (D == 72 && q_step % 4 == 0) {
++            vh.template accumulate<q_step, k_step>(qkv_cache, fms.cache);
++            return;
++        }
+ #endif
+         F16::Data v[8];
  #ifdef __AVX2__
          F16::Data vs[4];
  #endif
@@ -1050,7 +1094,7 @@ index 9b7f8b0..6da514d 100644
              for (int l = 0; l < k_step; l += 4) {
                  vh.load(l+0, i, v[0], v[4]);
                  vh.load(l+1, i, v[1], v[5]);
-@@ -1129,7 +1383,18 @@ struct FlashQKV {
+@@ -1129,7 +1389,18 @@ struct FlashQKV {
                  }
              }
          }
@@ -1070,7 +1114,7 @@ index 9b7f8b0..6da514d 100644
              for (int l = 0; l < k_step; l += 4) {
                  vh.load(l+0, i, v[0], v[4]);
                  vh.load(l+1, i, v[1], v[5]);
-@@ -1258,6 +1523,19 @@ struct FlashQKfp32 {
+@@ -1258,6 +1529,19 @@ struct FlashQKfp32 {
      static_assert(k_step%F16::block_size == 0);
      static_assert(q_step <= 4 || q_step%4 == 0);
  
@@ -1090,7 +1134,7 @@ index 9b7f8b0..6da514d 100644
      template <typename KHelper, typename q_float>
      static inline void multiply_mask_kq(const KHelper& kh, int stride_q, int stride_m, const q_float * q, const char * mask,
              FlashMS<q_step, k_step>& fms) {
-@@ -1265,8 +1543,7 @@ struct FlashQKfp32 {
+@@ -1265,8 +1549,7 @@ struct FlashQKfp32 {
          constexpr int nrc_k = 8;
          static_assert(k_step%nrc_k == 0);
  #endif
@@ -1100,7 +1144,7 @@ index 9b7f8b0..6da514d 100644
  #ifdef __AVX2__
          F16::Data vk[k_step/F16::block_size];
  #else
-@@ -1284,8 +1561,7 @@ struct FlashQKfp32 {
+@@ -1284,8 +1567,7 @@ struct FlashQKfp32 {
          constexpr int nrc_k = 8;
          static_assert(k_step%nrc_k == 0);
  #endif
@@ -1111,7 +1155,7 @@ index 9b7f8b0..6da514d 100644
          F16::Data vk[k_step/F16::block_size];
  #else
 diff --git a/ggml/src/iqk/iqk_flash_attn.cpp b/ggml/src/iqk/iqk_flash_attn.cpp
-index 6b6bbd7..320e897 100644
+index 6b6bbd7..21c1232 100644
 --- a/ggml/src/iqk/iqk_flash_attn.cpp
 +++ b/ggml/src/iqk/iqk_flash_attn.cpp
 @@ -17,6 +17,7 @@
@@ -1122,7 +1166,7 @@ index 6b6bbd7..320e897 100644
  #include <unordered_set>
  
  namespace {
-@@ -162,6 +163,84 @@ extern "C" IQK_API bool iqk_flash_attn_noalibi(int type_q, int type_mask, float
+@@ -162,6 +163,110 @@ extern "C" IQK_API bool iqk_flash_attn_noalibi(int type_q, int type_mask, float
  
      if (type_q != 0 || type_mask != 1 || max_bias > 0) return false;
  
@@ -1144,7 +1188,33 @@ index 6b6bbd7..320e897 100644
 +            nth <= 0 || ith < 0 || ith >= nth) return false;
 +
 +        const int64_t nheads = int64_t(neq2)*neq3;
-+        if (ith >= nheads) return true; // No scratch for idle workers.
++        const int nk_pad = 32*((nek1 + 31)/32);
++        const bool split_q = neq1 >= 256 && nheads % nth != 0;
++        // Use the helper's full query batches, not merely multiples of 4:
++        // changing the query kernel (including the last partial batch) can
++        // change floating point evaluation. Attach the tail to the last batch.
++        const int q_block = nk_pad >= 512 ? 64 : 8;
++        const int q_blocks = neq1/q_block;
++        const int64_t tasks = split_q ? nheads*q_blocks : nheads;
++        const int64_t begin = split_q ? tasks*ith/nth : ith;
++        const int64_t end = split_q ? tasks*(ith + 1)/nth : nheads;
++        if (begin >= end) return true;
++
++        auto for_each_shard = [&](auto && run) {
++            for (int64_t i = begin; i < end; ) {
++                if (!split_q) {
++                    run(i, 0, neq1);
++                    i += nth;
++                } else {
++                    const auto head = i/q_blocks;
++                    const auto next = std::min(end, (head + 1)*q_blocks);
++                    const int q0 = (i % q_blocks)*q_block;
++                    const int q1 = next % q_blocks == 0 ? neq1 : (next % q_blocks)*q_block;
++                    run(head, q0, q1 - q0);
++                    i = next;
++                }
++            }
++        };
 +#if !defined(__AVX512F__)
 +        // Amortize packing over a vision prefill, and bound per-worker scratch.
 +        // The existing adapter still handles byte strides the FP32 helper cannot express.
@@ -1152,52 +1222,52 @@ index 6b6bbd7..320e897 100644
 +            (reinterpret_cast<uintptr_t>(q) | nbq2 | nbq3) % alignof(float) == 0 &&
 +            int64_t(neq1)*(stride_q/sizeof(float)) <= std::numeric_limits<int>::max() &&
 +            int64_t(neq1)*ne1 <= std::numeric_limits<int>::max()/72) {
-+            for (int64_t head = ith; head < nheads; head += nth) {
++            for_each_shard([&](int64_t head, int q0, int nq) {
 +                const int64_t h = head%neq2, b = head/neq2;
-+                const auto qh = (const char *)q + h*nbq2 + b*nbq3;
++                const auto qh = (const char *)q + h*nbq2 + b*nbq3 + int64_t(q0)*stride_q;
 +                const auto kh = (const char *)k + h*nbk2 + b*nbk3;
 +                const auto vh = (const char *)v + h*nbv2 + b*nbv3;
-+                auto dst = qkv + (b*ne2*ne1 + h)*72;
-+                iqk_fa_vision_v72(neq1, nek1, stride_q/sizeof(float), stride_k, stride_v, ne1*72,
++                auto dst = qkv + ((b*ne2 + q0)*ne1 + h)*72;
++                iqk_fa_vision_v72(nq, nek1, stride_q/sizeof(float), stride_k, stride_v, ne1*72,
 +                                  reinterpret_cast<const float *>(qh), kh, vh, scale, dst);
-+            }
++            });
 +            return true;
 +        }
 +#endif
-+        const int nk_pad = 32*((nek1 + 31)/32);
-+        // Private scratch is linear in NQ/NK and reused across this worker's heads.
-+        std::vector<float> qp(size_t(neq1)*96, 0), result(size_t(neq1)*96);
++        // Private scratch is reused across this worker's shards.
++        const int max_nq = split_q ? std::min<int64_t>(neq1, ((end - begin) + 1)*q_block - 1) : neq1;
++        std::vector<float> qp(size_t(max_nq)*96, 0), result(size_t(max_nq)*96);
 +        std::vector<ggml_fp16_t> kp(size_t(nk_pad)*96, 0), vp(size_t(nk_pad)*96, 0);
 +        std::vector<ggml_fp16_t> mp(nk_pad, ggml_fp32_to_fp16(-INFINITY));
 +        std::fill(mp.begin(), mp.begin() + nek1, ggml_fp32_to_fp16(0));
-+        for (int64_t head = ith; head < nheads; head += nth) {
++        for_each_shard([&](int64_t head, int q0, int nq) {
 +            const int64_t h = head%neq2, b = head/neq2;
-+            const auto qh = (const char *)q + h*nbq2 + b*nbq3;
++            const auto qh = (const char *)q + h*nbq2 + b*nbq3 + int64_t(q0)*stride_q;
 +            const auto kh = (const char *)k + h*nbk2 + b*nbk3;
 +            const auto vh = (const char *)v + h*nbv2 + b*nbv3;
-+            for (int64_t r = 0; r < neq1; ++r)
++            for (int64_t r = 0; r < nq; ++r)
 +                std::memcpy(qp.data() + r*96, qh + r*stride_q, 72*sizeof(float));
 +            for (int64_t r = 0; r < nek1; ++r) {
 +                std::memcpy(kp.data() + r*96, kh + r*stride_k, 72*sizeof(ggml_fp16_t));
 +                std::memcpy(vp.data() + r*96, vh + r*stride_v, 72*sizeof(ggml_fp16_t));
 +            }
 +#ifdef __AVX512F__
-+            iqk_fa_vision_v72(neq1, nk_pad, qp.data(), kp.data(), vp.data(), mp.data(), scale, result.data());
++            iqk_fa_vision_v72(nq, nk_pad, qp.data(), kp.data(), vp.data(), mp.data(), scale, result.data(), neq1 >= 512);
 +#else
 +            // F16/F16, 96x96, a non-null mask and NK%32 == 0 cannot be
 +            // rejected by iqk_fa_96_96. Never return false after publishing a head:
 +            // another worker may already have returned true to the caller.
 +            const bool ok = iqk_flash_attn_impl(GGML_TYPE_F16, GGML_TYPE_F16,
-+                96, 96, neq1, nk_pad, 96*sizeof(float), 96*sizeof(ggml_fp16_t),
++                96, 96, nq, nk_pad, 96*sizeof(float), 96*sizeof(ggml_fp16_t),
 +                96*sizeof(ggml_fp16_t), 0, 96, qp.data(), kp.data(), vp.data(), mp.data(),
 +                nullptr, 0, scale, 0, result.data(), nullptr, nullptr);
 +            GGML_ASSERT(ok);
 +#endif
 +            // Preserve the original scale (D=72) and [Dv, heads, queries, batch].
-+            auto dst = (char *)qkv + (b*ne2*ne1 + h)*nb1;
-+            for (int64_t r = 0; r < neq1; ++r)
++            auto dst = (char *)qkv + ((b*ne2 + q0)*ne1 + h)*nb1;
++            for (int64_t r = 0; r < nq; ++r)
 +                std::memcpy(dst + r*ne1*nb1, result.data() + r*96, 72*sizeof(float));
-+        }
++        });
 +        return true;
 +#else
 +        return false;
@@ -1208,7 +1278,7 @@ index 6b6bbd7..320e897 100644
          //if (indexer->ne[0] < nek1 && neq1 >= nth && neq3 == 1 && nek3 == 1 && nev3 == 1 && nek2 == 1) {
          if (indexer->ne[0] < nek1 && neq3 == 1 && nek3 == 1 && nev3 == 1 && nek2 == 1) {
 diff --git a/ggml/src/iqk/iqk_flash_impl.h b/ggml/src/iqk/iqk_flash_impl.h
-index 211b337..9e91924 100644
+index 211b337..39010c3 100644
 --- a/ggml/src/iqk/iqk_flash_impl.h
 +++ b/ggml/src/iqk/iqk_flash_impl.h
 @@ -31,5 +31,13 @@ bool iqk_flash_attn_impl(int type_k,             // type of k
@@ -1217,7 +1287,7 @@ index 211b337..9e91924 100644
  
 +#ifdef __AVX512F__
 +void iqk_fa_vision_v72(int nq, int nk, const float * q, const void * k, const void * v,
-+                       const void * mask, float scale, float * result);
++                       const void * mask, float scale, float * result, bool pack_k);
 +#elif defined(__AVX2__)
 +void iqk_fa_vision_v72(int nq, int nk, int stride_q, int stride_k, int stride_v, int stride_out,
 +                       const float * q, const char * k, const char * v, float scale, float * result);
@@ -1706,10 +1776,10 @@ index 0000000..06cda54
 +}
 diff --git a/tests/test-paddleocr.cpp b/tests/test-paddleocr.cpp
 new file mode 100644
-index 0000000..de7f5d9
+index 0000000..81cdfef
 --- /dev/null
 +++ b/tests/test-paddleocr.cpp
-@@ -0,0 +1,433 @@
+@@ -0,0 +1,479 @@
 +#include "../src/llama-model.h"
 +
 +#include <algorithm>
@@ -1717,6 +1787,7 @@ index 0000000..de7f5d9
 +#include <cstdio>
 +#include <cstdlib>
 +#include <cstring>
++#include <thread>
 +#include <vector>
 +
 +// IQK is optional and its build defines are private to ggml. Inspect the existing
@@ -1797,6 +1868,16 @@ index 0000000..de7f5d9
 +    ggml_free(ctx);
 +    return accepted;
 +}
++
++#ifdef TEST_IQK_DISPATCH
++template <typename Task>
++static void run_workers(int nth, const Task & task) {
++    std::vector<std::thread> threads;
++    for (int ith = 1; ith < nth; ++ith) threads.emplace_back(task, ith);
++    task(0);
++    for (auto & thread : threads) thread.join();
++}
++#endif
 +
 +static void test_dispatch() {
 +    const auto arch = llm_arch_from_string("paddleocr");
@@ -1911,6 +1992,36 @@ index 0000000..de7f5d9
 +        scale, softcap, static_cast<float *>(out->data), nullptr, nullptr, nullptr, ith, nth, 0, indexer);
 +}
 +
++static void test_attention_thread_parity(int nq, int nk, int nh, int nb) {
++    constexpr int d = 72;
++    auto * ctx = context();
++    auto * q = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, d, nq, nh, nb);
++    auto * k = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, d, nk, nh, nb);
++    auto * v = ggml_dup_tensor(ctx, k);
++    for (int i = 0; i < ggml_nelements(q); ++i) static_cast<float *>(q->data)[i] = std::sin(i*0.17f);
++    for (int i = 0; i < ggml_nelements(k); ++i) {
++        static_cast<ggml_fp16_t *>(k->data)[i] = ggml_fp32_to_fp16(std::cos(i*0.11f));
++        static_cast<ggml_fp16_t *>(v->data)[i] = ggml_fp32_to_fp16(std::sin(i*0.07f));
++    }
++    const float scale = 1/std::sqrt(float(d));
++    auto * out = ggml_flash_attn_ext(ctx, q, k, v, nullptr, scale, 0, 0);
++    check(dispatch_attention(q, k, v, out, nullptr, scale, 0, 1), "single-worker D=72 dispatch rejected");
++    auto * ref = static_cast<const float *>(out->data);
++    check(std::all_of(ref, ref + ggml_nelements(out), [](float x) { return std::isfinite(x); }), "invalid D=72 reference");
++    std::vector<float> data(ggml_nelements(out));
++    ggml_tensor dst = *out;
++    dst.data = data.data();
++    for (int nth : {4, 6, 8, 10, 12, 16, 24}) {
++        std::fill(data.begin(), data.end(), -12345.f);
++        run_workers(nth, [&](int ith) {
++            check(dispatch_attention(q, k, v, &dst, nullptr, scale, ith, nth), "multi-worker D=72 dispatch rejected");
++        });
++        check(std::memcmp(ref, data.data(), ggml_nbytes(out)) == 0, "D=72 split differs bitwise from head-only dispatch");
++    }
++    ggml_free(ctx);
++    printf("D=72 %d queries x %d keys x %d heads: bit-exact at 1/4/6/8/10/12/16/24 threads\n", nq, nk, nh*nb);
++}
++
 +static bool has_iqk_attention() {
 +    if (!ggml_cpu_has_avx2() || !iqk_flash_attn_noalibi) return false;
 +    // The 96-wide masked F16 kernel predates the adapter. This distinguishes
@@ -2013,7 +2124,7 @@ index 0000000..de7f5d9
 +            check(dispatch_attention(q, k, v, &dst, mask ? mask->data : nullptr, scale, ith, threads),
 +                "eligible attention dispatcher rejected");
 +            for (int b = 0; b < nb; ++b) for (int r = 0; r < nq; ++r) for (int h = 0; h < nh; ++h) {
-+                if (dim == 72 && (b*nh + h)%threads > ith) {
++                if (dim == 72 && (nq < 256 || (nh*nb)%threads == 0) && (b*nh + h)%threads > ith) {
 +                    check(direct[dim*(h + nh*(r + nq*b))] == -12345.0f, "dispatcher wrote another worker's head");
 +                }
 +            }
@@ -2098,6 +2209,11 @@ index 0000000..de7f5d9
 +    bool iqk = false;
 +#ifdef TEST_IQK_DISPATCH
 +    iqk = has_iqk_attention();
++    if (iqk) {
++        test_attention_thread_parity(517, 521, 8, 2); // Native AVX2 and packed AVX-512; odd query/key tails.
++        test_attention_thread_parity(295, 177, 16, 1); // Short-K fallback and seven-query tail.
++        test_attention_thread_parity(325, 511, 1, 1); // Padded K selects the 64-query kernel.
++    }
 +#endif
 +    if (argc == 2 && std::strcmp(argv[1], "--require-iqk") == 0) check(iqk, "IQK attention unavailable");
 +    printf("IQK dispatcher checks: %s\n", iqk ? "enabled" : "unavailable (graph references only)");
