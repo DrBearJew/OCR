@@ -193,15 +193,18 @@ export default function SchemaPage() {
       <section className="schema-layout">
         <aside className="workflow-card schema-collections">
           <h2>{t('collections.title')}</h2>
-          {collections.map((collection) => (
-            <div className="schema-collection-row" key={collection.id}>
-              <button type="button" className={selected === collection.id ? 'active' : ''} onClick={() => setSelected(collection.id)}>
-                <strong>{collection.name}</strong>
-                <span>{collection.slug}</span>
-              </button>
-              <button type="button" className="schema-delete-button" title={t('schemas.delete', 'Delete schema')} disabled={busyDelete === collection.id} onClick={() => void deleteSchema(collection)}><Trash2 size={14} /></button>
-            </div>
-          ))}
+          {collections.map((collection) => {
+            const showSlug = collection.slug.toLowerCase() !== collection.name.toLowerCase()
+            return (
+              <div className="schema-collection-row" key={collection.id}>
+                <button type="button" className={selected === collection.id ? 'active' : ''} onClick={() => setSelected(collection.id)}>
+                  <strong>{collection.name}</strong>
+                  {showSlug && <span>{collection.slug}</span>}
+                </button>
+                <button type="button" className="schema-delete-button" title={t('schemas.delete', 'Delete schema')} disabled={busyDelete === collection.id} onClick={() => void deleteSchema(collection)}><Trash2 size={14} /></button>
+              </div>
+            )
+          })}
         </aside>
         <section className="schema-editor-stack">
           <section className="workflow-card schema-panel">

@@ -7,10 +7,19 @@ import type { ProcessingSummary } from '../types'
 import { useI18n } from '../i18n'
 
 export default function ProcessingPage({ onOpenDocument }: { onOpenDocument: (id: string) => void }) {
-  const { t } = useI18n()
+  const { t, language } = useI18n()
   const [data, setData] = useState<ProcessingSummary | null>(null)
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [error, setError] = useState('')
+
+  function formatSummaryValue(key: string, value: unknown) {
+    if (value === null || value === undefined || value === '') return '—'
+    if (key === 'oldest_queued_at' && typeof value === 'string') {
+      const parsed = new Date(value)
+      return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString(language === 'de' ? 'de-DE' : undefined)
+    }
+    return String(value)
+  }
 
   async function load() {
     setError('')
@@ -39,7 +48,12 @@ export default function ProcessingPage({ onOpenDocument }: { onOpenDocument: (id
       {error && <p className="error">{error}</p>}
       <SavedViewsBar section="processing" filters={filters} onApply={setFilters} />
       <section className="stats-grid">
-        {Object.entries(data?.summary || {}).map(([key, value]) => <div className="metric" key={key}><strong>{value}</strong><span>{key.replace(/_/g, ' ')}</span></div>)}
+        {Object.entries(data?.summary || {}).map(([key, value]) => (
+          <div className="metric" key={key}>
+            <strong>{formatSummaryValue(key, value)}</strong>
+            <span>{t(`processing.summary.${key}`, key.replace(/_/g, ' '))}</span>
+          </div>
+        ))}
         <div className="metric"><strong>{data?.stuck_documents.length || 0}</strong><span>{t('processing.stuck')}</span></div>
       </section>
       <div className="filter-row">

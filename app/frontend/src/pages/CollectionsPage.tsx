@@ -146,7 +146,9 @@ export default function CollectionsPage({ onOpenCollection, onSchemas }: Collect
                 </span>
                 <div className="binder-title-wrap">
                   <h2>{item.collection.name}</h2>
-                  <small>{item.collection.slug}</small>
+                  {item.collection.slug.toLowerCase() !== item.collection.name.toLowerCase() && (
+                    <small>{item.collection.slug}</small>
+                  )}
                 </div>
                 <span className="binder-arrow" aria-hidden="true"><ArrowUpRight size={17} /></span>
               </div>

@@ -344,6 +344,7 @@ const EXTRA_EVENT_DE: Record<string, string> = {
   process_finished: 'Verarbeitung abgeschlossen',
   process_queued: 'In Warteschlange',
   qwen_metadata_brain_single_pass: 'Metadaten-Extraktion',
+  financial_review_required: 'Finanzprüfung erforderlich',
 }
 
 const EXTRA_EVENT_EN: Record<string, string> = {
@@ -351,11 +352,15 @@ const EXTRA_EVENT_EN: Record<string, string> = {
   process_finished: 'Processing finished',
   process_queued: 'Processing queued',
   qwen_metadata_brain_single_pass: 'Metadata extraction',
+  financial_review_required: 'Financial review required',
 }
 
 const EXTRA_MESSAGE_DE: Record<string, string> = {
   'Manual document metadata edit': 'Dokument-Metadaten manuell bearbeitet',
   'Full document processing finished': 'Vollständige Dokumentverarbeitung abgeschlossen',
+  'Full document processing queued from existing OCR': 'Verarbeitung mit vorhandener OCR eingereiht',
+  'Financial values require scan verification': 'Finanzbeträge müssen anhand des Scans geprüft werden',
+  'Mapped correspondent, document type, tag, and storage path metadata': 'Korrespondent, Dokumenttyp, Tags und Speicherpfad zugeordnet',
   'Qwen metadata, search, tag, and folder candidates were handled in the metadata stage': 'Metadaten-, Such-, Tag- und Ordnervorschläge verarbeitet',
 }
 
