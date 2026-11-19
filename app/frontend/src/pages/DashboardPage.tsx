@@ -2,7 +2,6 @@ import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState
 import type { MouseEvent, MutableRefObject, ReactNode } from 'react'
 import { ArrowUpRight, Check, ChevronDown, ClipboardCheck, CloudUpload, Copy, FileImage, FileText, Layers, Maximize2, Minus, Plus, RefreshCw, RotateCcw, Save, Search, Sparkles, Trash2, UploadCloud, XCircle } from 'lucide-react'
 import { api, previewUrl as documentPreviewUrl, thumbnailUrl as documentThumbnailUrl } from '../api/client'
-import PdfPageViewer from '../components/PdfPageViewer'
 import StatusBadge from '../components/StatusBadge'
 import type { Collection, CustomFieldDefinition, DashboardSummary, Document } from '../types'
 import { useI18n } from '../i18n'
@@ -773,8 +772,7 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
   const previewSurfaceRef = useRef<HTMLDivElement | null>(null)
   const [basePreviewWidth, setBasePreviewWidth] = useState(820)
   const isPdf = selected?.kind === 'pdf'
-  const usesServerPdfPageViewer = Boolean(selected?.kind === 'pdf' && selected.documentId && !selected.previewUrl)
-  const nativePdfPreviewUrl = selected?.kind === 'pdf' && !usesServerPdfPageViewer ? selected.previewUrl || selected.serverPreviewUrl : null
+  const nativePdfPreviewUrl = selected?.kind === 'pdf' ? selected.previewUrl || selected.serverPreviewUrl : null
   const usesNativePdfViewer = Boolean(nativePdfPreviewUrl)
   const effectiveZoom = usesNativePdfViewer ? 100 : zoom
   const zoomedPreviewWidth = Math.round(basePreviewWidth * effectiveZoom / 100)
@@ -877,7 +875,7 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
         <h2>{t('dashboard.filePreview')}</h2>
         <span>{selected?.filename || t('dashboard.noFileSelected')}</span>
       </div>
-      {selected && !usesServerPdfPageViewer && (
+      {selected && (
         <div className="document-preview-toolbar upload-preview-toolbar">
           {usesNativePdfViewer ? (
             <>
@@ -901,26 +899,14 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
       )}
       <div className="document-preview-layout">
         <AttachmentStrip files={files} selectedId={selectedId} onSelect={setSelectedId} onAddMore={onAddMore} />
-        {usesServerPdfPageViewer && selected?.documentId ? (
-          <div className="dashboard-pdf-viewer-wrap">
-            <PdfPageViewer
-              documentId={selected.documentId}
-              filename={selected.filename}
-              pageCount={selected.pageCount}
-              height="min(62vh, 620px)"
-            />
-            {showOcr && selected.ocrSnippet && <pre className="document-preview-ocr-overlay">{selected.ocrSnippet}</pre>}
-          </div>
-        ) : (
-          <div ref={previewSurfaceRef} className={`document-preview-surface upload-zoomable-preview ${usesNativePdfViewer ? 'pdf-preview-surface' : ''} ${effectiveZoom <= 100 ? 'fit-preview' : 'zoomed-preview'} ${showOcr ? 'show-ocr-overlay' : ''}`} onClick={handlePreviewClick}>
-            <div className={`document-preview-stage ${usesNativePdfViewer ? 'pdf-preview-stage' : ''}`}>
-              <div className="document-preview-object" style={previewObjectStyle}>
-                {preview}
-              </div>
+        <div ref={previewSurfaceRef} className={`document-preview-surface upload-zoomable-preview ${usesNativePdfViewer ? 'native-pdf-frame-wrap' : ''} ${effectiveZoom <= 100 ? 'fit-preview' : 'zoomed-preview'} ${showOcr ? 'show-ocr-overlay' : ''}`} onClick={handlePreviewClick}>
+          <div className={`document-preview-stage ${usesNativePdfViewer ? 'pdf-preview-stage' : ''}`}>
+            <div className="document-preview-object" style={previewObjectStyle}>
+              {preview}
             </div>
-            {showOcr && selected?.ocrSnippet && <pre className="document-preview-ocr-overlay">{selected.ocrSnippet}</pre>}
           </div>
-        )}
+          {showOcr && selected?.ocrSnippet && <pre className="document-preview-ocr-overlay">{selected.ocrSnippet}</pre>}
+        </div>
       </div>
     </section>
   )

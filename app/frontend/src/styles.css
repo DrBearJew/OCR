@@ -1189,7 +1189,7 @@ pre {
 
 .documents-split-workbench {
   display: grid;
-  grid-template-columns: minmax(0, 1.12fr) minmax(420px, 0.88fr);
+  grid-template-columns: minmax(480px, 1fr) minmax(860px, 1.08fr);
   min-height: calc(100vh - 10.2rem);
   align-items: stretch;
 }
@@ -1417,13 +1417,20 @@ pre {
   box-shadow: inset 0 1px 3px rgba(28, 25, 23, 0.06);
 }
 
-/* Native PDF iframes manage their own scrolling/zooming; avoid double-scroll
-   and border-radius overflow clipping that causes Firefox PDF.js toolbar drift. */
-.pdf-preview-surface {
-  overflow: visible;
+/* Native PDF iframe container: keeps iframe >= 860px so Firefox Nova PDF.js
+   toolbar + Tools (>>) never enter their overflow-clipping dead-zones.
+   At >= 860px container width (100%–175% zoom), fills 100% with zero scrollbar;
+   at extreme zoom (< 860px), scrolls smoothly horizontally with native 1:1 hit-testing. */
+.native-pdf-frame-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid var(--border);
   border-radius: 2px;
-  box-shadow: none;
   background: #ffffff;
+  box-shadow: none;
+  min-width: 0;
 }
 
 .pdf-preview-stage {
@@ -1434,124 +1441,20 @@ pre {
   background: #ffffff;
 }
 
+.pdf-preview-stage .document-preview-object {
+  width: 100% !important;
+  min-width: 860px;
+}
+
 .document-native-pdf-preview,
 .large-native-pdf-preview,
-.collection-native-pdf-preview {
+.collection-native-pdf-preview,
+.upload-native-pdf-preview {
   display: block;
   width: 100%;
-  max-width: 100%;
+  min-width: 860px;
   border: 0;
   background: #ffffff;
-}
-
-/* ── Self-Contained PDF Page Viewer (zoom-safe in Firefox & Chrome) ────── */
-
-.pdf-viewer-shell {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: #ffffff;
-  overflow: hidden;
-  min-width: 0;
-}
-
-.pdf-viewer-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.35rem 0.6rem;
-  padding: 0.45rem 0.65rem;
-  background: var(--surface-subtle);
-  border-bottom: 1px solid var(--border);
-  min-width: 0;
-}
-
-.pdf-viewer-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  flex-shrink: 0;
-}
-
-.pdf-viewer-toolbar .icon-button,
-.pdf-viewer-toolbar .zoom-value {
-  min-height: 28px;
-  padding: 0.2rem 0.45rem;
-  font-size: 0.8rem;
-}
-
-.pdf-viewer-page-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  padding: 0 0.2rem;
-}
-
-.pdf-viewer-page-indicator input {
-  width: 2.5rem;
-  min-height: 26px;
-  padding: 0.15rem 0.25rem;
-  text-align: center;
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-  border: 1px solid var(--border-strong);
-  border-radius: 5px;
-  background: #ffffff;
-  color: var(--text);
-}
-
-.pdf-viewer-surface {
-  position: relative;
-  overflow: auto;
-  background: #eae6dc;
-  cursor: zoom-in;
-  min-width: 0;
-  box-shadow: inset 0 1px 3px rgba(28, 25, 23, 0.06);
-}
-
-.pdf-viewer-surface.is-zoomed {
-  cursor: zoom-out;
-}
-
-.pdf-viewer-stage {
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  min-width: 100%;
-  min-height: 100%;
-  padding: 0.85rem;
-}
-
-.pdf-viewer-page-img {
-  display: block;
-  height: auto;
-  background: #ffffff;
-  box-shadow: 0 2px 10px rgba(28, 25, 23, 0.12);
-  border-radius: 2px;
-  transition: transform 0.15s ease;
-}
-
-.pdf-viewer-fallback {
-  display: grid;
-  place-items: center;
-  gap: 0.65rem;
-  min-height: 220px;
-  padding: 1.5rem;
-  text-align: center;
-  color: var(--text-muted);
-}
-
-.dashboard-pdf-viewer-wrap {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0.65rem;
-  min-width: 0;
 }
 
 .ocr-tabs,
@@ -3480,8 +3383,8 @@ button.ghost-accent:hover:not(:disabled) {
 .collection-native-pdf-preview {
   display: block;
   width: 100%;
-  max-width: 100%;
-  height: min(46vh, 460px);
+  min-width: 860px;
+  height: min(54vh, 560px);
   border: 0;
   background: #ffffff;
 }
@@ -4454,7 +4357,7 @@ button.ghost-accent:hover:not(:disabled) {
 
 /* ── Responsive & Zoom Breakpoints ──────────────────────────────────────── */
 
-@media (max-width: 1280px) {
+@media (max-width: 1960px) {
   .collection-workbench-layout {
     grid-template-columns: 185px minmax(0, 1fr);
   }
@@ -4464,7 +4367,7 @@ button.ghost-accent:hover:not(:disabled) {
   }
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1640px) {
   .documents-split-workbench {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -4474,10 +4377,15 @@ button.ghost-accent:hover:not(:disabled) {
     border-top: 1px solid var(--border);
   }
 
+  .document-detail-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 1180px) {
   .upload-dashboard-grid,
   .upload-redesign-grid,
-  .collection-workbench-layout,
-  .document-detail-split {
+  .collection-workbench-layout {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -4489,6 +4397,28 @@ button.ghost-accent:hover:not(:disabled) {
     margin-top: 1rem;
     border-left: 0;
     border-top: 1px solid var(--border);
+  }
+}
+
+/* At >= 175% browser zoom (<= 1120px CSS viewport), compact the sidebar to a 56px icon rail
+   so native PDF panes keep >= 860px width without horizontal scrolling. */
+@media (max-width: 1120px) {
+  .app-shell {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  .sidebar-group-label,
+  .brand-button span:last-child,
+  .sidebar nav button span,
+  .sidebar .logout span {
+    display: none;
+  }
+
+  .brand-button,
+  .sidebar nav button,
+  .sidebar .logout {
+    justify-content: center;
+    padding-inline: 0.3rem;
   }
 }
 
