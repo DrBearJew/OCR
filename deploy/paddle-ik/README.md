@@ -20,6 +20,26 @@ Unlike stock CPU builds, this image compiles custom PaddleOCR-VL and LFM2.5 patc
 
 These optimizations are compiled into this `ik_llama.cpp` image and do **not** transfer to external engines (LM Studio, Ollama, stock `llama-server`, or vLLM), which run their own GPU/CPU kernels. Choose `unified` for CPU-only AVX2/AVX-512 hosts; choose `--ocr-runtime external` / `--metadata-runtime external` for GPUs, older pre-AVX2 (AVX1-only) CPUs, or external inference servers.
 
+## Measured speedups
+
+### AVX2 native `D=72` vision attention (Ryzen 9 5900X, Zen 3, `nh = 16`, `D = 72`)
+
+Wall-clock median across 7 iterations on pinned physical cores (bit-for-bit identical output to padded 96-wide AVX2 IQK):
+
+| Vision tokens (`nq = nk`) | Threads | Padded 96-wide AVX2 | Native 72-wide AVX2 | Latency drop | Speedup |
+|---:|---:|---:|---:|---:|---:|
+| 4920 | 4 | 562.0 ms | **365.0 ms** | −35.1% | **1.54×** |
+| 4920 | 8 | 332.5 ms | **204.0 ms** | −38.7% | **1.63×** |
+| 4988 | 4 | 575.7 ms | **371.1 ms** | −35.5% | **1.55×** |
+| 4988 | 8 | 336.9 ms | **211.1 ms** | −37.4% | **1.60×** |
+
+At 8 threads (`nq = nk = 4920`), QK dropped from `215.5 ms` to `85.3 ms` (2.5× faster), V accumulation from `133.0 ms` to `92.5 ms` (1.44× faster), and scratch/pack overhead from `10.4 ms` to `1.1 ms`.
+
+### AVX-512 vision attention & LFM2.5 CPU decoding (4-vCPU AVX-512 VPS)
+
+- **PaddleOCR-VL vision attention:** dropped from **107.45 s** (generic fallback) to **13.31 s** (~8× faster), with full-page receipt OCR at **25.2–25.7 s** vs **30.6–34.3 s** on upstream `llama.cpp`.
+- **LFM2.5-8B-A1B Q5_K_M metadata:** **43.4 tok/s** (`65.6–70.9 s` per invoice) vs **28.0 tok/s** (`88.1–107.6 s`) on upstream `llama.cpp` at matched 8k context and 4 threads.
+
 ## Usage
 
 Install through the standard Docker installer on any x86_64 CPU with **AVX2, FMA, and F16C** (automatically uses **AVX-512 BF16/VBMI/VNNI** when present):
