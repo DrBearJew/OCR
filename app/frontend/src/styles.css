@@ -1189,7 +1189,7 @@ pre {
 
 .documents-split-workbench {
   display: grid;
-  grid-template-columns: minmax(480px, 1fr) minmax(860px, 1.08fr);
+  grid-template-columns: minmax(480px, 1fr) minmax(908px, 1.08fr);
   min-height: calc(100vh - 10.2rem);
   align-items: stretch;
 }
