@@ -150,7 +150,9 @@ function summarizeSystemHealth(summary: IntegrationSummary | null, t: (key: stri
   const coreDown = failing.some((item) => item.name === 'database' || item.name === 'redis')
   return {
     state: coreDown ? 'down' as const : 'warning' as const,
-    label: `${failing.length} ${t('shell.systemIssues', failing.length === 1 ? 'issue' : 'issues')}`,
+    label: failing.length === 1
+      ? `1 ${t('shell.systemIssue', 'issue')}`
+      : `${failing.length} ${t('shell.systemIssues', 'issues')}`,
     tooltip: failing.map((item) => `${item.name}: ${item.detail}`).join('\n')
   }
 }

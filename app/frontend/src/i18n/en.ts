@@ -34,6 +34,7 @@ export const en: Record<string, string> = {
   'shell.openNeedsReview': 'Open failed and needs review documents',
   'shell.activity': 'Activity',
   'shell.systemOk': 'System OK',
+  'shell.systemIssue': 'issue',
   'shell.systemIssues': 'issues',
   'shell.systemChecking': 'Checking…',
   'shell.openActivity': 'Open activity log',

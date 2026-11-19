@@ -12551,53 +12551,44 @@ body {
   transform: none !important;
 }
 
-:where(
-  .button-row,
-  .admin-actions,
-  .collection-actions,
-  .folder-tree-tools,
-  .saved-views,
-  .filter-row,
-  .document-toolbar,
-  .collection-detail-toolbar,
-  .record-toolbar,
-  .schema-form,
-  .search-band,
-  .upload-band,
-  .record-upload-band,
-  .bulk-bar,
-  .detail-actions,
-  .upload-header-actions
-) button.primary,
-button.primary {
+/* Consistent flat primary button everywhere (no neon glow) */
+.content button.primary,
+.admin-console button.primary,
+.model-config-form button.primary,
+.runtime-setup-actions button.primary,
+.documents-console button.primary,
+.button-row button.primary,
+.detail-actions button.primary {
+  min-height: 2.15rem !important;
+  padding: 0.36rem 0.82rem !important;
+  border-radius: 7px !important;
   background: #0d9488 !important;
   border: 1px solid #14b8a6 !important;
   color: #ffffff !important;
   box-shadow: none !important;
+  font-size: 0.83rem !important;
+  font-weight: 600 !important;
+  transform: none !important;
 }
 
-:where(
-  .button-row,
-  .admin-actions,
-  .collection-actions,
-  .folder-tree-tools,
-  .saved-views,
-  .filter-row,
-  .document-toolbar,
-  .collection-detail-toolbar,
-  .record-toolbar,
-  .schema-form,
-  .search-band,
-  .upload-band,
-  .record-upload-band,
-  .bulk-bar,
-  .detail-actions,
-  .upload-header-actions
-) button.primary:hover:not(:disabled),
-button.primary:hover:not(:disabled) {
+.content button.primary::after,
+.admin-console button.primary::after,
+.model-config-form button.primary::after {
+  display: none !important;
+  content: none !important;
+}
+
+.content button.primary:hover:not(:disabled),
+.admin-console button.primary:hover:not(:disabled),
+.model-config-form button.primary:hover:not(:disabled),
+.runtime-setup-actions button.primary:hover:not(:disabled),
+.documents-console button.primary:hover:not(:disabled),
+.button-row button.primary:hover:not(:disabled),
+.detail-actions button.primary:hover:not(:disabled) {
   background: #0f766e !important;
   border-color: #2dd4bf !important;
   box-shadow: none !important;
+  transform: none !important;
 }
 
 .danger-button {
@@ -12781,15 +12772,19 @@ button.primary:hover:not(:disabled) {
   color: #cbd5e1;
 }
 
+.documents-console .bulk-bar.console-bulk button {
+  flex: 0 0 auto !important;
+}
+
 /* Zoom-proof 3-col -> 2-col -> 1-col grid */
 .documents-console-grid {
   display: grid !important;
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.85fr) minmax(290px, 0.72fr) !important;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.85fr) minmax(290px, 0.72fr) !important;
   gap: 0.85rem !important;
   align-items: start !important;
 }
 
-@media (max-width: 1520px) {
+@media (max-width: 1680px) {
   .documents-console-grid {
     grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr) !important;
   }
@@ -12805,7 +12800,7 @@ button.primary:hover:not(:disabled) {
   }
 }
 
-/* Clean 6-column table that scrolls horizontally instead of clipping */
+/* Clean 6-column table with fluid tracks so columns never clip */
 .documents-console .document-console-table {
   overflow-x: auto !important;
   border: 1px solid var(--border-soft) !important;
@@ -12815,9 +12810,17 @@ button.primary:hover:not(:disabled) {
 
 .documents-console .doc-table-head,
 .documents-console .doc-table-row {
-  grid-template-columns: 28px minmax(170px, 1.5fr) minmax(96px, 0.55fr) minmax(92px, 0.45fr) minmax(84px, 0.4fr) minmax(72px, 0.35fr) !important;
-  gap: 0.55rem !important;
-  min-width: 580px;
+  grid-template-columns: 24px minmax(0, 1.9fr) minmax(0, 0.75fr) minmax(0, 0.65fr) minmax(0, 0.55fr) minmax(0, 0.45fr) !important;
+  gap: 0.5rem !important;
+  min-width: 0 !important;
+}
+
+.documents-console .doc-table-head > span,
+.documents-console .doc-table-row > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .documents-console .doc-table-row {

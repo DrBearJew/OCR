@@ -34,6 +34,7 @@ export const de: Record<string, string> = {
   'shell.openNeedsReview': 'Fehlgeschlagene Dokumente und Prüffälle öffnen',
   'shell.activity': 'Aktivität',
   'shell.systemOk': 'System OK',
+  'shell.systemIssue': 'Problem',
   'shell.systemIssues': 'Probleme',
   'shell.systemChecking': 'Prüfung…',
   'shell.openActivity': 'Aktivitätsprotokoll öffnen',
