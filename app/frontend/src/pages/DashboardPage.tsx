@@ -406,13 +406,13 @@ export default function DashboardPage({ onOpenDocument, onSearch }: DashboardPag
             <UploadDropzone inputRef={inputRef} files={files} selectedId={selectedId} onSelect={setSelectedId} busy={busy} onFiles={addFiles} />
           </aside>
 
-          {files.length > 0 ? (
-            <section className="upload-review-workspace">
-              <section className="workflow-card review-combo-card document-preview-shell">
-                <FilePreviewCard selected={selected} files={files} selectedId={selectedId} setSelectedId={setSelectedId} onAddMore={() => inputRef.current?.click()} />
-              </section>
+          <section className="upload-review-workspace">
+            <section className="review-combo-card document-preview-shell dash-preview-card">
+              <FilePreviewCard selected={selected} files={files} selectedId={selectedId} setSelectedId={setSelectedId} onAddMore={() => inputRef.current?.click()} />
             </section>
-          ) : (
+          </section>
+
+          {archiveStats.recentDocs.length > 0 && (
             <RecentArchiveCard documents={archiveStats.recentDocs} onOpenDocument={onOpenDocument} onSearch={onSearch} />
           )}
 

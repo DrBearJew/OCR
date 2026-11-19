@@ -1945,7 +1945,41 @@ pre {
   color: var(--muted);
 }
 
-/* Live Recent Archive Card (Shown When Intake Queue Is Empty) */
+/* Framed File Preview Card on Dashboard */
+.dash-preview-card {
+  padding: 1.05rem 1.2rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(28, 25, 23, 0.035);
+}
+
+.dash-preview-card .document-preview-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.7rem;
+}
+
+.dash-preview-card .document-preview-heading h2 {
+  margin: 0;
+}
+
+.dash-preview-card .document-preview-heading span {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.dash-preview-card .document-preview-surface {
+  min-height: 11.5rem;
+}
+
+.dash-preview-card .empty-preview-state {
+  min-height: 9.5rem;
+}
+
+/* Live Recent Archive Card */
 .dash-recent-archive {
   display: grid;
   border: 1px solid var(--border);
