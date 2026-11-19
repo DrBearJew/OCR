@@ -22,7 +22,7 @@ Published images:
 | Setup | RAM | Free disk | CPU / GPU |
 | --- | --- | --- | --- |
 | Standard (PP-OCRv6) | 4 GiB (4 cores) | 10 GiB | Any x86_64 CPU |
-| Unified (PaddleOCR-VL + LFM2.5) | 16 GiB | 20 GiB | x86_64 with AVX-512 (BF16, VBMI, VNNI) |
+| Unified (PaddleOCR-VL + LFM2.5) | 16 GiB | 20 GiB | x86_64 with AVX2, FMA, F16C (auto-uses AVX-512 BF16/VBMI/VNNI when available) |
 | Local CPU metadata (LFM2.5) | 16 GiB | 20 GiB | x86_64 with AVX2, FMA, F16C |
 | Local GPU metadata (CUDA / Vulkan) | 16 GiB + VRAM | 20 GiB | AVX2, FMA, F16C host CPU + supported GPU |
 
@@ -46,15 +46,15 @@ Out of the box, Dok OCR runs local **PP-OCRv6** on CPU (models are baked into th
 
 ### Unified runtime: PaddleOCR-VL + LFM2.5 in one container
 
-On a CPU with AVX-512 BF16, VBMI, and VNNI support:
+On any x86_64 CPU with **AVX2, FMA, and F16C** (automatically using the **AVX-512 BF16/VBMI/VNNI** build when present):
 
 ```bash
 bash install-docker.sh --metadata-runtime unified
 ```
 
-This starts a single inference container backed by one custom `ik_llama.cpp` binary and `llama-swap`. Dok OCR uses PaddleOCR-VL for OCR and LFM2.5-8B-A1B for metadata, loading one model at a time and unloading it when idle.
+This starts a single inference container backed by `ik_llama.cpp` and `llama-swap`. Dok OCR uses PaddleOCR-VL for OCR and LFM2.5-8B-A1B for metadata, loading one model at a time and unloading it when idle.
 
-Why pick `unified` on a CPU-only host: this image bundles our custom PaddleOCR-VL CPU kernels (unmasked `D=72` IQK vision attention, AVX-512 BF16 FFN tail fix, MRoPE/causal-mask parity, and fast LFM2.5 CPU decoding). Those kernels live inside this compiled binary and do not carry over to external engines like LM Studio or Ollama—use `external` instead when you already have a GPU or separate inference server.
+Why pick `unified` on a CPU-only host: this image bundles both **AVX-512** and **AVX2** builds with our custom PaddleOCR-VL CPU kernels (vectorized `D=72` IQK vision attention on both AVX2 and AVX-512, AVX-512 BF16 FFN tail fix, MRoPE/causal-mask parity, and fast LFM2.5 CPU decoding). Those kernels live inside this compiled image and do not carry over to external engines like LM Studio or Ollama—use `external` instead when you already have a GPU, an older pre-AVX2 CPU, or a separate inference server.
 
 First startup downloads and verifies ~7.85 GB of public model files into the persistent model volume and quantizes the OCR weights automatically.
 
@@ -176,7 +176,7 @@ Custom variables in `.env` survive reruns; direct edits to downloaded Compose fi
 | Symptom | What to check |
 | --- | --- |
 | Image pull fails | Verify DNS and outbound HTTPS access to `ghcr.io`, check `--image-tag`, and inspect `docker compose logs --tail=100`. |
-| `Illegal instruction` on startup | Local metadata images require AVX2, FMA, and F16C; `unified` requires AVX-512 (BF16, VBMI, VNNI). Switch to `external` or standard PP-OCRv6 on older CPUs. |
+| `Illegal instruction` or unsupported CPU on startup | `ik_llama.cpp` (`unified` and local `cpu` metadata images) requires x86_64 with **AVX2, FMA, and F16C** (`unified` auto-selects AVX-512 when available and falls back to AVX2). Older AVX1-only CPUs (pre-2013) should use standard PP-OCRv6 or `--ocr-runtime external` / `--metadata-runtime external`. |
 | GPU container fails to start | Check host drivers, NVIDIA Container Toolkit (CUDA) or `/dev/dri` permissions (Vulkan), and free VRAM. Selected GPU modes fail fast rather than silently falling back to CPU. |
 | Port already in use | Pass free ports via `--port` and `--api-port`, or check `--bind`. |
 | Model download stalls or takes long | Ensure outbound access and >= 20 GiB free disk. Keep the model volume—downloads resume automatically and activate only after SHA-256 verification. Follow `docker compose logs -f metadata`. |

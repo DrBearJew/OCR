@@ -79,17 +79,6 @@ jobs:
         run: |
           python3 scripts/test-metadata-download.py
           python3 scripts/test-metadata-runtime.py
-      - name: Paddle and LFM CPU regression tests on AVX2
-        if: matrix.name == 'unified'
-        uses: docker/build-push-action@v6
-        with:
-          context: deploy
-          file: deploy/paddle-ik/Dockerfile
-          target: build
-          build-args: PADDLE_AVX512=OFF
-          platforms: linux/amd64
-          cache-from: type=gha,scope=paddle-ik-tests
-          cache-to: type=gha,scope=paddle-ik-tests,mode=max
       - name: Build candidate
         uses: docker/build-push-action@v6
         with:
@@ -103,12 +92,18 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-      - name: Unified image bundles one server and the Paddle chat template
+      - name: Unified image bundles AVX-512 and AVX2 runtimes with automatic CPU dispatch
         if: matrix.name == 'unified'
         run: |
           docker run --rm --network none --entrypoint sh dokocr-test:unified -ec '
-            test -x /opt/dokocr/bin/llama-server
-            test -x /opt/dokocr/bin/llama-quantize
+            for tier in avx512 avx2; do
+              test -x "/opt/dokocr/$tier/bin/llama-server"
+              test -x "/opt/dokocr/$tier/bin/llama-quantize"
+            done
+            test -x /usr/local/bin/dokocr-cpu-tier
+            tier=$(/usr/local/bin/dokocr-cpu-tier)
+            /usr/local/bin/dokocr-paddle-ik --check-cpu
+            LD_LIBRARY_PATH="/opt/dokocr/$tier/lib" "/opt/dokocr/$tier/bin/llama-server" --version
             test -s /opt/dokocr/share/paddleocr-vl-chat_template.jinja
             llama-swap -version
           '

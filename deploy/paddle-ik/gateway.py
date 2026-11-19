@@ -16,7 +16,11 @@ Q8_SIZE = 498316256
 Q8_HASH = 'a9a23a93838383ecb8a3bb166c2c0491c226d4442b22855b879920ca66854ef7'
 
 
-def prepare_ocr():
+def selected_cpu_tier() -> str:
+    return subprocess.check_output(['/usr/local/bin/dokocr-cpu-tier'], text=True).strip()
+
+
+def prepare_ocr(tier: str):
     ensure_model(MODEL_DIR, PADDLE + 'PaddleOCR-VL-1.6-GGUF-mmproj.gguf', 881770560,
                  PROJECTOR_HASH, name='paddleocr-vl-mmproj.gguf')
     q8 = MODEL_DIR / 'paddleocr-vl-q8_0.gguf'
@@ -30,8 +34,9 @@ def prepare_ocr():
             source = ensure_model(MODEL_DIR, PADDLE + SOURCE, 935769056, SOURCE_HASH, name=SOURCE)
             if shutil.disk_usage(MODEL_DIR).free < Q8_SIZE + 128 * 1024**2:
                 raise RuntimeError('Insufficient space to prepare PaddleOCR weights')
-            subprocess.run(['/opt/dokocr/bin/llama-quantize', '--pure', str(source), str(temp), 'Q8_0', '2'],
-                           check=True)
+            env = {**os.environ, 'LD_LIBRARY_PATH': f'/opt/dokocr/{tier}/lib'}
+            subprocess.run([f'/opt/dokocr/{tier}/bin/llama-quantize', '--pure', str(source), str(temp), 'Q8_0', '2'],
+                           env=env, check=True)
             if temp.stat().st_size != Q8_SIZE or digest(temp) != Q8_HASH:
                 raise RuntimeError('Prepared PaddleOCR weights did not match the verified Q8 model')
             os.replace(temp, q8)
@@ -40,8 +45,9 @@ def prepare_ocr():
 
 
 def main():
+    tier = selected_cpu_tier()
     subprocess.run(['/usr/local/bin/dokocr-paddle-ik', '--check-cpu'], check=True)
-    prepare_ocr()
+    prepare_ocr(tier)
     ensure_model(MODEL_DIR)
     os.execv('/usr/local/bin/llama-swap', ['llama-swap', '-config', '/etc/llama-swap.yml', '-listen', '0.0.0.0:8080'])
 

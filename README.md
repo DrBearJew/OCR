@@ -27,7 +27,7 @@ That gives you the full app using prebuilt images and local CPU **PP-OCRv6**—n
 To enable local AI models with the same installer:
 
 ```bash
-# PaddleOCR-VL (OCR) + LFM2.5 (metadata) in one custom ik_llama.cpp container (AVX-512 CPU)
+# PaddleOCR-VL (OCR) + LFM2.5 (metadata) in one custom ik_llama.cpp container (auto AVX-512 / AVX2)
 bash install-docker.sh --metadata-runtime unified
 
 # Standard PP-OCRv6 + local LFM2.5 metadata on CPU, NVIDIA, Vulkan, or an external endpoint
@@ -61,7 +61,7 @@ Collection → Record → Document
 
 ## Highlights
 
-- **Custom CPU kernels in the unified runtime:** `--metadata-runtime unified` ships a tuned `ik_llama.cpp` binary with custom PaddleOCR-VL CPU optimizations—an unmasked `D=72` IQK vision-attention kernel (cutting vision-attention CPU time roughly 8× on tested pages, from ~107 s to ~13 s), an AVX-512 BF16 FFN tail fix, MRoPE image-grid & causal-mask fixes, and fast LFM2.5 CPU decoding—swapping models in one container so only one stays in RAM at a time.
+- **Custom CPU kernels in the unified runtime:** `--metadata-runtime unified` ships a tuned `ik_llama.cpp` image bundling **both AVX-512 and AVX2** builds with automatic CPU detection at startup—including an unmasked `D=72` IQK vision-attention kernel (cutting vision-attention CPU time roughly 8× on tested AVX-512 pages, from ~107 s to ~13 s, and avoiding generic attention fallback on AVX2 as well), an AVX-512 BF16 FFN tail fix, MRoPE image-grid & causal-mask fixes, and fast LFM2.5 CPU decoding—swapping models in one container so only one stays in RAM at a time.
 - **Bring your own engine (LM Studio, `llama.cpp`, Ollama, vLLM):** Point OCR (`openai_vision`) and/or metadata at any OpenAI-compatible server via the installer or **Admin → Models** using one-click presets, `/v1/models` auto-detection (`auto`), and optional Bearer API keys. Note that external engines use their own GPU/CPU kernels; our custom CPU kernels live in the `unified` `ik_llama.cpp` image.
 - **Flexible OCR:** Local CPU PP-OCRv6 out of the box, PaddleOCR-VL via the unified runtime, generic OpenAI-compatible vision models (`openai_vision`), and optional GLM OCR fallback. Searchable PDFs reuse their embedded text layer when every selected page passes text-quality checks, or force full OCR on demand.
 - **Metadata and titles:** Deterministic extraction for titles, dates, correspondents, amounts, document types, and tags, with optional LLM refinement (**LFM2.5-8B-A1B Q5_K_M** or any external chat model). Manual edits can be locked so reprocessing never overwrites them.
@@ -73,7 +73,7 @@ Collection → Record → Document
 | Provider | Best for | Notes |
 | --- | --- | --- |
 | `ppocrv6` | Everyday CPU-only setups | Default in the Docker installer. Prewarmed in the backend image; no GPU needed. |
-| `paddle_vl` | High-accuracy CPU OCR without a GPU | Included in `--metadata-runtime unified` with our custom `ik_llama.cpp` CPU kernels (AVX-512). |
+| `paddle_vl` | High-accuracy CPU OCR without a GPU | Included in `--metadata-runtime unified` with our custom `ik_llama.cpp` CPU kernels (auto-selects AVX-512 or AVX2 at startup). |
 | `openai_vision` | LM Studio, `llama-server`, Ollama, vLLM | Works with any OpenAI-compatible multimodal vision model (`model=auto`, optional Bearer key). Uses the external engine's own GPU/CPU kernels. |
 | `glm` | Secondary multimodal OCR | Optional fallback via an external OpenAI-compatible endpoint. |
 | `fake` | UI and API development | Default in `app/.env.example` for fast local testing without running OCR. |
