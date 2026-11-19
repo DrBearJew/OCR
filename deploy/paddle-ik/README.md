@@ -11,7 +11,9 @@ This image packages custom **AVX-512** and **AVX2** `ik_llama.cpp` `llama-server
 
 Unlike stock CPU builds, this image compiles custom PaddleOCR-VL and LFM2.5 patches directly into `ik_llama.cpp`:
 
-- **Unmasked `D=72` IQK vision-attention kernel (AVX2 + AVX-512):** dispatches PaddleOCR-VL's 72-wide vision attention through IQK instead of falling back to generic GGML CPU attention (cutting vision-attention CPU time from ~107 s down to ~13 s on tested AVX-512 pages, with an extra packed 72-lane tail micro-kernel on AVX-512).
+- **Unmasked `D=72` IQK vision-attention kernels (native AVX-512 and AVX2):** dispatches PaddleOCR-VL's 72-wide vision attention through IQK instead of generic GGML CPU attention:
+  - **AVX-512:** packed 72-lane vision attention (`iqk_fa_vision_v72`) cutting vision-attention CPU time from ~107 s down to ~13 s on tested pages.
+  - **AVX2:** dedicated zero-spill 8-key × 4-query packed-K + native 72-wide V microkernel (`9 × 8` exact AVX2 vectors, zero wasted lanes, zero-copy Q/V fast path) cutting full-page attention latency by **35.1–38.7% (1.54×–1.63×)** vs padded 96-wide AVX2 IQK on a Ryzen 9 5900X, bit-for-bit identical to the 96-wide path.
 - **AVX-512 BF16 FFN-down tail fix:** fixes dropped final 16 terms on PaddleOCR-VL's 4304-wide feed-forward layer on AVX-512 BF16 CPUs.
 - **Accuracy parity fixes:** MRoPE image-grid position-span fix (`mtmd_image_tokens_get_n_pos`), corrected image causal mask, and Q8_0 FP16-scale activations.
 - **Fast CPU metadata extraction:** shares the same `ik_llama.cpp` runtime with LFM2.5-8B-A1B JSON-schema extraction (~1.5× faster CPU token generation than stock `llama.cpp` on tested invoices).
