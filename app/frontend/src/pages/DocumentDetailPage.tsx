@@ -192,7 +192,7 @@ export default function DocumentDetailPage({ id }: { id: string }) {
   const canPreview = document.mime_type?.startsWith('image/') || document.mime_type === 'application/pdf'
   const isPdf = document.mime_type === 'application/pdf'
   const previewMediaStyle = isPdf
-    ? { width: '100%', maxWidth: '1100px', height: 'min(78vh, 900px)' }
+    ? { width: '100%', height: 'min(78vh, 900px)' }
     : { width: `${previewZoom}%`, maxWidth: previewZoom <= 100 ? '100%' : 'none' }
 
   function adjustPreviewZoom(delta: number) {
@@ -235,12 +235,12 @@ export default function DocumentDetailPage({ id }: { id: string }) {
               )}
             </div>
           </div>
-          <div className="preview-pane document-detail-preview-pane">
+          <div className={`preview-pane document-detail-preview-pane ${isPdf ? 'pdf-preview-surface' : ''}`}>
             {document.thumbnail_path && !canPreview ? (
               <img className="document-detail-preview-media" style={previewMediaStyle} src={thumbnailUrl(document.id)} alt={document.original_filename} />
             ) : canPreview ? (
               isPdf
-                ? <iframe className="document-detail-preview-media document-native-pdf-preview" style={previewMediaStyle} src={previewUrl(document.id)} title={t('documents.preview')} />
+                ? <iframe className="document-detail-preview-media document-native-pdf-preview" style={previewMediaStyle} src={`${previewUrl(document.id)}#navpanes=0`} title={t('documents.preview')} />
                 : <img className="document-detail-preview-media" style={previewMediaStyle} src={previewUrl(document.id)} alt={document.original_filename} />
             ) : (
               <a href={downloadUrl(document.id)}>{t('common.download')} {document.original_filename}</a>

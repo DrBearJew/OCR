@@ -898,8 +898,8 @@ function FilePreviewCard({ selected, files, selectedId, setSelectedId, onAddMore
       )}
       <div className="document-preview-layout">
         <AttachmentStrip files={files} selectedId={selectedId} onSelect={setSelectedId} onAddMore={onAddMore} />
-        <div ref={previewSurfaceRef} className={`document-preview-surface upload-zoomable-preview ${effectiveZoom <= 100 ? 'fit-preview' : 'zoomed-preview'} ${showOcr ? 'show-ocr-overlay' : ''}`} onClick={handlePreviewClick}>
-          <div className="document-preview-stage">
+        <div ref={previewSurfaceRef} className={`document-preview-surface upload-zoomable-preview ${usesNativePdfViewer ? 'pdf-preview-surface' : ''} ${effectiveZoom <= 100 ? 'fit-preview' : 'zoomed-preview'} ${showOcr ? 'show-ocr-overlay' : ''}`} onClick={handlePreviewClick}>
+          <div className={`document-preview-stage ${usesNativePdfViewer ? 'pdf-preview-stage' : ''}`}>
             <div className="document-preview-object" style={previewObjectStyle}>
               {preview}
             </div>

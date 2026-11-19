@@ -390,7 +390,7 @@ function DocumentPreviewPanel({ document, pages, loading, onOpenDocument }: { do
   const canPreview = document.mime_type?.startsWith('image/') || document.mime_type === 'application/pdf'
   const isPdf = document.mime_type === 'application/pdf'
   const mediaStyle = isPdf
-    ? { width: '100%', maxWidth: '1100px', height: 'min(42vh, 420px)' }
+    ? { width: '100%', height: 'min(48vh, 500px)' }
     : { width: `${zoom}%`, maxWidth: zoom <= 100 ? '100%' : 'none' }
 
   useEffect(() => {
@@ -457,10 +457,10 @@ function DocumentPreviewPanel({ document, pages, loading, onOpenDocument }: { do
           <button className="icon-button" onClick={() => onOpenDocument(document.id)} title={t('common.open')}><FileText size={15} /></button>
         </div>
       </div>
-      <div ref={previewSurfaceRef} className="document-preview-surface console-preview zoomable-preview" onClick={handlePreviewClick} title={isPdf ? 'Use the PDF toolbar for pages and zoom.' : 'Click image to zoom around that point'}>
+      <div ref={previewSurfaceRef} className={`document-preview-surface console-preview zoomable-preview ${isPdf ? 'pdf-preview-surface' : ''}`} onClick={handlePreviewClick} title={isPdf ? 'Use the PDF toolbar for pages and zoom.' : 'Click image to zoom around that point'}>
         {canPreview && !document.id.startsWith('demo-') ? (
           isPdf
-            ? <iframe className="zoomable-preview-media document-native-pdf-preview" style={mediaStyle} src={`${previewUrl(document.id)}#navpanes=0&view=FitH`} title={t('documents.preview')} />
+            ? <iframe className="zoomable-preview-media document-native-pdf-preview" style={mediaStyle} src={`${previewUrl(document.id)}#navpanes=0`} title={t('documents.preview')} />
             : <img className="zoomable-preview-media" style={mediaStyle} src={previewUrl(document.id)} alt={document.original_filename} />
         ) : document.thumbnail_path && !document.id.startsWith('demo-') ? <img className="zoomable-preview-media" style={mediaStyle} src={thumbnailUrl(document.id)} alt={document.original_filename} /> : <InvoiceMockup />}
       </div>

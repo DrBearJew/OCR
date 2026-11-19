@@ -425,7 +425,7 @@ function CollectionPeekPanel({ document, busy, onOpenDocument, onMarkReviewed, o
 
   const previewSource = collectionDocumentPreviewUrl(document)
   const isPdf = document.mime_type === 'application/pdf' && !document.id.startsWith('demo-')
-  const pdfPreviewSource = isPdf ? `${previewUrl(document.id)}#page=1&navpanes=0&view=FitH` : null
+  const pdfPreviewSource = isPdf ? `${previewUrl(document.id)}#page=1&navpanes=0` : null
   const title = document.manual_title_override || document.extracted_title || document.original_filename
   const updated = new Date(document.updated_at).toLocaleString(language === 'de' ? 'de-DE' : undefined)
   const snippet = (document.ocr_text || document.ocr_snippet || '').trim()
