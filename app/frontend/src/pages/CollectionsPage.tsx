@@ -10,6 +10,22 @@ interface CollectionsPageProps {
   onSchemas: () => void
 }
 
+const curatedCollectionColors: Record<string, string> = {
+  eingangsrechnung: '#145946',
+  ausgangsrechnung: '#2563eb',
+  belege: '#b45309',
+  dokumente: '#6d28d9',
+}
+
+function resolveCollectionColor(slug: string, rawColor?: string | null): string {
+  const key = slug.trim().toLowerCase()
+  const normalized = (rawColor || '').trim().toLowerCase()
+  if (!normalized || normalized === '#22c55e' || normalized === '#145946') {
+    return curatedCollectionColors[key] || normalized || '#145946'
+  }
+  return rawColor!.trim()
+}
+
 export default function CollectionsPage({ onOpenCollection, onSchemas }: CollectionsPageProps) {
   const { t } = useI18n()
   const [collections, setCollections] = useState<CollectionSummary[]>([])
@@ -109,14 +125,9 @@ export default function CollectionsPage({ onOpenCollection, onSchemas }: Collect
         </label>
       </div>
 
-      <section className="collections-ledger" aria-label={t('collections.title')}>
-        <div className="collections-ledger-head">
-          <span>{t('nav.collections')}</span>
-          <span>{t('fields.status')}</span>
-          <span>{t('nav.documents')}</span>
-          <span />
-        </div>
+      <section className="collection-binder-grid" aria-label={t('collections.title')}>
         {filtered.map((item) => {
+          const accent = resolveCollectionColor(item.collection.slug, item.collection.color)
           const complete = item.status_counts.complete || 0
           const needsReview = item.status_counts.needs_review || 0
           const processing = item.status_counts.processing || 0
@@ -124,38 +135,43 @@ export default function CollectionsPage({ onOpenCollection, onSchemas }: Collect
           const pct = item.document_count > 0 ? Math.round((complete / item.document_count) * 100) : 0
           return (
             <article
-              className="collections-ledger-row"
+              className="collection-binder-card"
               key={item.collection.id}
+              style={{ '--binder-color': accent } as CSSProperties}
               onClick={() => onOpenCollection(item.collection.slug)}
             >
-              <div className="collection-row-identity">
-                <span className="collection-monogram" style={{ '--collection-color': item.collection.color || '#145946' } as CSSProperties}>
+              <div className="binder-top">
+                <span className="binder-monogram">
                   {item.collection.icon || item.collection.name.slice(0, 2).toUpperCase()}
                 </span>
-                <div>
-                  <strong>{item.collection.name}</strong>
+                <div className="binder-title-wrap">
+                  <h2>{item.collection.name}</h2>
                   <small>{item.collection.slug}</small>
                 </div>
+                <span className="binder-arrow" aria-hidden="true"><ArrowUpRight size={17} /></span>
               </div>
 
-              <div className="collection-row-status">
-                {complete > 0 && <span className="badge badge-complete">{complete} {t('common.complete')}</span>}
-                {needsReview > 0 && <span className="badge badge-needs-review">{needsReview} {t('common.needsReview')}</span>}
-                {processing > 0 && <span className="badge badge-processing">{processing} {t('common.processing')}</span>}
-                {failed > 0 && <span className="badge badge-failed">{failed} {t('common.failed')}</span>}
-                {item.document_count === 0 && <span className="muted">—</span>}
-              </div>
-
-              <div className="collection-row-volume">
-                <strong>{item.document_count.toLocaleString()}</strong>
-                <div className="collection-bar" aria-hidden="true">
+              <div className="binder-metric-block">
+                <div className="binder-count">
+                  <strong>{item.document_count.toLocaleString()}</strong>
+                  <span>{t('common.documents')}</span>
+                </div>
+                <div className="binder-progress-track" aria-hidden="true">
                   <span style={{ width: `${pct}%` }} />
                 </div>
               </div>
 
-              <div className="collection-row-actions" onClick={(event) => event.stopPropagation()}>
+              <div className="binder-status-row">
+                {complete > 0 && <span className="badge badge-complete">{complete} {t('common.complete')}</span>}
+                {needsReview > 0 && <span className="badge badge-needs-review">{needsReview} {t('common.needsReview')}</span>}
+                {processing > 0 && <span className="badge badge-processing">{processing} {t('common.processing')}</span>}
+                {failed > 0 && <span className="badge badge-failed">{failed} {t('common.failed')}</span>}
+                {item.document_count === 0 && <span className="binder-empty-hint">{t('common.empty', 'Empty collection')}</span>}
+              </div>
+
+              <div className="binder-footer" onClick={(event) => event.stopPropagation()}>
                 <button type="button" onClick={onSchemas}>{t('common.schema')}</button>
-                <button type="button" className="ghost-accent" onClick={() => onOpenCollection(item.collection.slug)}>
+                <button type="button" className="binder-open-btn" onClick={() => onOpenCollection(item.collection.slug)}>
                   {t('common.open')} <ArrowUpRight size={14} />
                 </button>
               </div>
@@ -169,7 +185,7 @@ export default function CollectionsPage({ onOpenCollection, onSchemas }: Collect
 
 const demoCollections: CollectionSummary[] = [
   {
-    collection: { id: 'demo-belege', name: 'Belege', slug: 'belege', icon: 'BL', color: '#2563eb' },
+    collection: { id: 'demo-belege', name: 'Belege', slug: 'belege', icon: 'BL', color: '#b45309' },
     record_count: 42,
     document_count: 67,
     status_counts: { complete: 51, processing: 7, needs_review: 6, partially_failed: 3 }
@@ -181,13 +197,13 @@ const demoCollections: CollectionSummary[] = [
     status_counts: { complete: 109, processing: 8, needs_review: 5, partially_failed: 2 }
   },
   {
-    collection: { id: 'demo-ausgang', name: 'Ausgangsrechnung', slug: 'ausgangsrechnung', icon: 'AR', color: '#7c3aed' },
+    collection: { id: 'demo-ausgang', name: 'Ausgangsrechnung', slug: 'ausgangsrechnung', icon: 'AR', color: '#2563eb' },
     record_count: 31,
     document_count: 39,
     status_counts: { complete: 35, needs_review: 2, processing: 1, partially_failed: 1 }
   },
   {
-    collection: { id: 'demo-dok', name: 'Dokumente', slug: 'dokumente', icon: 'DK', color: '#b45309' },
+    collection: { id: 'demo-dok', name: 'Dokumente', slug: 'dokumente', icon: 'DK', color: '#6d28d9' },
     record_count: 18,
     document_count: 22,
     status_counts: { complete: 16, processing: 4, needs_review: 2 }

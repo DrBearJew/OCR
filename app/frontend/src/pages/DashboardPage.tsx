@@ -1,8 +1,9 @@
 import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent, MutableRefObject, ReactNode } from 'react'
-import { Check, ChevronDown, ClipboardCheck, CloudUpload, Copy, FileImage, FileText, Maximize2, Minus, Plus, RefreshCw, RotateCcw, Save, Sparkles, Trash2, UploadCloud, XCircle } from 'lucide-react'
+import { ArrowUpRight, Check, ChevronDown, ClipboardCheck, CloudUpload, Copy, FileImage, FileText, Layers, Maximize2, Minus, Plus, RefreshCw, RotateCcw, Save, Search, Sparkles, Trash2, UploadCloud, XCircle } from 'lucide-react'
 import { api, previewUrl as documentPreviewUrl, thumbnailUrl as documentThumbnailUrl } from '../api/client'
-import type { Collection, CustomFieldDefinition, Document } from '../types'
+import StatusBadge from '../components/StatusBadge'
+import type { Collection, CustomFieldDefinition, DashboardSummary, Document } from '../types'
 import { useI18n } from '../i18n'
 
 interface DashboardPageProps {
@@ -110,11 +111,12 @@ const defaultProcessingOptions: ProcessingOptionsState = {
   collectionRules: true
 }
 
-export default function DashboardPage({ onOpenDocument }: DashboardPageProps) {
+export default function DashboardPage({ onOpenDocument, onSearch }: DashboardPageProps) {
   const { t } = useI18n()
   const [files, setFiles] = useState<UploadDraftFile[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [collections, setCollections] = useState<Collection[]>([])
+  const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null)
   const [customFieldDefinitions, setCustomFieldDefinitions] = useState<CustomFieldDefinition[]>([])
   const [collectionName, setCollectionNameState] = useState(sampleMetadata.collection)
   const [processingOptions, setProcessingOptions] = useState<ProcessingOptionsState>(defaultProcessingOptions)
@@ -133,6 +135,7 @@ export default function DashboardPage({ onOpenDocument }: DashboardPageProps) {
 
   useEffect(() => {
     void api.collections().then(setCollections).catch(() => setCollections([]))
+    void api.dashboard().then(setDashboardSummary).catch(() => setDashboardSummary(null))
   }, [])
 
   useEffect(() => {
@@ -342,36 +345,83 @@ export default function DashboardPage({ onOpenDocument }: DashboardPageProps) {
     if (document.record_id) setUploadedRecordId(document.record_id)
   }
 
+  const archiveStats = useMemo(() => {
+    const statusCounts = dashboardSummary?.status_counts || {}
+    const reviewCounts = dashboardSummary?.review_counts || {}
+    const total = Object.values(statusCounts).reduce((sum, n) => sum + (Number(n) || 0), 0)
+    const complete = Number(statusCounts.complete || 0)
+    const needsReview = Number(reviewCounts.needs_review || 0)
+    const activeQueue = Number(statusCounts.queued_for_ocr || 0) + Number(statusCounts.ocr_processing || 0) + Number(statusCounts.metadata_processing || 0) + Number(statusCounts.uploaded || 0)
+    const failed = Number(statusCounts.failed || 0) + Number(statusCounts.partially_failed || 0)
+    const recentDocs = [
+      ...(dashboardSummary?.failed_documents || []),
+      ...(dashboardSummary?.completed_documents || []),
+    ].slice(0, 6)
+    const topCollection = (dashboardSummary?.collection_counts || []).slice().sort((a, b) => b.documents - a.documents)[0]
+    return { total, complete, needsReview, activeQueue, failed, recentDocs, topCollection }
+  }, [dashboardSummary])
+
   return (
-    <main className="upload-dashboard">
-      <header className="upload-header">
+    <main className="upload-dashboard dash-studio">
+      <header className="upload-header dash-studio-header">
         <div>
           <h1>{t('dashboard.title')}</h1>
           <p>{t('dashboard.subtitle')}</p>
         </div>
         <div className="upload-header-actions">
+          <button type="button" onClick={onSearch}><Search size={15} /> {t('nav.search')}</button>
           <button type="button" disabled={!selected?.documentId} onClick={() => selected?.documentId && onOpenDocument(selected.documentId)}>{t('dashboard.openSelectedDocument')}</button>
           <button type="button" disabled={!selected || actionBusy === 'delete'} onClick={() => void deleteSelected()}><Trash2 size={15} /> {t('dashboard.deleteSelected')}</button>
         </div>
       </header>
+
+      <section className="dash-pulse-strip" aria-label={t('nav.dashboard')}>
+        <article className="dash-pulse-tile">
+          <span className="dash-pulse-label">{t('nav.documents')}</span>
+          <strong>{archiveStats.total.toLocaleString()}</strong>
+          <small>{archiveStats.complete.toLocaleString()} {t('common.complete')}</small>
+        </article>
+        <article className={`dash-pulse-tile ${archiveStats.needsReview > 0 ? 'tone-amber' : ''}`}>
+          <span className="dash-pulse-label">{t('common.needsReview')}</span>
+          <strong>{archiveStats.needsReview.toLocaleString()}</strong>
+          <small>{archiveStats.needsReview > 0 ? t('documents.kpiNeedsReview') : t('common.complete')}</small>
+        </article>
+        <article className={`dash-pulse-tile ${archiveStats.failed > 0 ? 'tone-red' : ''}`}>
+          <span className="dash-pulse-label">{t('nav.processing')}</span>
+          <strong>{archiveStats.activeQueue.toLocaleString()}</strong>
+          <small>{archiveStats.failed > 0 ? `${archiveStats.failed} ${t('common.failed')}` : t('status.complete')}</small>
+        </article>
+        <article className="dash-pulse-tile">
+          <span className="dash-pulse-label">{t('nav.collections')}</span>
+          <strong>{(collections.length || dashboardSummary?.collection_counts?.length || 0).toLocaleString()}</strong>
+          <small>{archiveStats.topCollection ? `${archiveStats.topCollection.collection} (${archiveStats.topCollection.documents})` : t('collections.schemaBuckets')}</small>
+        </article>
+      </section>
+
       {message && <p className={message.toLowerCase().includes('failed') || message.toLowerCase().includes(t('dashboard.message.addFiles').toLowerCase().slice(0, 8)) ? 'error' : 'success-message'}>{message}</p>}
+
       <form className="upload-dashboard-grid upload-redesign-grid" onSubmit={submit}>
         <section className="upload-left-workspace">
           <aside className="upload-queue-rail">
-            <UploadDropzone inputRef={inputRef} files={files} busy={busy} onFiles={addFiles} />
+            <UploadDropzone inputRef={inputRef} files={files} selectedId={selectedId} onSelect={setSelectedId} busy={busy} onFiles={addFiles} />
           </aside>
 
-          <section className="upload-review-workspace">
-            <section className="workflow-card review-combo-card document-preview-shell">
-              <FilePreviewCard selected={selected} files={files} selectedId={selectedId} setSelectedId={setSelectedId} onAddMore={() => inputRef.current?.click()} />
+          {files.length > 0 ? (
+            <section className="upload-review-workspace">
+              <section className="workflow-card review-combo-card document-preview-shell">
+                <FilePreviewCard selected={selected} files={files} selectedId={selectedId} setSelectedId={setSelectedId} onAddMore={() => inputRef.current?.click()} />
+              </section>
             </section>
-          </section>
+          ) : (
+            <RecentArchiveCard documents={archiveStats.recentDocs} onOpenDocument={onOpenDocument} onSearch={onSearch} />
+          )}
 
           <ProcessingProfilePanel options={processingOptions} setOptions={setProcessingOptions} qwenStatus={qwenStatus} />
         </section>
 
         <aside className="metadata-redesign-rail">
           <NextActionsBar
+            stagedCount={files.length}
             disabled={Boolean(actionBusy) || busy}
             hasUploadedRecord={Boolean(uploadedRecordId)}
             actionBusy={actionBusy}
@@ -380,55 +430,107 @@ export default function DashboardPage({ onOpenDocument }: DashboardPageProps) {
             onExtract={() => void runSelected('metadata')}
             onReview={() => void runSelected('review')}
           />
-          <RecordSetupCard collectionName={collectionName} setCollectionName={setCollectionName} value={sharedTitle} setValue={setSharedTitle} folderPath={folderPath} setFolderPath={setFolderPath} collections={collections} />
-          <MetadataForm metadata={metadata} setMetadata={updateSelectedMetadata} busy={busy} selected={selected} collectionName={collectionName} setCollectionName={setCollectionName} customFieldDefinitions={customFieldDefinitions} />
-          <OCRTextPreview selected={selected} />
-          <ProcessingOptionsPanel options={processingOptions} setOptions={setProcessingOptions} qwenStatus={qwenStatus} />
+          <div className="dash-config-stack">
+            <RecordSetupCard collectionName={collectionName} setCollectionName={setCollectionName} value={sharedTitle} setValue={setSharedTitle} folderPath={folderPath} setFolderPath={setFolderPath} collections={collections} />
+            <MetadataForm metadata={metadata} setMetadata={updateSelectedMetadata} busy={busy} selected={selected} collectionName={collectionName} setCollectionName={setCollectionName} customFieldDefinitions={customFieldDefinitions} />
+            <OCRTextPreview selected={selected} />
+            <ProcessingOptionsPanel options={processingOptions} setOptions={setProcessingOptions} qwenStatus={qwenStatus} />
+          </div>
         </aside>
       </form>
     </main>
   )
 }
 
-function UploadDropzone({ inputRef, files, busy, onFiles }: { inputRef: MutableRefObject<HTMLInputElement | null>; files: UploadDraftFile[]; busy: boolean; onFiles: (files: FileList | File[]) => void }) {
+function RecentArchiveCard({ documents, onOpenDocument, onSearch }: { documents: Document[]; onOpenDocument: (id: string) => void; onSearch: () => void }) {
   const { t } = useI18n()
+  return (
+    <section className="dash-recent-archive">
+      <div className="dash-section-head">
+        <div>
+          <h2>{t('nav.documents')}</h2>
+          <small>{documents.length ? `${documents.length} ${t('common.documents')}` : t('dashboard.noUploadsYet')}</small>
+        </div>
+        <button type="button" className="ghost-accent" onClick={onSearch}>{t('nav.search')} <ArrowUpRight size={14} /></button>
+      </div>
+      {documents.length === 0 ? (
+        <div className="dash-recent-empty">
+          <Layers size={20} />
+          <span>{t('dashboard.noUploadsYet')}</span>
+        </div>
+      ) : (
+        <div className="dash-recent-list">
+          {documents.map((doc) => (
+            <button
+              type="button"
+              key={doc.id}
+              className="dash-recent-row"
+              onClick={() => onOpenDocument(doc.id)}
+            >
+              <span className="dash-recent-icon"><FileText size={16} /></span>
+              <span className="dash-recent-title">
+                <strong>{doc.manual_title_override || doc.extracted_title || doc.original_filename}</strong>
+                <small>{doc.original_filename}</small>
+              </span>
+              <span className="pill">{doc.collection_name}</span>
+              <StatusBadge value={doc.processing_state === 'complete' && doc.review_state === 'needs_review' ? 'needs_review' : doc.processing_state} />
+              <span className="dash-recent-amount">{doc.extracted_amount || '—'}</span>
+              <ArrowUpRight size={14} className="dash-recent-go" />
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function UploadDropzone({ inputRef, files, selectedId, onSelect, busy, onFiles }: { inputRef: MutableRefObject<HTMLInputElement | null>; files: UploadDraftFile[]; selectedId: string; onSelect: (id: string) => void; busy: boolean; onFiles: (files: FileList | File[]) => void }) {
+  const { t } = useI18n()
+  const [dragging, setDragging] = useState(false)
   function drop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault()
+    setDragging(false)
     onFiles(event.dataTransfer.files)
   }
   return (
-    <section className="workflow-card upload-card">
-      <h2>{t('dashboard.uploadFile')}</h2>
-      <div className="upload-card-grid">
-        <div className="dropzone" onDrop={drop} onDragOver={(event) => event.preventDefault()}>
-          <CloudUpload size={54} />
-          <strong>{t('dashboard.dropFile')}</strong>
-          <span>{t('common.or', 'or')}</span>
-          <button type="button" className="primary split-button" onClick={() => inputRef.current?.click()} disabled={busy}>
-            {t('dashboard.uploadFileButton')} <ChevronDown size={16} />
-          </button>
-          <small>{t('dashboard.fileSupport')}</small>
-          <input ref={inputRef} hidden type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.tif,.tiff,application/pdf,image/jpeg,image/png,image/webp,image/tiff" onChange={(event: ChangeEvent<HTMLInputElement>) => event.target.files && onFiles(event.target.files)} />
-        </div>
-        <div className="recent-uploads">
-          <div className="mini-heading">
-            <strong>{t('dashboard.recentUploads')}</strong>
-            <span>{files.length ? `${files.length} ${files.length === 1 ? t('dashboard.file') : t('dashboard.files')}` : t('dashboard.noFilesSelected')}</span>
+    <section className="upload-hero-shell">
+      <div
+        className={`dropzone dropzone-hero ${dragging ? 'is-dragging' : ''} ${files.length ? 'has-files' : ''}`}
+        onDrop={drop}
+        onDragOver={(event) => { event.preventDefault(); setDragging(true) }}
+        onDragLeave={() => setDragging(false)}
+      >
+        <div className="dropzone-hero-main">
+          <span className="dropzone-emblem" aria-hidden="true"><CloudUpload size={26} strokeWidth={1.9} /></span>
+          <div className="dropzone-hero-copy">
+            <strong>{t('dashboard.dropFile')}</strong>
+            <small>{t('dashboard.fileSupport')}</small>
           </div>
-          {files.length === 0 ? (
-            <div className="recent-upload-empty">
-              <FileText size={20} />
-              <span>{t('dashboard.noUploadsYet')}</span>
-            </div>
-          ) : files.slice(0, 3).map((file) => (
-            <div className="recent-upload-row" key={file.id}>
+        </div>
+        <div className="dropzone-hero-actions">
+          <button type="button" className="primary split-button" onClick={() => inputRef.current?.click()} disabled={busy}>
+            <UploadCloud size={15} /> {t('dashboard.uploadFileButton')}
+          </button>
+        </div>
+        <input ref={inputRef} hidden type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.tif,.tiff,application/pdf,image/jpeg,image/png,image/webp,image/tiff" onChange={(event: ChangeEvent<HTMLInputElement>) => event.target.files && onFiles(event.target.files)} />
+      </div>
+
+      {files.length > 0 && (
+        <div className="staged-files-bar">
+          {files.map((file) => (
+            <button
+              type="button"
+              key={file.id}
+              className={`staged-file-chip ${file.id === selectedId ? 'active' : ''}`}
+              onClick={() => onSelect(file.id)}
+            >
               <FileKindIcon kind={file.kind} />
-              <span><strong>{file.filename}</strong><small>{file.sizeLabel} · {file.extractedTitle || t('dashboard.titleGeneratedAfterUpload')}</small></span>
-              <Check size={18} />
-            </div>
+              <span><strong>{file.filename}</strong><small>{file.sizeLabel}</small></span>
+              <Check size={14} />
+            </button>
           ))}
         </div>
-      </div>
+      )}
     </section>
   )
 }
@@ -441,7 +543,10 @@ function RecordSetupCard({ collectionName, setCollectionName, value, setValue, f
     : `${value.sharedTitleBase || 'Telekom'}_12345_12/10/2024_90,74`
   return (
     <details className="workflow-card shared-title-card record-setup-panel">
-      <summary><span><ChevronDown size={16} /> {t('dashboard.recordSetup')}</span></summary>
+      <summary>
+        <span><ChevronDown size={15} /> {t('dashboard.recordSetup')}</span>
+        <span className="pill">{collectionName}</span>
+      </summary>
       <p>{t('dashboard.recordSetupCopy')}</p>
       <div className="shared-title-controls">
         <label>
@@ -854,19 +959,22 @@ function OCRTextPreview({ selected }: { selected?: UploadDraftFile }) {
   )
 }
 
-function NextActionsBar({ disabled, hasUploadedRecord, actionBusy, onProcessAll, onRunOcr, onExtract, onReview }: { disabled: boolean; hasUploadedRecord: boolean; actionBusy: 'process' | 'ocr' | 'metadata' | 'review' | 'delete' | null; onProcessAll: () => void; onRunOcr: () => void; onExtract: () => void; onReview: () => void }) {
+function NextActionsBar({ stagedCount, disabled, hasUploadedRecord, actionBusy, onProcessAll, onRunOcr, onExtract, onReview }: { stagedCount: number; disabled: boolean; hasUploadedRecord: boolean; actionBusy: 'process' | 'ocr' | 'metadata' | 'review' | 'delete' | null; onProcessAll: () => void; onRunOcr: () => void; onExtract: () => void; onReview: () => void }) {
   const { t } = useI18n()
   return (
-    <section className="workflow-card next-actions">
-      <h2>{t('dashboard.nextActions')}</h2>
+    <section className="next-actions dash-forest-panel">
+      <div className="dash-forest-top">
+        <h2>{t('dashboard.nextActions')}</h2>
+        <span className="dash-staged-badge">{stagedCount} {stagedCount === 1 ? t('dashboard.file') : t('dashboard.files')}</span>
+      </div>
       <div className="primary-process-row">
         {hasUploadedRecord ? (
-          <button type="button" className="primary process-button" disabled={disabled} onClick={onProcessAll}>
-            <Sparkles size={18} /> {actionBusy === 'process' ? t('common.processingEllipsis') : t('dashboard.processAllDocuments')}
+          <button type="button" className="dash-forest-cta process-button" disabled={disabled} onClick={onProcessAll}>
+            <Sparkles size={16} /> {actionBusy === 'process' ? t('common.processingEllipsis') : t('dashboard.processAllDocuments')}
           </button>
         ) : (
-          <button type="submit" className="primary process-button" disabled={disabled}>
-            <Sparkles size={18} /> {t('dashboard.uploadProcessAll')}
+          <button type="submit" className="dash-forest-cta process-button" disabled={disabled}>
+            <Sparkles size={16} /> {t('dashboard.uploadProcessAll')}
           </button>
         )}
         <span>{t('dashboard.pipelineDescription')}</span>
@@ -874,11 +982,11 @@ function NextActionsBar({ disabled, hasUploadedRecord, actionBusy, onProcessAll,
       <details className="advanced-actions">
         <summary>{t('dashboard.advancedActions')}</summary>
         <div>
-          <button type="button" disabled={disabled} onClick={onRunOcr}><RefreshCw size={17} /> {actionBusy === 'ocr' ? t('dashboard.runningOcr') : t('dashboard.runOcrOnly')}</button>
-          <button type="button" disabled={disabled} onClick={onExtract}><Sparkles size={17} /> {actionBusy === 'metadata' ? t('dashboard.extracting') : t('dashboard.extractMetadataOnly')}</button>
-          <button type="button" disabled={disabled}><ClipboardCheck size={17} /> {t('dashboard.validateData')}</button>
-          <button type="button" disabled={disabled}><UploadCloud size={17} /> {t('dashboard.rebuildSearchSync')}</button>
-          <button type="button" disabled={disabled} onClick={onReview}><XCircle size={17} /> {actionBusy === 'review' ? t('dashboard.sending') : t('dashboard.sendToReview')}</button>
+          <button type="button" disabled={disabled} onClick={onRunOcr}><RefreshCw size={15} /> {actionBusy === 'ocr' ? t('dashboard.runningOcr') : t('dashboard.runOcrOnly')}</button>
+          <button type="button" disabled={disabled} onClick={onExtract}><Sparkles size={15} /> {actionBusy === 'metadata' ? t('dashboard.extracting') : t('dashboard.extractMetadataOnly')}</button>
+          <button type="button" disabled={disabled}><ClipboardCheck size={15} /> {t('dashboard.validateData')}</button>
+          <button type="button" disabled={disabled}><UploadCloud size={15} /> {t('dashboard.rebuildSearchSync')}</button>
+          <button type="button" disabled={disabled} onClick={onReview}><XCircle size={15} /> {actionBusy === 'review' ? t('dashboard.sending') : t('dashboard.sendToReview')}</button>
         </div>
       </details>
     </section>
