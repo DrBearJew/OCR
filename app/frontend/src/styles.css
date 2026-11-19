@@ -3658,6 +3658,328 @@ button.ghost-accent:hover:not(:disabled) {
   color: var(--dim);
 }
 
+/* ── Activity / Audit Timeline (Grouped, Date-Sectioned Ledger) ─────────── */
+
+.activity-console {
+  max-width: 1120px;
+}
+
+.activity-view-toggle {
+  display: inline-flex;
+  padding: 0.16rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  gap: 0.12rem;
+}
+
+.activity-view-toggle button {
+  min-height: 1.7rem;
+  padding: 0.16rem 0.62rem;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: 0.77rem;
+  font-weight: 560;
+}
+
+.activity-view-toggle button.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(28, 25, 23, 0.08);
+}
+
+.activity-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.activity-quick-pills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.activity-quick-pills button {
+  min-height: 1.9rem;
+  padding: 0.24rem 0.72rem;
+  border-radius: 999px;
+  font-size: 0.79rem;
+  font-weight: 550;
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--muted);
+  box-shadow: none;
+}
+
+.activity-quick-pills button:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.activity-quick-pills button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.activity-toolbar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.active-filter-btn {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.activity-advanced-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.7rem;
+  padding: 0.9rem 1rem;
+  margin-top: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.activity-feed {
+  display: grid;
+  gap: 1.35rem;
+  padding: 1.15rem 0 0.5rem;
+}
+
+.activity-day-group {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.activity-day-label {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.74rem;
+  font-weight: 620;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.activity-day-label small {
+  padding: 0.05rem 0.42rem;
+  border-radius: 999px;
+  background: var(--surface-3);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-soft);
+}
+
+.activity-day-list {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(28, 25, 23, 0.03);
+}
+
+.activity-entry {
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.activity-entry:last-child {
+  border-bottom: 0;
+}
+
+.activity-entry-main {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.72rem 1rem;
+  transition: background 90ms ease;
+}
+
+.activity-entry-main:hover {
+  background: #faf9f5;
+}
+
+.activity-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.activity-dot.tone-ok { background: var(--green); }
+.activity-dot.tone-manual { background: var(--accent); }
+.activity-dot.tone-warn { background: var(--orange); }
+.activity-dot.tone-err { background: var(--red); }
+.activity-dot.tone-info { background: #64748b; }
+
+.activity-time {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.activity-entry-body {
+  display: grid;
+  gap: 0.14rem;
+  min-width: 0;
+}
+
+.activity-entry-headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+  min-width: 0;
+}
+
+.activity-entry-headline strong {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.activity-doc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  min-height: 1.5rem;
+  padding: 0.08rem 0.48rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  box-shadow: none;
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 560;
+  max-width: 100%;
+}
+
+.activity-doc-link span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 24rem;
+}
+
+.activity-doc-link:hover {
+  background: var(--accent-soft);
+  border-color: #b7dbd0;
+  color: var(--accent-hover);
+  box-shadow: none;
+}
+
+.activity-entry-msg {
+  margin: 0;
+  font-size: 0.79rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-entry-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-shrink: 0;
+}
+
+.activity-burst-toggle {
+  min-height: 1.65rem;
+  padding: 0.15rem 0.52rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  box-shadow: none;
+  color: var(--text-soft);
+  font-size: 0.73rem;
+  font-weight: 560;
+}
+
+.activity-burst-toggle:hover {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+  box-shadow: none;
+}
+
+.activity-source-tag {
+  padding: 0.16rem 0.52rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.activity-source-tag.source-manual {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.activity-source-tag.source-auto {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.activity-substeps {
+  list-style: none;
+  margin: 0;
+  padding: 0.45rem 1rem 0.7rem 2.35rem;
+  display: grid;
+  gap: 0.32rem;
+  background: var(--bg);
+  border-top: 1px dashed var(--border);
+}
+
+.activity-substeps li {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: baseline;
+  font-size: 0.77rem;
+}
+
+.activity-substeps time {
+  font-family: var(--font-mono);
+  font-size: 0.71rem;
+  color: var(--dim);
+}
+
+.activity-substeps strong {
+  font-weight: 580;
+  color: var(--text-soft);
+  white-space: nowrap;
+}
+
+.activity-substeps span {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-empty {
+  padding: 2rem 1rem;
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+}
+
 /* ── Responsive & Zoom Breakpoints ──────────────────────────────────────── */
 
 @media (max-width: 1180px) {
