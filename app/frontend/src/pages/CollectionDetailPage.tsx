@@ -425,56 +425,56 @@ function CollectionPeekPanel({ document, busy, onOpenDocument, onMarkReviewed, o
 
   const previewSource = collectionDocumentPreviewUrl(document)
   const isPdf = document.mime_type === 'application/pdf' && !document.id.startsWith('demo-')
-  const pdfPreviewSource = isPdf ? `${previewUrl(document.id)}#page=1` : null
+  const pdfPreviewSource = isPdf ? `${previewUrl(document.id)}#page=1&navpanes=0&view=FitH` : null
   const title = document.manual_title_override || document.extracted_title || document.original_filename
   const updated = new Date(document.updated_at).toLocaleString(language === 'de' ? 'de-DE' : undefined)
   const snippet = (document.ocr_text || document.ocr_snippet || '').trim()
   const tags = document.llm_suggested_tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0).slice(0, 4)
 
   return (
-    <aside className="collection-peek-panel workflow-card">
-      <header>
-        <span className="eyebrow">{t('collectionDetail.pageOnePreview', 'Page 1 preview')}</span>
-        <h2>{title}</h2>
-        <small>{document.original_filename}</small>
+    <aside className="collection-peek-panel">
+      <header className="collection-peek-header">
+        <div className="collection-peek-title">
+          <h2>{title}</h2>
+          <small>{document.original_filename}</small>
+        </div>
+        <div className="button-row">
+          {isPdf && (
+            <>
+              <a className="icon-button" href={previewUrl(document.id)} target="_blank" rel="noreferrer" title={t('collectionDetail.openFullPdf', 'Open full PDF')}><ExternalLink size={15} /></a>
+              <a className="icon-button" href={downloadUrl(document.id)} title={t('common.download')}><Download size={15} /></a>
+            </>
+          )}
+        </div>
       </header>
-      <div className="collection-preview-toolbar">
-        {isPdf ? (
-          <>
-            <span><FileText size={16} /> {t('collectionDetail.pdfOptions', 'PDF options')}</span>
-            <small className="native-pdf-toolbar-note">{t('collectionDetail.pdfToolbarHint', 'Use the PDF toolbar for pages and zoom.')}</small>
-            <a className="icon-button" href={previewUrl(document.id)} target="_blank" rel="noreferrer" title={t('collectionDetail.openFullPdf', 'Open full PDF')}><ExternalLink size={15} /></a>
-            <a className="icon-button" href={downloadUrl(document.id)} title={t('common.download')}><Download size={15} /></a>
-          </>
-        ) : (
-          <span><FileText size={16} /> {t('collectionDetail.pageOnePreview', 'Page 1 preview')}</span>
-        )}
-      </div>
       <div className={`collection-page-preview ${isPdf ? 'collection-pdf-preview' : ''}`}>
         {pdfPreviewSource ? <iframe className="collection-native-pdf-preview" src={pdfPreviewSource} title={`${document.original_filename} PDF preview`} /> : previewSource ? <img src={previewSource} alt={`${document.original_filename} page 1`} /> : <div className="file-icon">{document.original_filename.split('.').pop()?.toUpperCase() || 'DOC'}</div>}
       </div>
       <dl className="collection-peek-fields">
         <div><dt>{t('fields.sender')}</dt><dd>{document.extracted_sender || '—'}</dd></div>
         <div><dt>{t('fields.recipient')}</dt><dd>{document.extracted_recipient || '—'}</dd></div>
-        <div><dt>{t('fields.date')}</dt><dd>{document.extracted_date || updated}</dd></div>
-        <div><dt>{t('fields.amount')}</dt><dd>{document.extracted_amount || '—'}</dd></div>
+        <div><dt>{t('fields.date')}</dt><dd className="kv-mono">{document.extracted_date || updated}</dd></div>
+        <div><dt>{t('fields.amount')}</dt><dd className="kv-strong">{document.extracted_amount || '—'}</dd></div>
         <div><dt>{t('fields.status')}</dt><dd><StatusBadge value={document.review_state === 'needs_review' ? 'needs_review' : document.processing_state} /></dd></div>
       </dl>
       <section className="collection-peek-tags">
         <strong>{t('fields.tags')}</strong>
-        <div>{tags.length ? tags.map((tag) => <span key={tag}>{tag}</span>) : <span>{document.llm_suggested_folder || t('documents.noTags', 'No tags')}</span>}</div>
+        <div className="inspector-tag-row">
+          {tags.length
+            ? tags.map((tag) => <span className="pill" key={tag}>{tag}</span>)
+            : <span className="pill">{document.llm_suggested_folder || t('documents.noTags', 'No tags')}</span>}
+        </div>
       </section>
-      <section className="collection-peek-ocr">
-        <strong>{t('documents.ocrText')}</strong>
-        <p>{snippet ? compactText(snippet, 420) : t('documents.noActivityEvents', 'No OCR text preview available yet.')}</p>
-      </section>
-      <section className="collection-peek-activity">
-        <strong>{t('nav.activity')}</strong>
+      <details className="collection-peek-ocr">
+        <summary>{t('documents.ocrText')}</summary>
+        <pre>{snippet ? compactText(snippet, 520) : t('documents.noActivityEvents', 'No OCR text preview available yet.')}</pre>
+      </details>
+      <div className="collection-peek-activity">
         <span>{t('common.updated', 'Updated')} {updated}</span>
         {document.review_reason && <span>{document.review_reason}</span>}
-      </section>
+      </div>
       <div className="collection-peek-actions">
-        <button type="button" className="primary" onClick={() => onOpenDocument(document.id)}><ExternalLink size={16} /> {t('common.open')}</button>
+        <button type="button" className="primary" onClick={() => onOpenDocument(document.id)}><ExternalLink size={15} /> {t('common.open')}</button>
         <button type="button" disabled={busy || document.id.startsWith('demo-') || document.review_state === 'reviewed'} onClick={() => onMarkReviewed(document)}>{t('documents.markReviewed')}</button>
         <button type="button" disabled={busy || document.id.startsWith('demo-')} onClick={() => onReextract(document)}>{t('common.reextract')}</button>
       </div>

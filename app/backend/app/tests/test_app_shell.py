@@ -99,6 +99,7 @@ def test_collection_page_counts_review_independently_of_processing_state(db_sess
     assert response.status_code == 200
     assert response.json()["status_counts"] == {"complete": 2}
     assert response.json()["needs_review_count"] == 1
+    assert response.json()["total_estimate"] == 2
 
 
 def test_activity_legacy_and_page_default_limits(db_session: Session, tmp_path: Path, shell_client) -> None:

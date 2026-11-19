@@ -295,7 +295,8 @@ def collection_page(slug: str, db: Session = Depends(get_db)) -> dict:
     collection = db.scalars(select(Collection).where(Collection.slug == slug)).first()
     if collection is None:
         raise HTTPException(status_code=404, detail="Collection not found")
-    record_count = db.scalar(select(func.count(Record.id)).where(Record.collection_id == collection.id).where(Record.deleted_at.is_(None))) or 0
+    status_counts = _status_counts_for_collection(db, collection.name)
+    document_count = sum(int(count) for count in status_counts.values())
     return {
         "collection": {
             "id": str(collection.id),
@@ -308,8 +309,8 @@ def collection_page(slug: str, db: Session = Depends(get_db)) -> dict:
         "records": [],
         "limit": 0,
         "next_cursor": None,
-        "total_estimate": int(record_count),
-        "status_counts": _status_counts_for_collection(db, collection.name),
+        "total_estimate": document_count,
+        "status_counts": status_counts,
         "needs_review_count": db.scalar(
             select(func.count(Document.id))
             .where(Document.collection_name == collection.name, Document.deleted_at.is_(None))
