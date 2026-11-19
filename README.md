@@ -22,7 +22,7 @@ curl -fL https://raw.githubusercontent.com/DrBearJew/OCR/main/scripts/install-do
 bash install-docker.sh
 ```
 
-That gives you the full app using prebuilt images and local CPU **PP-OCRv6**—no source build, GPU, or external model server required.
+That gives you the full app using prebuilt images and local CPU **PP-OCRv6**—no source build, GPU, or external model server required. Open `http://127.0.0.1:3001` on first launch to pick your own admin username and password in the browser (and change them anytime under **Admin → System**).
 
 To enable local AI models with the same installer:
 

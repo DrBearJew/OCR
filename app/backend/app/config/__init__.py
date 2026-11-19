@@ -65,6 +65,7 @@ class Settings(BaseSettings):
 
     admin_username: str = "admin"
     admin_password: str = "admin"
+    allow_initial_setup: bool = False
     secret_key: str = "change-me-in-production"
     access_token_expire_minutes: int = 60
     jwt_issuer: str = "dokocr"

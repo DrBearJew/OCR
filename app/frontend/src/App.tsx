@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AUTH_EXPIRED_EVENT, getToken, setToken } from './api/client'
+import { AUTH_EXPIRED_EVENT, getToken, logout, setToken } from './api/client'
 import AppShell from './components/AppShell'
 import LoginPanel from './components/LoginPanel'
 import BatchListPage from './pages/BatchListPage'
@@ -80,7 +80,7 @@ export default function App() {
   if (!authed) return <LoginPanel onLogin={() => setAuthed(true)} />
 
   return (
-    <AppShell active={route.name} onNavigate={navigate} onLogout={() => { setToken(null); setAuthed(false) }}>
+    <AppShell active={route.name} onNavigate={navigate} onLogout={() => { void logout(); setAuthed(false) }}>
         {route.name === 'dashboard' && <DashboardPage onOpenDocument={(id) => navigate(`/documents/${id}`)} onSearch={() => navigate('/search')} />}
         {route.name === 'collections' && <CollectionsPage onOpenCollection={(slug) => navigate(`/collections/${slug}`)} onSchemas={() => navigate('/schemas')} />}
         {route.name === 'collection' && <CollectionDetailPage slug={route.slug} onOpenDocument={(id) => navigate(`/documents/${id}`)} onOpenSchemas={() => navigate('/schemas')} />}

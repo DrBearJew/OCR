@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { RefreshCw, RotateCcw, Save, Wrench } from 'lucide-react'
-import { api } from '../api/client'
+import { api, changeCredentials, getAuthMe } from '../api/client'
 import type { Collection, Document, IngestionJob, IngestionSource, IntegrationSummary, JobInfo, ModelEndpointTestResult, ModelSetup, ProcessingHook } from '../types'
 import { useI18n } from '../i18n'
 
@@ -82,6 +82,9 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
 
   const [integrations, setIntegrations] = useState<IntegrationSummary | null>(null)
   const [collection, setCollection] = useState('Belege')
+  const [accountForm, setAccountForm] = useState({ username: 'admin', currentPassword: '', newPassword: '', confirmPassword: '' })
+  const [accountBusy, setAccountBusy] = useState(false)
+  const [accountNotice, setAccountNotice] = useState<{ ok: boolean; text: string } | null>(null)
 
   const [sources, setSources] = useState<IngestionSource[]>([])
   const [hooks, setHooks] = useState<ProcessingHook[]>([])
@@ -107,12 +110,16 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
         setSelectedCollectionId((prev) => prev || collectionRows[0]?.id || '')
         setSourceForm((form) => (form.collection_id || !collectionRows[0] ? form : { ...form, collection_id: collectionRows[0].id }))
       } else if (target === 'system') {
-        const [integrationStatus, collectionRows] = await Promise.all([
+        const [integrationStatus, collectionRows, me] = await Promise.all([
           api.integrations(force),
-          collections.length ? Promise.resolve(collections) : api.collections()
+          collections.length ? Promise.resolve(collections) : api.collections(),
+          getAuthMe().catch(() => null),
         ])
         setIntegrations(integrationStatus)
         if (!collections.length) setCollections(collectionRows)
+        if (me?.username) {
+          setAccountForm((prev) => ({ ...prev, username: me.username }))
+        }
       } else if (target === 'automation') {
         const [sourceRows, hookRows, collectionRows] = await Promise.all([
           api.ingestionSources(),
@@ -155,6 +162,40 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
     if (!selectedCollection) return
     setModelForm(formFromCollection(selectedCollection))
   }, [selectedCollection?.id, selectedCollection?.updated_at])
+
+  async function saveAccountCredentials() {
+    setAccountNotice(null)
+    if (!accountForm.username.trim()) {
+      setAccountNotice({ ok: false, text: t('admin.accountUsernameRequired') })
+      return
+    }
+    if (!accountForm.currentPassword) {
+      setAccountNotice({ ok: false, text: t('admin.accountCurrentPasswordRequired') })
+      return
+    }
+    if (accountForm.newPassword.length < 8) {
+      setAccountNotice({ ok: false, text: t('login.setupPasswordTooShort') })
+      return
+    }
+    if (accountForm.newPassword !== accountForm.confirmPassword) {
+      setAccountNotice({ ok: false, text: t('login.setupPasswordMismatch') })
+      return
+    }
+    setAccountBusy(true)
+    try {
+      const updated = await changeCredentials(
+        accountForm.currentPassword,
+        accountForm.username.trim(),
+        accountForm.newPassword
+      )
+      setAccountForm({ username: updated.username, currentPassword: '', newPassword: '', confirmPassword: '' })
+      setAccountNotice({ ok: true, text: t('admin.accountSaved') })
+    } catch (err) {
+      setAccountNotice({ ok: false, text: err instanceof Error ? err.message : t('admin.accountSaveFailed') })
+    } finally {
+      setAccountBusy(false)
+    }
+  }
 
   async function runAction(action: () => Promise<unknown>, success: string) {
     setError('')
@@ -611,6 +652,56 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
                 </div>
               ))}
             </div>
+          </section>
+
+          <section className="admin-card">
+            <div className="section-heading-row">
+              <h2>{t('admin.accountTitle')}</h2>
+              <TechnicalPill state="info" label={accountForm.username || 'admin'} />
+            </div>
+            <p className="muted">{t('admin.accountHint')}</p>
+            <div className="model-config-form">
+              <label>{t('login.username')}
+                <input
+                  autoComplete="username"
+                  value={accountForm.username}
+                  onChange={(event) => setAccountForm({ ...accountForm, username: event.target.value })}
+                />
+              </label>
+              <label>{t('admin.accountCurrentPassword')}
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={accountForm.currentPassword}
+                  onChange={(event) => setAccountForm({ ...accountForm, currentPassword: event.target.value })}
+                />
+              </label>
+              <label>{t('admin.accountNewPassword')}
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder={t('login.setupPasswordPlaceholder')}
+                  value={accountForm.newPassword}
+                  onChange={(event) => setAccountForm({ ...accountForm, newPassword: event.target.value })}
+                />
+              </label>
+              <label>{t('login.setupConfirmPassword')}
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={accountForm.confirmPassword}
+                  onChange={(event) => setAccountForm({ ...accountForm, confirmPassword: event.target.value })}
+                />
+              </label>
+              <button type="button" className="primary" disabled={accountBusy} onClick={() => void saveAccountCredentials()}>
+                <Save size={16} /> {accountBusy ? '…' : t('admin.accountSave')}
+              </button>
+            </div>
+            {accountNotice && (
+              <p className={accountNotice.ok ? 'success-message' : 'error'} role={accountNotice.ok ? 'status' : 'alert'}>
+                {accountNotice.text}
+              </p>
+            )}
           </section>
 
           <section className="admin-card">

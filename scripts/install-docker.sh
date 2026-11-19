@@ -19,6 +19,8 @@ OCR_RUNTIME_ARG_SET=false
 OCR_URL_ARG=""
 OCR_MODEL_ARG=""
 OCR_API_KEY_ARG=""
+ADMIN_USER_ARG=""
+ADMIN_PASSWORD_ARG=""
 DIRECTORY_ARG_SET=false
 
 usage() {
@@ -29,6 +31,8 @@ Usage: bash install-docker.sh [options]
 
 Options:
   --directory DIR    Install files here (default: ./dokocr)
+  --admin-user NAME  Admin login username (default: admin)
+  --admin-password PASS  Admin login password (8-128 chars; omit on local installs to set it in the browser)
   --ocr-runtime MODE Choose local (PP-OCRv6 CPU) or external (OpenAI-compatible vision OCR)
   --ocr-url URL      External OpenAI-compatible vision OCR server URL (requires --ocr-runtime external)
   --ocr-model NAME   External OCR model ID (default: auto)
@@ -177,6 +181,20 @@ while (($#)); do
       [[ -n "$2" ]] || fail "--project-name cannot be empty"
       [[ -z "$PROJECT_ARG" ]] || fail "--project-name may be specified only once"
       PROJECT_ARG=$2
+      shift 2
+      ;;
+    --admin-user)
+      (($# >= 2)) || fail "--admin-user requires a value"
+      [[ -n "$2" ]] || fail "--admin-user cannot be empty"
+      [[ -z "$ADMIN_USER_ARG" ]] || fail "--admin-user may be specified only once"
+      ADMIN_USER_ARG=$2
+      shift 2
+      ;;
+    --admin-password)
+      (($# >= 2)) || fail "--admin-password requires a value"
+      [[ -n "$2" ]] || fail "--admin-password cannot be empty"
+      [[ -z "$ADMIN_PASSWORD_ARG" ]] || fail "--admin-password may be specified only once"
+      ADMIN_PASSWORD_ARG=$2
       shift 2
       ;;
     -h|--help)
@@ -390,6 +408,7 @@ lookup_env_value DOKOCR_API_PORT; SAVED_API_PORT=$ENV_VALUE
 lookup_env_value COMPOSE_PROJECT_NAME; SAVED_PROJECT=$ENV_VALUE
 lookup_env_value ADMIN_USERNAME; SAVED_ADMIN_USERNAME=$ENV_VALUE
 lookup_env_value ADMIN_PASSWORD; SAVED_ADMIN_PASSWORD=$ENV_VALUE
+lookup_env_value DOKOCR_ALLOW_INITIAL_SETUP; SAVED_ALLOW_INITIAL_SETUP=$ENV_VALUE
 lookup_env_value SECRET_KEY; SAVED_SECRET_KEY=$ENV_VALUE
 lookup_env_value POSTGRES_PASSWORD; SAVED_POSTGRES_PASSWORD=$ENV_VALUE
 
@@ -417,10 +436,19 @@ BIND=${BIND_ARG:-${SAVED_BIND:-127.0.0.1}}
 PORT=${PORT_ARG:-${SAVED_PORT:-3001}}
 API_PORT=${API_PORT_ARG:-${SAVED_API_PORT:-8001}}
 PROJECT_NAME=${PROJECT_ARG:-${SAVED_PROJECT:-dokocr}}
-ADMIN_USERNAME=${SAVED_ADMIN_USERNAME:-admin}
-ADMIN_PASSWORD=${SAVED_ADMIN_PASSWORD:-}
+ADMIN_USERNAME=${ADMIN_USER_ARG:-${SAVED_ADMIN_USERNAME:-admin}}
+ADMIN_PASSWORD=${ADMIN_PASSWORD_ARG:-${SAVED_ADMIN_PASSWORD:-}}
 SECRET_KEY=${SAVED_SECRET_KEY:-}
 POSTGRES_PASSWORD=${SAVED_POSTGRES_PASSWORD:-}
+if [[ -n "$ADMIN_PASSWORD_ARG" || "$BIND" != 127.0.0.1 ]]; then
+  ALLOW_INITIAL_SETUP=false
+elif [[ -n "$SAVED_ALLOW_INITIAL_SETUP" ]]; then
+  ALLOW_INITIAL_SETUP=$SAVED_ALLOW_INITIAL_SETUP
+elif [[ -z "$SAVED_ADMIN_PASSWORD" ]]; then
+  ALLOW_INITIAL_SETUP=true
+else
+  ALLOW_INITIAL_SETUP=false
+fi
 
 validate_image_tag "$IMAGE_TAG"
 [[ "$METADATA_ENABLED" == true || "$METADATA_ENABLED" == false ]] || fail "DOKOCR_METADATA_ENABLED in $ENV_FILE must be true or false"
@@ -476,8 +504,14 @@ for container in $project_containers; do
 done
 
 [[ "$ADMIN_USERNAME" =~ ^[A-Za-z0-9._@-]{1,64}$ ]] || fail "ADMIN_USERNAME in $ENV_FILE must use only letters, digits, '.', '_', '@', or '-' (max 64 characters)"
+[[ "$ALLOW_INITIAL_SETUP" == true || "$ALLOW_INITIAL_SETUP" == false ]] || fail "DOKOCR_ALLOW_INITIAL_SETUP in $ENV_FILE must be true or false"
 
-for secret_name in ADMIN_PASSWORD SECRET_KEY POSTGRES_PASSWORD; do
+if [[ -n "$ADMIN_PASSWORD" ]]; then
+  [[ "$ADMIN_PASSWORD" != "admin" ]] || fail "ADMIN_PASSWORD cannot be 'admin'"
+  [[ "$ADMIN_PASSWORD" =~ ^[^[:cntrl:][:space:]]{8,128}$ ]] || fail "ADMIN_PASSWORD must be 8-128 non-whitespace printable characters"
+fi
+
+for secret_name in SECRET_KEY POSTGRES_PASSWORD; do
   secret_value=${!secret_name}
   if [[ -n "$secret_value" ]]; then
     [[ "$secret_value" =~ ^[A-Za-z0-9._~-]{32,128}$ ]] || fail "$secret_name in $ENV_FILE must be 32-128 URL-safe characters"
@@ -551,7 +585,7 @@ fi
 
 is_managed_env_key() {
   case "$1" in
-    COMPOSE_FILE|COMPOSE_PROJECT_NAME|COMPOSE_PROFILES|DOKOCR_IMAGE_TAG|DOKOCR_OCR_RUNTIME|DOKOCR_OCR_PROVIDER|DOKOCR_OCR_URL|DOKOCR_OCR_MODEL|DOKOCR_OCR_API_KEY|DOKOCR_OCR_EXTERNAL_URL|DOKOCR_OCR_EXTERNAL_MODEL|DOKOCR_METADATA_ENABLED|DOKOCR_METADATA_RUNTIME|DOKOCR_METADATA_URL|DOKOCR_METADATA_MODEL|DOKOCR_METADATA_API_KEY|DOKOCR_METADATA_EXTERNAL_URL|DOKOCR_METADATA_EXTERNAL_MODEL|DOKOCR_METADATA_GPU_LAYERS|DOKOCR_METADATA_DEVICES|DOKOCR_BIND|DOKOCR_PORT|DOKOCR_API_PORT|ADMIN_USERNAME|ADMIN_PASSWORD|SECRET_KEY|POSTGRES_PASSWORD)
+    COMPOSE_FILE|COMPOSE_PROJECT_NAME|COMPOSE_PROFILES|DOKOCR_IMAGE_TAG|DOKOCR_OCR_RUNTIME|DOKOCR_OCR_PROVIDER|DOKOCR_OCR_URL|DOKOCR_OCR_MODEL|DOKOCR_OCR_API_KEY|DOKOCR_OCR_EXTERNAL_URL|DOKOCR_OCR_EXTERNAL_MODEL|DOKOCR_METADATA_ENABLED|DOKOCR_METADATA_RUNTIME|DOKOCR_METADATA_URL|DOKOCR_METADATA_MODEL|DOKOCR_METADATA_API_KEY|DOKOCR_METADATA_EXTERNAL_URL|DOKOCR_METADATA_EXTERNAL_MODEL|DOKOCR_METADATA_GPU_LAYERS|DOKOCR_METADATA_DEVICES|DOKOCR_BIND|DOKOCR_PORT|DOKOCR_API_PORT|DOKOCR_ALLOW_INITIAL_SETUP|ADMIN_USERNAME|ADMIN_PASSWORD|SECRET_KEY|POSTGRES_PASSWORD)
       return 0
       ;;
     *)
@@ -601,6 +635,7 @@ fi
   printf 'DOKOCR_BIND=%s\n' "$BIND"
   printf 'DOKOCR_PORT=%s\n' "$PORT"
   printf 'DOKOCR_API_PORT=%s\n' "$API_PORT"
+  printf 'DOKOCR_ALLOW_INITIAL_SETUP=%s\n' "$ALLOW_INITIAL_SETUP"
   printf 'ADMIN_USERNAME=%s\n' "$ADMIN_USERNAME"
   printf 'ADMIN_PASSWORD=%s\n' "$ADMIN_PASSWORD"
   printf 'SECRET_KEY=%s\n' "$SECRET_KEY"
@@ -626,7 +661,7 @@ compose() {
     unset DOKOCR_METADATA_ENABLED DOKOCR_METADATA_RUNTIME DOKOCR_METADATA_URL DOKOCR_METADATA_MODEL DOKOCR_METADATA_API_KEY
     unset DOKOCR_METADATA_EXTERNAL_URL DOKOCR_METADATA_EXTERNAL_MODEL DOKOCR_METADATA_GPU_LAYERS DOKOCR_METADATA_DEVICES
     unset CUDA_VISIBLE_DEVICES GGML_VK_VISIBLE_DEVICES
-    unset DOKOCR_BIND DOKOCR_PORT DOKOCR_API_PORT ADMIN_USERNAME ADMIN_PASSWORD SECRET_KEY POSTGRES_PASSWORD
+    unset DOKOCR_BIND DOKOCR_PORT DOKOCR_API_PORT DOKOCR_ALLOW_INITIAL_SETUP ADMIN_USERNAME ADMIN_PASSWORD SECRET_KEY POSTGRES_PASSWORD
     unset FRONTEND_ORIGIN PUBLIC_BASE_URL CORS_ORIGINS COOKIE_SECURE
     docker compose \
       --project-directory "$INSTALL_DIR" \
@@ -711,7 +746,16 @@ fi
 APP_HOST=$BIND
 if [[ "$APP_HOST" == 0.0.0.0 ]]; then APP_HOST=localhost; fi
 printf '\nDok OCR is ready: http://%s:%s\n' "$APP_HOST" "$PORT"
-printf 'Admin username: %s\nCredentials: %s\n' "$ADMIN_USERNAME" "$ENV_FILE"
+if [[ "$ALLOW_INITIAL_SETUP" == true ]]; then
+  printf 'First-time login: open the link above in your browser to choose your username and password.\n'
+else
+  printf 'Admin username: %s\n' "$ADMIN_USERNAME"
+  if [[ -z "$ADMIN_PASSWORD_ARG" ]]; then
+    printf 'Credentials file: %s (you can also change your login later under Admin -> System)\n' "$ENV_FILE"
+  else
+    printf 'Admin password: set from --admin-password (changeable anytime under Admin -> System)\n'
+  fi
+fi
 if [[ "$OCR_RUNTIME" == external ]]; then
   printf 'OCR: external OpenAI-compatible vision server (%s, model: %s).\n' "$OCR_EXTERNAL_URL" "$OCR_EXTERNAL_MODEL"
 fi

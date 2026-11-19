@@ -1,24 +1,64 @@
 import type { FormEvent } from 'react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowRight, Eye, EyeOff, FileText } from 'lucide-react'
-import { login } from '../api/client'
+import { completeInitialSetup, getAuthStatus, login } from '../api/client'
 import { useI18n } from '../i18n'
 
 export default function LoginPanel({ onLogin }: { onLogin: () => void }) {
   const { language, setLanguage, t } = useI18n()
+  const [needsSetup, setNeedsSetup] = useState(false)
+  const [statusLoaded, setStatusLoaded] = useState(false)
   const [username, setUsername] = useState('admin')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    let active = true
+    getAuthStatus()
+      .then((status) => {
+        if (!active) return
+        setNeedsSetup(status.needs_setup)
+        if (status.needs_setup && status.default_username) {
+          setUsername(status.default_username)
+        }
+      })
+      .catch(() => {
+        // Fall back to regular sign-in if status endpoint is unreachable.
+      })
+      .finally(() => {
+        if (active) setStatusLoaded(true)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (submitting) return
     setError('')
+
+    if (needsSetup) {
+      if (password.length < 8) {
+        setError(t('login.setupPasswordTooShort'))
+        return
+      }
+      if (password !== confirmPassword) {
+        setError(t('login.setupPasswordMismatch'))
+        return
+      }
+    }
+
     setSubmitting(true)
     try {
-      await login(username, password)
+      if (needsSetup) {
+        await completeInitialSetup(username.trim(), password)
+      } else {
+        await login(username, password)
+      }
       onLogin()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('login.failed'))
@@ -28,6 +68,7 @@ export default function LoginPanel({ onLogin }: { onLogin: () => void }) {
   }
 
   const isDe = language === 'de'
+  const canSubmit = !submitting && username.trim().length > 0 && (!needsSetup || (password.length >= 8 && confirmPassword.length > 0))
 
   return (
     <main className="auth-split" aria-label={t('login.aria')}>
@@ -87,8 +128,8 @@ export default function LoginPanel({ onLogin }: { onLogin: () => void }) {
 
         <div className="auth-form-wrap">
           <header className="auth-form-header">
-            <h2>{isDe ? 'Anmelden' : 'Sign in'}</h2>
-            <p>{t('login.subtitle')}</p>
+            <h2>{needsSetup ? t('login.setupTitle') : (isDe ? 'Anmelden' : 'Sign in')}</h2>
+            <p>{needsSetup ? t('login.setupSubtitle') : t('login.subtitle')}</p>
           </header>
 
           <form className="auth-form" onSubmit={submit}>
@@ -104,11 +145,11 @@ export default function LoginPanel({ onLogin }: { onLogin: () => void }) {
             </label>
 
             <label className="auth-field">
-              <span>{t('login.password')}</span>
+              <span>{needsSetup ? t('login.setupPassword') : t('login.password')}</span>
               <div className="auth-password-wrap">
                 <input
-                  autoComplete="current-password"
-                  placeholder="••••••••"
+                  autoComplete={needsSetup ? 'new-password' : 'current-password'}
+                  placeholder={needsSetup ? t('login.setupPasswordPlaceholder') : '••••••••'}
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
@@ -125,16 +166,31 @@ export default function LoginPanel({ onLogin }: { onLogin: () => void }) {
               </div>
             </label>
 
+            {needsSetup && (
+              <label className="auth-field">
+                <span>{t('login.setupConfirmPassword')}</span>
+                <input
+                  autoComplete="new-password"
+                  placeholder="••••••••"
+                  type={showPassword ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                />
+              </label>
+            )}
+
             {error && <p className="auth-error" role="alert">{error}</p>}
 
-            <button className="primary auth-submit" type="submit" disabled={submitting || !username.trim()}>
-              <span>{submitting ? '…' : t('login.submit')}</span>
+            <button className="primary auth-submit" type="submit" disabled={!statusLoaded || !canSubmit}>
+              <span>{submitting ? '…' : (needsSetup ? t('login.setupSubmit') : t('login.submit'))}</span>
               {!submitting && <ArrowRight size={15} />}
             </button>
           </form>
 
           <p className="auth-foot">
-            {isDe ? 'Selbstgehostetes Dokumentenarchiv & OCR' : 'Self-hosted document archive & OCR'}
+            {needsSetup
+              ? t('login.setupFoot')
+              : (isDe ? 'Selbstgehostetes Dokumentenarchiv & OCR' : 'Self-hosted document archive & OCR')}
           </p>
         </div>
       </section>

@@ -62,6 +62,29 @@ function decodeBase64Url(value: string): string {
   return atob(padded)
 }
 
+function extractApiError(text: string, fallback: string): string {
+  if (!text) return fallback
+  try {
+    const parsed = JSON.parse(text) as { detail?: unknown }
+    if (typeof parsed.detail === 'string' && parsed.detail.trim()) return parsed.detail
+    if (Array.isArray(parsed.detail) && parsed.detail.length > 0) {
+      const first = parsed.detail[0] as { msg?: unknown }
+      if (typeof first?.msg === 'string' && first.msg.trim()) return first.msg
+    }
+  } catch {
+    // Plain text response
+  }
+  return text
+}
+
+const AUTH_NO_EXPIRE_PATHS = new Set([
+  '/api/auth/login',
+  '/api/auth/setup',
+  '/api/auth/status',
+  '/api/auth/logout',
+  '/api/auth/change-credentials',
+])
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   const token = getToken()
@@ -70,14 +93,14 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, { ...init, headers, credentials: 'include' })
   if (!response.ok) {
     const text = await response.text()
-    if (response.status === 401 && path !== '/api/auth/login') {
+    if (response.status === 401 && !AUTH_NO_EXPIRE_PATHS.has(path)) {
       expireClientSession()
       throw new Error('Session expired. Please sign in again.')
     }
     if (response.status === 413) {
       throw new Error('Upload too large. Check the configured max file size and max batch size.')
     }
-    throw new Error(text || response.statusText)
+    throw new Error(extractApiError(text, response.statusText))
   }
   return response.json() as Promise<T>
 }
@@ -125,6 +148,18 @@ function searchParams(params: SearchParams) {
   return query
 }
 
+export async function getAuthStatus(): Promise<{ needs_setup: boolean; default_username: string }> {
+  return request<{ needs_setup: boolean; default_username: string }>('/api/auth/status')
+}
+
+export async function completeInitialSetup(username: string, password: string): Promise<void> {
+  const data = await request<{ access_token: string }>('/api/auth/setup', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  })
+  setToken(data.access_token)
+}
+
 export async function login(username: string, password: string): Promise<void> {
   try {
     const data = await request<{ access_token: string }>('/api/auth/login', {
@@ -139,6 +174,36 @@ export async function login(username: string, password: string): Promise<void> {
     }
     throw err
   }
+}
+
+export async function logout(): Promise<void> {
+  setToken(null)
+  try {
+    await request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' })
+  } catch {
+    // Clearing client state is sufficient if the network is already unreachable.
+  }
+}
+
+export async function getAuthMe(): Promise<{ username: string }> {
+  return request<{ username: string }>('/api/auth/me')
+}
+
+export async function changeCredentials(
+  currentPassword: string,
+  newUsername: string,
+  newPassword: string
+): Promise<{ username: string }> {
+  const data = await request<{ access_token: string; username: string }>('/api/auth/change-credentials', {
+    method: 'POST',
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_username: newUsername,
+      new_password: newPassword,
+    }),
+  })
+  setToken(data.access_token)
+  return { username: data.username }
 }
 
 function canUseDevPreviewLogin(username: string, password: string, err: unknown): boolean {

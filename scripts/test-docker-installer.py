@@ -627,6 +627,27 @@ def main() -> None:
         check(lm_env["DOKOCR_OCR_URL"] == "http://host.docker.internal:1234/v1" and lm_env["DOKOCR_OCR_MODEL"] == "auto", "external OCR URL/model not written")
         check(lm_env["DOKOCR_OCR_API_KEY"] == "sk-ocr-test-123" and lm_env["DOKOCR_METADATA_API_KEY"] == "sk-meta-test-456", "API keys not persisted in .env")
         check("sk-ocr-test-123" not in result.stdout and "sk-meta-test-456" not in result.stdout, "API keys must never be printed to stdout")
+        check(lm_env["DOKOCR_ALLOW_INITIAL_SETUP"] == "true", "fresh local 127.0.0.1 install must enable browser first-run setup")
+
+        custom_auth_install = work / "custom-admin-auth"
+        result = run_installer(
+            script, bindir, log, COMPOSE, custom_auth_install,
+            ["--admin-user", "alex", "--admin-password", "my-strong-pass-1"],
+        )
+        check(result.returncode == 0, f"custom admin credentials install failed:\n{result.stderr}")
+        auth_env = dotenv(custom_auth_install / ".env")
+        check(auth_env["ADMIN_USERNAME"] == "alex" and auth_env["ADMIN_PASSWORD"] == "my-strong-pass-1", "custom admin credentials were not written")
+        check(auth_env["DOKOCR_ALLOW_INITIAL_SETUP"] == "false", "explicit --admin-password must disable unauthenticated browser setup")
+        check("my-strong-pass-1" not in result.stdout + result.stderr, "custom --admin-password must never be printed")
+
+        lan_install = work / "lan-no-browser-setup"
+        result = run_installer(script, bindir, log, COMPOSE, lan_install, ["--bind", "0.0.0.0"])
+        check(result.returncode == 0, f"LAN bind install failed:\n{result.stderr}")
+        lan_env = dotenv(lan_install / ".env")
+        check(lan_env["DOKOCR_ALLOW_INITIAL_SETUP"] == "false", "non-loopback bind must never enable unauthenticated browser setup")
+
+        result = run_installer(script, bindir, log, COMPOSE, work / "short-admin-pass", ["--admin-password", "short"])
+        check(result.returncode != 0 and "8-128" in result.stderr, "short --admin-password was accepted")
 
         result = run_installer(
             script, bindir, log, COMPOSE, work / "ocr-external-with-unified",

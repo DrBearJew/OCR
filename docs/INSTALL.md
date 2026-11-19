@@ -36,9 +36,15 @@ curl -fL https://raw.githubusercontent.com/DrBearJew/OCR/main/scripts/install-do
 bash install-docker.sh
 ```
 
-On first run, the script creates `./dokocr` (permissions `0700`), generates random credentials in `./dokocr/.env` (`0600`), pulls the images, runs database migrations, and starts the stack.
+On first run, the script creates `./dokocr` (permissions `0700`), writes `./dokocr/.env` (`0600`), pulls the images, runs database migrations, and starts the stack.
 
-The admin username is `admin`. Read the generated `ADMIN_PASSWORD` directly from `./dokocr/.env`.
+Open `http://127.0.0.1:3001` in your browser—on a fresh local install, Dok OCR prompts you to **choose your own admin username and password** right on the first screen (no digging through `.env`). You can change your username or password anytime later under **Admin → System**.
+
+For headless or network-exposed (`--bind 0.0.0.0`) installs, pass `--admin-user` and `--admin-password` directly so unauthenticated browser setup stays disabled on public networks:
+
+```bash
+bash install-docker.sh --bind 0.0.0.0 --admin-user alex --admin-password "your-strong-password"
+```
 
 Out of the box, Dok OCR runs local **PP-OCRv6** on CPU (models are baked into the backend image) alongside deterministic metadata extraction, review queues, and PostgreSQL search.
 
@@ -107,6 +113,8 @@ Run `bash install-docker.sh --help` to see all flags.
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--directory PATH` | `./dokocr` | Target install directory. |
+| `--admin-user NAME` | `admin` | Initial admin login username. |
+| `--admin-password PASS` | Browser setup (local) / random (LAN) | Initial admin password (8–128 chars). Omit on local `127.0.0.1` installs to pick it in your browser on first visit. |
 | `--ocr-runtime MODE` | `local` | OCR runtime: `local` (PP-OCRv6 CPU) or `external` (OpenAI-compatible vision OCR). |
 | `--ocr-url URL` | — | Base URL for `--ocr-runtime external` (HTTP/HTTPS, no embedded credentials or query string). |
 | `--ocr-model NAME` | `auto` | Model ID sent to an external vision OCR server (`auto` picks the first model from `/v1/models`). |

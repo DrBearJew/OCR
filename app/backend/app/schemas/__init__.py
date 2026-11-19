@@ -32,6 +32,32 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class AuthStatusResponse(BaseModel):
+    needs_setup: bool
+    default_username: str = ""
+
+
+class InitialSetupRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class AuthMeResponse(BaseModel):
+    username: str
+
+
+class ChangeCredentialsRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_username: str = Field(min_length=1, max_length=64)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class ChangeCredentialsResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    username: str
+
+
 class BatchRead(BaseModel):
     id: uuid.UUID
     collection_name: str

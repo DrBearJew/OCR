@@ -7,7 +7,7 @@ from starlette.requests import Request
 from app.api import auth as auth_api
 from app.auth import create_access_token, require_admin
 from app.config import Settings, validate_production_settings
-from app.schemas import LoginRequest
+from app.schemas import ChangeCredentialsRequest, InitialSetupRequest, LoginRequest
 from app.models import HookKind, HookStage, ProcessingHook
 from app.services.hooks import execute_hook
 
@@ -141,3 +141,118 @@ def test_webhook_hooks_require_allowlist_and_block_private(monkeypatch) -> None:
         assert "blocked address" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("private webhook target was accepted")
+
+
+def test_initial_setup_and_credential_change_flow(monkeypatch, db_session) -> None:
+    fake = FakeRedis()
+    monkeypatch.setattr(auth_api, "_redis", lambda settings: fake)
+    settings = Settings(
+        admin_username="admin",
+        admin_password="bootstrap-env-password",
+        secret_key="test-secret-key-for-auth-setup-flow",
+        allow_initial_setup=True,
+    )
+
+    # Disabled when allow_initial_setup is False
+    disabled = auth_api.auth_status(db=db_session, settings=Settings(admin_username="admin", admin_password="secret", secret_key="x", allow_initial_setup=False))
+    assert disabled.needs_setup is False
+    assert disabled.default_username == ""
+
+    # Enabled before setup runs
+    status_before = auth_api.auth_status(db=db_session, settings=settings)
+    assert status_before.needs_setup is True
+    assert status_before.default_username == "admin"
+
+    # First-run setup creates scrypt credentials and signs the user in
+    setup_response = Response()
+    setup_token = auth_api.initial_setup(
+        InitialSetupRequest(username="alex", password="my-first-password"),
+        _request(),
+        setup_response,
+        db=db_session,
+        settings=settings,
+    )
+    assert setup_token.access_token
+    assert "httponly" in setup_response.headers["set-cookie"].lower()
+
+    # Setup is now permanently closed
+    status_after = auth_api.auth_status(db=db_session, settings=settings)
+    assert status_after.needs_setup is False
+    assert status_after.default_username == ""
+    try:
+        auth_api.initial_setup(
+            InitialSetupRequest(username="hacker", password="other-password"),
+            _request(),
+            Response(),
+            db=db_session,
+            settings=settings,
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 409
+    else:  # pragma: no cover
+        raise AssertionError("second initial setup was accepted")
+
+    # Old .env password no longer works once DB credentials exist
+    try:
+        auth_api.login(
+            LoginRequest(username="admin", password="bootstrap-env-password"),
+            _request(),
+            Response(),
+            settings=settings,
+            db=db_session,
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 401
+    else:  # pragma: no cover
+        raise AssertionError("stale .env password was accepted after setup")
+
+    # New credentials work and pass require_admin
+    login_token = auth_api.login(
+        LoginRequest(username="alex", password="my-first-password"),
+        _request(),
+        Response(),
+        settings=settings,
+        db=db_session,
+    )
+    assert require_admin(cookie_token=login_token.access_token, credentials=None, settings=settings, db=db_session) == "alex"
+
+    # Changing credentials rejects wrong current password
+    try:
+        auth_api.change_credentials(
+            ChangeCredentialsRequest(current_password="wrong-password", new_username="alex", new_password="brand-new-password"),
+            _request(),
+            Response(),
+            current_user="alex",
+            db=db_session,
+            settings=settings,
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 401
+    else:  # pragma: no cover
+        raise AssertionError("credential change accepted wrong current password")
+
+    # Changing credentials succeeds, revokes old tokens, and signs in with new identity
+    change_resp = Response()
+    changed = auth_api.change_credentials(
+        ChangeCredentialsRequest(current_password="my-first-password", new_username="alex.admin", new_password="brand-new-password"),
+        _request(),
+        change_resp,
+        current_user="alex",
+        db=db_session,
+        settings=settings,
+    )
+    assert changed.username == "alex.admin"
+    assert require_admin(cookie_token=changed.access_token, credentials=None, settings=settings, db=db_session) == "alex.admin"
+
+    # Prior token is invalidated because password_version incremented
+    try:
+        require_admin(cookie_token=login_token.access_token, credentials=None, settings=settings, db=db_session)
+    except HTTPException as exc:
+        assert exc.status_code == 401
+    else:  # pragma: no cover
+        raise AssertionError("previous token remained valid after password change")
+
+    # Logout clears session cookie
+    logout_resp = Response()
+    assert auth_api.logout(logout_resp, settings=settings) == {"ok": True}
+    assert "dokocr_session=" in logout_resp.headers["set-cookie"]
