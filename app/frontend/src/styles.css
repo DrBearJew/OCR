@@ -2134,6 +2134,10 @@ pre {
   max-width: 1120px;
 }
 
+.collections-console .toolbar-search {
+  width: min(26rem, 100%);
+}
+
 .collections-ledger {
   display: grid;
 }
