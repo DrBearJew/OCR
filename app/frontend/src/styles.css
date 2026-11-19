@@ -1744,104 +1744,132 @@ pre {
   color: #cfe7dc;
 }
 
-.dash-profile-selector {
+/* Crisp Light-Paper Processing Profiles Card (3 Modes + Stackable Archiving Modifier) */
+.dash-profiles-card {
   display: grid;
-  gap: 0.5rem;
-  padding: 0.75rem 0 0.25rem;
-  border-top: 1px solid rgba(244, 241, 232, 0.14);
-}
-
-.dash-profile-label-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.dash-profile-label-row span {
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: rgba(244, 241, 232, 0.65);
-}
-
-.dash-profile-label-row em {
-  font-style: normal;
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: #a7d5c0;
-}
-
-.dash-profile-pills {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.42rem;
-}
-
-.dash-profile-pill {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 0.45rem;
-  min-height: 2.3rem;
-  padding: 0.38rem 0.62rem;
-  border: 1px solid rgba(244, 241, 232, 0.16);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  box-shadow: none;
-  color: rgba(244, 241, 232, 0.86);
-  font-size: 0.78rem;
-  font-weight: 550;
-  text-align: left;
-}
-
-.dash-profile-pill:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.13);
-  border-color: rgba(244, 241, 232, 0.32);
-  color: #ffffff;
-  box-shadow: none;
-}
-
-.dash-profile-pill.active {
-  background: rgba(235, 246, 240, 0.96);
-  border-color: #ffffff;
-  color: #0e382c;
-  font-weight: 640;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
-}
-
-.dash-profile-icon {
-  display: inline-grid;
-  place-items: center;
-  flex: 0 0 auto;
-  opacity: 0.85;
-}
-
-.dash-profile-pill.active .dash-profile-icon {
-  color: #145946;
-  opacity: 1;
-}
-
-.dash-profile-pill strong {
-  font-weight: inherit;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(28, 25, 23, 0.035);
 }
 
-.dash-profile-check {
-  margin-left: auto;
-  color: #145946;
+.dash-profiles-head {
+  padding: 0.78rem 1.05rem 0.62rem;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg);
+}
+
+.dash-profiles-head h2 {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 620;
+}
+
+.dash-mode-list {
+  display: grid;
+}
+
+.dash-mode-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.68rem 1.05rem;
+  border: 0;
+  border-bottom: 1px solid var(--border-soft);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+  white-space: normal;
+  transition: background 100ms ease;
+}
+
+.dash-mode-row:hover:not(:disabled) {
+  background: #faf9f5;
+  border-color: var(--border-soft);
+  box-shadow: none;
+}
+
+.dash-mode-row.active {
+  background: #f1f8f4;
+}
+
+.dash-mode-icon {
+  width: 1.9rem;
+  height: 1.9rem;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text-soft);
   flex: 0 0 auto;
 }
 
-.dash-profile-hint {
+.dash-mode-row.active .dash-mode-icon,
+.dash-archive-modifier.active .dash-mode-icon {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.dash-mode-copy {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.dash-mode-copy strong {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.25;
+}
+
+.dash-mode-copy small {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.dash-mode-radio {
+  width: 1.15rem;
+  height: 1.15rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1.5px solid var(--border-strong);
+  background: var(--surface);
+  color: #ffffff;
+  flex: 0 0 auto;
+}
+
+.dash-mode-row.active .dash-mode-radio {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.dash-archive-modifier {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.72rem 1.05rem;
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
+  cursor: pointer;
   margin: 0;
-  font-size: 0.76rem;
-  line-height: 1.4;
-  color: rgba(244, 241, 232, 0.72);
+  transition: background 100ms ease;
+}
+
+.dash-archive-modifier:hover {
+  background: #efede6;
+}
+
+.dash-archive-modifier.active {
+  background: #edf6f1;
 }
 
 .dash-forest-cta {
