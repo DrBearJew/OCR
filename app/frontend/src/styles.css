@@ -2196,9 +2196,11 @@ pre {
   display: grid;
   gap: 0.3rem;
   justify-items: start;
+  justify-content: start;
+  align-content: start;
   text-align: left;
   white-space: normal;
-  padding: 0.95rem 1rem;
+  padding: 1rem 1.1rem;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
