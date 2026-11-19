@@ -1,12 +1,15 @@
 import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { ArrowRight, Eye, EyeOff, FileText } from 'lucide-react'
-import { completeInitialSetup, getAuthStatus, login } from '../api/client'
+import { completeInitialSetup, getAuthStatus, login, registerAccount } from '../api/client'
 import { useI18n } from '../i18n'
+
+type AuthMode = 'login' | 'setup' | 'register'
 
 export default function LoginPanel({ onLogin }: { onLogin: () => void }) {
   const { language, setLanguage, t } = useI18n()
-  const [needsSetup, setNeedsSetup] = useState(false)
+  const [mode, setMode] = useState<AuthMode>('login')
+  const [allowRegistration, setAllowRegistration] = useState(false)
   const [statusLoaded, setStatusLoaded] = useState(false)
   const [username, setUsername] = useState('admin')
   const [password, setPassword] = useState('')
@@ -20,9 +23,10 @@ export default function LoginPanel({ onLogin }: { onLogin: () => void }) {
     getAuthStatus()
       .then((status) => {
         if (!active) return
-        setNeedsSetup(status.needs_setup)
-        if (status.needs_setup && status.default_username) {
-          setUsername(status.default_username)
+        setAllowRegistration(Boolean(status.allow_registration))
+        if (status.needs_setup) {
+          setMode('setup')
+          if (status.default_username) setUsername(status.default_username)
         }
       })
       .catch(() => {
@@ -36,12 +40,24 @@ export default function LoginPanel({ onLogin }: { onLogin: () => void }) {
     }
   }, [])
 
+  function switchMode(next: AuthMode) {
+    setMode(next)
+    setError('')
+    setPassword('')
+    setConfirmPassword('')
+    if (next === 'register' && username === 'admin') {
+      setUsername('')
+    }
+  }
+
+  const isCreating = mode === 'setup' || mode === 'register'
+
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (submitting) return
     setError('')
 
-    if (needsSetup) {
+    if (isCreating) {
       if (password.length < 8) {
         setError(t('login.setupPasswordTooShort'))
         return
@@ -54,8 +70,10 @@ export default function LoginPanel({ onLogin }: { onLogin: () => void }) {
 
     setSubmitting(true)
     try {
-      if (needsSetup) {
+      if (mode === 'setup') {
         await completeInitialSetup(username.trim(), password)
+      } else if (mode === 'register') {
+        await registerAccount(username.trim(), password)
       } else {
         await login(username, password)
       }
@@ -68,7 +86,25 @@ export default function LoginPanel({ onLogin }: { onLogin: () => void }) {
   }
 
   const isDe = language === 'de'
-  const canSubmit = !submitting && username.trim().length > 0 && (!needsSetup || (password.length >= 8 && confirmPassword.length > 0))
+  const canSubmit = !submitting && username.trim().length > 0 && (!isCreating || (password.length >= 8 && confirmPassword.length > 0))
+
+  const heading = mode === 'setup'
+    ? t('login.setupTitle')
+    : mode === 'register'
+      ? t('login.registerTitle')
+      : (isDe ? 'Anmelden' : 'Sign in')
+
+  const subtitle = mode === 'setup'
+    ? t('login.setupSubtitle')
+    : mode === 'register'
+      ? t('login.registerSubtitle')
+      : t('login.subtitle')
+
+  const submitLabel = mode === 'setup'
+    ? t('login.setupSubmit')
+    : mode === 'register'
+      ? t('login.registerSubmit')
+      : t('login.submit')
 
   return (
     <main className="auth-split" aria-label={t('login.aria')}>
@@ -128,8 +164,8 @@ export default function LoginPanel({ onLogin }: { onLogin: () => void }) {
 
         <div className="auth-form-wrap">
           <header className="auth-form-header">
-            <h2>{needsSetup ? t('login.setupTitle') : (isDe ? 'Anmelden' : 'Sign in')}</h2>
-            <p>{needsSetup ? t('login.setupSubtitle') : t('login.subtitle')}</p>
+            <h2>{heading}</h2>
+            <p>{subtitle}</p>
           </header>
 
           <form className="auth-form" onSubmit={submit}>
@@ -145,11 +181,11 @@ export default function LoginPanel({ onLogin }: { onLogin: () => void }) {
             </label>
 
             <label className="auth-field">
-              <span>{needsSetup ? t('login.setupPassword') : t('login.password')}</span>
+              <span>{isCreating ? t('login.setupPassword') : t('login.password')}</span>
               <div className="auth-password-wrap">
                 <input
-                  autoComplete={needsSetup ? 'new-password' : 'current-password'}
-                  placeholder={needsSetup ? t('login.setupPasswordPlaceholder') : '••••••••'}
+                  autoComplete={isCreating ? 'new-password' : 'current-password'}
+                  placeholder={isCreating ? t('login.setupPasswordPlaceholder') : '••••••••'}
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
@@ -166,7 +202,7 @@ export default function LoginPanel({ onLogin }: { onLogin: () => void }) {
               </div>
             </label>
 
-            {needsSetup && (
+            {isCreating && (
               <label className="auth-field">
                 <span>{t('login.setupConfirmPassword')}</span>
                 <input
@@ -182,13 +218,33 @@ export default function LoginPanel({ onLogin }: { onLogin: () => void }) {
             {error && <p className="auth-error" role="alert">{error}</p>}
 
             <button className="primary auth-submit" type="submit" disabled={!statusLoaded || !canSubmit}>
-              <span>{submitting ? '…' : (needsSetup ? t('login.setupSubmit') : t('login.submit'))}</span>
+              <span>{submitting ? '…' : submitLabel}</span>
               {!submitting && <ArrowRight size={15} />}
             </button>
           </form>
 
+          {allowRegistration && mode !== 'setup' && (
+            <p className="auth-switch">
+              {mode === 'login' ? (
+                <>
+                  <span>{t('login.noAccountYet')} </span>
+                  <button type="button" className="auth-switch-btn" onClick={() => switchMode('register')}>
+                    {t('login.createAccountLink')}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span>{t('login.haveAccountAlready')} </span>
+                  <button type="button" className="auth-switch-btn" onClick={() => switchMode('login')}>
+                    {t('login.backToSignIn')}
+                  </button>
+                </>
+              )}
+            </p>
+          )}
+
           <p className="auth-foot">
-            {needsSetup
+            {mode === 'setup'
               ? t('login.setupFoot')
               : (isDe ? 'Selbstgehostetes Dokumentenarchiv & OCR' : 'Self-hosted document archive & OCR')}
           </p>

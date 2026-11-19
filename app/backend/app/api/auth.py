@@ -12,11 +12,14 @@ from sqlalchemy.orm import Session
 from app.auth import (
     ADMIN_CREDENTIALS_KEY,
     create_access_token,
-    get_active_admin_identity,
-    get_stored_credentials,
+    ensure_auth_store,
+    find_account,
+    get_auth_store,
     hash_password,
     is_initial_setup_needed,
+    is_registration_allowed,
     require_admin,
+    save_auth_store,
     validate_new_password,
     validate_username,
     verify_admin_credentials,
@@ -25,12 +28,16 @@ from app.config import Settings, get_settings
 from app.db import get_db
 from app.models import AppSetting
 from app.schemas import (
+    AccountSummary,
+    AuthAccountsResponse,
     AuthMeResponse,
     AuthStatusResponse,
     ChangeCredentialsRequest,
     ChangeCredentialsResponse,
     InitialSetupRequest,
     LoginRequest,
+    RegisterAccountRequest,
+    RegistrationSettingRequest,
     TokenResponse,
 )
 
@@ -58,6 +65,7 @@ def auth_status(
     needs_setup = is_initial_setup_needed(db, settings)
     return AuthStatusResponse(
         needs_setup=needs_setup,
+        allow_registration=False if needs_setup else is_registration_allowed(db, settings),
         default_username=settings.admin_username if needs_setup else "",
     )
 
@@ -81,9 +89,14 @@ def initial_setup(
     row = AppSetting(
         key=ADMIN_CREDENTIALS_KEY,
         value_json={
-            "username": username,
-            "password_hash": hash_password(password),
-            "password_version": 1,
+            "accounts": [
+                {
+                    "username": username,
+                    "password_hash": hash_password(password),
+                    "password_version": 1,
+                }
+            ],
+            "allow_registration": False,
             "setup_completed": True,
         },
     )
@@ -97,6 +110,49 @@ def initial_setup(
             detail="Initial account setup is already completed",
         )
     _clear_failed_login(request, "__setup__", settings)
+    token = create_access_token(username, settings, password_version=1)
+    _set_session_cookie(response, token, settings)
+    return TokenResponse(access_token=token)
+
+
+@router.post("/register", response_model=TokenResponse)
+def register_account(
+    payload: RegisterAccountRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> TokenResponse:
+    _check_rate_limit(request, "__register__", settings)
+    if not is_registration_allowed(db, settings):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account self-registration is disabled by the administrator",
+        )
+    store = get_auth_store(db)
+    if store is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account self-registration is disabled by the administrator",
+        )
+    username = validate_username(payload.username)
+    password = validate_new_password(payload.password)
+    if find_account(store["accounts"], username) is not None:
+        _record_failed_login(request, "__register__", settings)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this username already exists",
+        )
+    store["accounts"].append(
+        {
+            "username": username,
+            "password_hash": hash_password(password),
+            "password_version": 1,
+        }
+    )
+    save_auth_store(db, store)
+    db.commit()
+    _clear_failed_login(request, "__register__", settings)
     token = create_access_token(username, settings, password_version=1)
     _set_session_cookie(response, token, settings)
     return TokenResponse(access_token=token)
@@ -139,6 +195,106 @@ def auth_me(
     return AuthMeResponse(username=current_user)
 
 
+@router.get("/accounts", response_model=AuthAccountsResponse)
+def list_accounts(
+    current_user: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> AuthAccountsResponse:
+    store = get_auth_store(db)
+    if store is None:
+        return AuthAccountsResponse(
+            current_username=current_user,
+            allow_registration=False,
+            accounts=[AccountSummary(username=settings.admin_username)],
+        )
+    return AuthAccountsResponse(
+        current_username=current_user,
+        allow_registration=bool(store.get("allow_registration", False)),
+        accounts=[AccountSummary(username=item["username"]) for item in store["accounts"]],
+    )
+
+
+@router.post("/accounts", response_model=AuthAccountsResponse)
+def create_account(
+    payload: RegisterAccountRequest,
+    current_user: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> AuthAccountsResponse:
+    username = validate_username(payload.username)
+    password = validate_new_password(payload.password)
+    store = ensure_auth_store(db, settings)
+    if find_account(store["accounts"], username) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this username already exists",
+        )
+    store["accounts"].append(
+        {
+            "username": username,
+            "password_hash": hash_password(password),
+            "password_version": 1,
+        }
+    )
+    save_auth_store(db, store)
+    db.commit()
+    return AuthAccountsResponse(
+        current_username=current_user,
+        allow_registration=bool(store.get("allow_registration", False)),
+        accounts=[AccountSummary(username=item["username"]) for item in store["accounts"]],
+    )
+
+
+@router.delete("/accounts/{username}", response_model=AuthAccountsResponse)
+def delete_account(
+    username: str,
+    current_user: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> AuthAccountsResponse:
+    store = ensure_auth_store(db, settings)
+    if username.lower() == current_user.lower():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot remove the currently signed-in account",
+        )
+    remaining = [item for item in store["accounts"] if item["username"].lower() != username.lower()]
+    if len(remaining) == len(store["accounts"]):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    if not remaining:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one account must remain",
+        )
+    store["accounts"] = remaining
+    save_auth_store(db, store)
+    db.commit()
+    return AuthAccountsResponse(
+        current_username=current_user,
+        allow_registration=bool(store.get("allow_registration", False)),
+        accounts=[AccountSummary(username=item["username"]) for item in store["accounts"]],
+    )
+
+
+@router.patch("/registration", response_model=AuthAccountsResponse)
+def update_registration_setting(
+    payload: RegistrationSettingRequest,
+    current_user: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> AuthAccountsResponse:
+    store = ensure_auth_store(db, settings)
+    store["allow_registration"] = bool(payload.allow_registration)
+    save_auth_store(db, store)
+    db.commit()
+    return AuthAccountsResponse(
+        current_username=current_user,
+        allow_registration=bool(store["allow_registration"]),
+        accounts=[AccountSummary(username=item["username"]) for item in store["accounts"]],
+    )
+
+
 @router.post("/change-credentials", response_model=ChangeCredentialsResponse)
 def change_credentials(
     payload: ChangeCredentialsRequest,
@@ -155,18 +311,31 @@ def change_credentials(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
     new_username = validate_username(payload.new_username)
     new_password = validate_new_password(payload.new_password)
+    store = ensure_auth_store(db, settings)
+    existing = find_account(store["accounts"], new_username)
+    if existing is not None and existing["username"].lower() != current_user.lower():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Another account already uses this username",
+        )
     next_pv = max(current_pv, 0) + 1
-    new_value = {
-        "username": new_username,
-        "password_hash": hash_password(new_password),
-        "password_version": next_pv,
-        "setup_completed": True,
-    }
-    row = db.get(AppSetting, ADMIN_CREDENTIALS_KEY)
-    if row is None:
-        db.add(AppSetting(key=ADMIN_CREDENTIALS_KEY, value_json=new_value))
-    else:
-        row.value_json = new_value
+    updated = False
+    for account in store["accounts"]:
+        if account["username"].lower() == current_user.lower():
+            account["username"] = new_username
+            account["password_hash"] = hash_password(new_password)
+            account["password_version"] = next_pv
+            updated = True
+            break
+    if not updated:
+        store["accounts"].append(
+            {
+                "username": new_username,
+                "password_hash": hash_password(new_password),
+                "password_version": next_pv,
+            }
+        )
+    save_auth_store(db, store)
     db.commit()
     _clear_failed_login(request, current_user, settings)
     token = create_access_token(new_username, settings, password_version=next_pv)

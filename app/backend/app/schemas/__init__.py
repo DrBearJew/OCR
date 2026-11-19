@@ -34,6 +34,7 @@ class LoginRequest(BaseModel):
 
 class AuthStatusResponse(BaseModel):
     needs_setup: bool
+    allow_registration: bool = False
     default_username: str = ""
 
 
@@ -42,8 +43,27 @@ class InitialSetupRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
 
 
+class RegisterAccountRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=8, max_length=128)
+
+
 class AuthMeResponse(BaseModel):
     username: str
+
+
+class AccountSummary(BaseModel):
+    username: str
+
+
+class AuthAccountsResponse(BaseModel):
+    current_username: str
+    allow_registration: bool = False
+    accounts: list[AccountSummary]
+
+
+class RegistrationSettingRequest(BaseModel):
+    allow_registration: bool
 
 
 class ChangeCredentialsRequest(BaseModel):

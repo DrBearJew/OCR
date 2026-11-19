@@ -7,7 +7,7 @@ from starlette.requests import Request
 from app.api import auth as auth_api
 from app.auth import create_access_token, require_admin
 from app.config import Settings, validate_production_settings
-from app.schemas import ChangeCredentialsRequest, InitialSetupRequest, LoginRequest
+from app.schemas import ChangeCredentialsRequest, InitialSetupRequest, LoginRequest, RegisterAccountRequest, RegistrationSettingRequest
 from app.models import HookKind, HookStage, ProcessingHook
 from app.services.hooks import execute_hook
 
@@ -256,3 +256,107 @@ def test_initial_setup_and_credential_change_flow(monkeypatch, db_session) -> No
     logout_resp = Response()
     assert auth_api.logout(logout_resp, settings=settings) == {"ok": True}
     assert "dokocr_session=" in logout_resp.headers["set-cookie"]
+
+
+def test_multi_account_and_opt_in_registration(monkeypatch, db_session) -> None:
+    fake = FakeRedis()
+    monkeypatch.setattr(auth_api, "_redis", lambda settings: fake)
+    settings = Settings(
+        admin_username="admin",
+        admin_password="bootstrap-env-password",
+        secret_key="test-secret-key-for-multi-account-flow",
+        allow_initial_setup=True,
+    )
+
+    # First admin creates account
+    auth_api.initial_setup(
+        InitialSetupRequest(username="alex", password="alex-password-1"),
+        _request(),
+        Response(),
+        db=db_session,
+        settings=settings,
+    )
+
+    # Public self-registration is OFF by default
+    st = auth_api.auth_status(db=db_session, settings=settings)
+    assert st.needs_setup is False
+    assert st.allow_registration is False
+    try:
+        auth_api.register_account(
+            RegisterAccountRequest(username="sam", password="sam-password-1"),
+            _request(),
+            Response(),
+            db=db_session,
+            settings=settings,
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 403
+    else:  # pragma: no cover
+        raise AssertionError("self-registration succeeded while disabled")
+
+    # Admin creates a 2nd account directly
+    listed = auth_api.create_account(
+        RegisterAccountRequest(username="maria", password="maria-password-1"),
+        current_user="alex",
+        db=db_session,
+        settings=settings,
+    )
+    assert [a.username for a in listed.accounts] == ["alex", "maria"]
+    maria_tok = auth_api.login(
+        LoginRequest(username="maria", password="maria-password-1"),
+        _request(),
+        Response(),
+        settings=settings,
+        db=db_session,
+    )
+    assert require_admin(cookie_token=maria_tok.access_token, credentials=None, settings=settings, db=db_session) == "maria"
+
+    # Admin enables self-registration -> 3rd user registers from the Sign-in page
+    reg_on = auth_api.update_registration_setting(
+        RegistrationSettingRequest(allow_registration=True),
+        current_user="alex",
+        db=db_session,
+        settings=settings,
+    )
+    assert reg_on.allow_registration is True
+    assert auth_api.auth_status(db=db_session, settings=settings).allow_registration is True
+
+    sam_tok = auth_api.register_account(
+        RegisterAccountRequest(username="sam", password="sam-password-1"),
+        _request(),
+        Response(),
+        db=db_session,
+        settings=settings,
+    )
+    assert require_admin(cookie_token=sam_tok.access_token, credentials=None, settings=settings, db=db_session) == "sam"
+
+    # Duplicate username (case-insensitive) is rejected
+    try:
+        auth_api.register_account(
+            RegisterAccountRequest(username="SAM", password="another-password-1"),
+            _request(),
+            Response(),
+            db=db_session,
+            settings=settings,
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 409
+    else:  # pragma: no cover
+        raise AssertionError("duplicate username registration was accepted")
+
+    # Deleting self is blocked; deleting another account revokes that user's token
+    try:
+        auth_api.delete_account("alex", current_user="alex", db=db_session, settings=settings)
+    except HTTPException as exc:
+        assert exc.status_code == 400
+    else:  # pragma: no cover
+        raise AssertionError("deleting currently signed-in account was allowed")
+
+    after_del = auth_api.delete_account("sam", current_user="alex", db=db_session, settings=settings)
+    assert [a.username for a in after_del.accounts] == ["alex", "maria"]
+    try:
+        require_admin(cookie_token=sam_tok.access_token, credentials=None, settings=settings, db=db_session)
+    except HTTPException as exc:
+        assert exc.status_code == 401
+    else:  # pragma: no cover
+        raise AssertionError("deleted user token remained valid")

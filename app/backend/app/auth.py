@@ -88,29 +88,103 @@ def _session_or_none(db: Any) -> Session | None:
     return db if isinstance(db, Session) else None
 
 
-def get_stored_credentials(db: Any) -> dict[str, Any] | None:
+def get_auth_store(db: Any) -> dict[str, Any] | None:
+    """Return normalized DB auth store ({accounts, allow_registration, setup_completed}) or None."""
     session = _session_or_none(db)
     if session is None:
         return None
     row = session.get(AppSetting, ADMIN_CREDENTIALS_KEY)
     if row is None or not isinstance(row.value_json, dict):
         return None
-    username = row.value_json.get("username")
-    password_hash = row.value_json.get("password_hash")
-    if not isinstance(username, str) or not username or not isinstance(password_hash, str) or not password_hash:
+    data = row.value_json
+    accounts: list[dict[str, Any]] = []
+    raw_accounts = data.get("accounts")
+    if isinstance(raw_accounts, list):
+        for item in raw_accounts:
+            if (
+                isinstance(item, dict)
+                and isinstance(item.get("username"), str)
+                and item["username"]
+                and isinstance(item.get("password_hash"), str)
+                and item["password_hash"]
+            ):
+                accounts.append(
+                    {
+                        "username": item["username"],
+                        "password_hash": item["password_hash"],
+                        "password_version": int(item.get("password_version", 1)),
+                    }
+                )
+    elif (
+        isinstance(data.get("username"), str)
+        and data["username"]
+        and isinstance(data.get("password_hash"), str)
+        and data["password_hash"]
+    ):
+        accounts.append(
+            {
+                "username": data["username"],
+                "password_hash": data["password_hash"],
+                "password_version": int(data.get("password_version", 1)),
+            }
+        )
+    if not accounts:
         return None
-    return row.value_json
+    return {
+        "accounts": accounts,
+        "allow_registration": bool(data.get("allow_registration", False)),
+        "setup_completed": bool(data.get("setup_completed", True)),
+    }
 
 
-def get_active_admin_identity(db: Any, settings: Settings) -> tuple[str, int]:
-    stored = get_stored_credentials(db)
-    if stored is not None:
-        return str(stored["username"]), int(stored.get("password_version", 1))
-    return settings.admin_username, 0
+def ensure_auth_store(db: Session, settings: Settings) -> dict[str, Any]:
+    """Return existing DB auth store, or materialize the .env admin account into a new store dict."""
+    existing = get_auth_store(db)
+    if existing is not None:
+        return existing
+    return {
+        "accounts": [
+            {
+                "username": settings.admin_username,
+                "password_hash": hash_password(settings.admin_password),
+                "password_version": 0,
+            }
+        ],
+        "allow_registration": False,
+        "setup_completed": True,
+    }
+
+
+def save_auth_store(db: Session, store: dict[str, Any]) -> None:
+    row = db.get(AppSetting, ADMIN_CREDENTIALS_KEY)
+    payload = {
+        "accounts": list(store["accounts"]),
+        "allow_registration": bool(store.get("allow_registration", False)),
+        "setup_completed": True,
+    }
+    if row is None:
+        db.add(AppSetting(key=ADMIN_CREDENTIALS_KEY, value_json=payload))
+    else:
+        row.value_json = payload
+
+
+def find_account(accounts: list[dict[str, Any]], username: str) -> dict[str, Any] | None:
+    target = username.lower()
+    for account in accounts:
+        if account["username"].lower() == target:
+            return account
+    return None
 
 
 def is_initial_setup_needed(db: Any, settings: Settings) -> bool:
-    return bool(settings.allow_initial_setup) and get_stored_credentials(db) is None
+    return bool(settings.allow_initial_setup) and get_auth_store(db) is None
+
+
+def is_registration_allowed(db: Any, settings: Settings) -> bool:
+    store = get_auth_store(db)
+    if store is None:
+        return False
+    return bool(store.get("allow_registration", False))
 
 
 def verify_admin_credentials(
@@ -119,17 +193,27 @@ def verify_admin_credentials(
     username: str,
     password: str,
 ) -> tuple[bool, str, int]:
-    stored = get_stored_credentials(db)
-    if stored is not None:
-        expected_user = str(stored["username"])
-        expected_hash = str(stored["password_hash"])
-        pv = int(stored.get("password_version", 1))
-        user_ok = secrets.compare_digest(username, expected_user)
-        pass_ok = verify_password_hash(password, expected_hash)
-        return (user_ok and pass_ok), expected_user, pv
+    store = get_auth_store(db)
+    if store is not None:
+        for account in store["accounts"]:
+            if secrets.compare_digest(username, account["username"]):
+                if verify_password_hash(password, account["password_hash"]):
+                    return True, account["username"], int(account.get("password_version", 1))
+                return False, account["username"], int(account.get("password_version", 1))
+        return False, username, 0
     user_ok = secrets.compare_digest(username, settings.admin_username)
     pass_ok = secrets.compare_digest(password, settings.admin_password)
     return (user_ok and pass_ok), settings.admin_username, 0
+
+
+def _verify_active_identity(db: Any, settings: Settings, subject: str, token_pv: int) -> bool:
+    store = get_auth_store(db)
+    if store is not None:
+        for account in store["accounts"]:
+            if secrets.compare_digest(subject, account["username"]):
+                return token_pv == int(account.get("password_version", 1))
+        return False
+    return secrets.compare_digest(subject, settings.admin_username) and token_pv == 0
 
 
 def create_access_token(
@@ -176,7 +260,6 @@ def require_admin(
         token_pv = int(payload.get("pv", 0))
     except (JWTError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
-    active_user, active_pv = get_active_admin_identity(db, settings)
-    if subject != active_user or token_pv != active_pv:
+    if not isinstance(subject, str) or not _verify_active_identity(db, settings, subject, token_pv):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
     return subject

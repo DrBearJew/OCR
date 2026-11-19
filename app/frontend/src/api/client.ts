@@ -80,6 +80,7 @@ function extractApiError(text: string, fallback: string): string {
 const AUTH_NO_EXPIRE_PATHS = new Set([
   '/api/auth/login',
   '/api/auth/setup',
+  '/api/auth/register',
   '/api/auth/status',
   '/api/auth/logout',
   '/api/auth/change-credentials',
@@ -148,8 +149,14 @@ function searchParams(params: SearchParams) {
   return query
 }
 
-export async function getAuthStatus(): Promise<{ needs_setup: boolean; default_username: string }> {
-  return request<{ needs_setup: boolean; default_username: string }>('/api/auth/status')
+export interface AuthAccountsState {
+  current_username: string
+  allow_registration: boolean
+  accounts: { username: string }[]
+}
+
+export async function getAuthStatus(): Promise<{ needs_setup: boolean; allow_registration: boolean; default_username: string }> {
+  return request<{ needs_setup: boolean; allow_registration: boolean; default_username: string }>('/api/auth/status')
 }
 
 export async function completeInitialSetup(username: string, password: string): Promise<void> {
@@ -158,6 +165,38 @@ export async function completeInitialSetup(username: string, password: string): 
     body: JSON.stringify({ username, password }),
   })
   setToken(data.access_token)
+}
+
+export async function registerAccount(username: string, password: string): Promise<void> {
+  const data = await request<{ access_token: string }>('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  })
+  setToken(data.access_token)
+}
+
+export async function getAuthAccounts(): Promise<AuthAccountsState> {
+  return request<AuthAccountsState>('/api/auth/accounts')
+}
+
+export async function createAuthAccount(username: string, password: string): Promise<AuthAccountsState> {
+  return request<AuthAccountsState>('/api/auth/accounts', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  })
+}
+
+export async function deleteAuthAccount(username: string): Promise<AuthAccountsState> {
+  return request<AuthAccountsState>(`/api/auth/accounts/${encodeURIComponent(username)}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function setAllowRegistration(allowRegistration: boolean): Promise<AuthAccountsState> {
+  return request<AuthAccountsState>('/api/auth/registration', {
+    method: 'PATCH',
+    body: JSON.stringify({ allow_registration: allowRegistration }),
+  })
 }
 
 export async function login(username: string, password: string): Promise<void> {

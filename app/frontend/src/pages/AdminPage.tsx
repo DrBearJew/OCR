@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { RefreshCw, RotateCcw, Save, Wrench } from 'lucide-react'
-import { api, changeCredentials, getAuthMe } from '../api/client'
+import { api, changeCredentials, createAuthAccount, deleteAuthAccount, getAuthAccounts, setAllowRegistration } from '../api/client'
+import type { AuthAccountsState } from '../api/client'
 import type { Collection, Document, IngestionJob, IngestionSource, IntegrationSummary, JobInfo, ModelEndpointTestResult, ModelSetup, ProcessingHook } from '../types'
 import { useI18n } from '../i18n'
 
@@ -82,6 +83,8 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
 
   const [integrations, setIntegrations] = useState<IntegrationSummary | null>(null)
   const [collection, setCollection] = useState('Belege')
+  const [accountsState, setAccountsState] = useState<AuthAccountsState | null>(null)
+  const [newAccountForm, setNewAccountForm] = useState({ username: '', password: '' })
   const [accountForm, setAccountForm] = useState({ username: 'admin', currentPassword: '', newPassword: '', confirmPassword: '' })
   const [accountBusy, setAccountBusy] = useState(false)
   const [accountNotice, setAccountNotice] = useState<{ ok: boolean; text: string } | null>(null)
@@ -110,15 +113,16 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
         setSelectedCollectionId((prev) => prev || collectionRows[0]?.id || '')
         setSourceForm((form) => (form.collection_id || !collectionRows[0] ? form : { ...form, collection_id: collectionRows[0].id }))
       } else if (target === 'system') {
-        const [integrationStatus, collectionRows, me] = await Promise.all([
+        const [integrationStatus, collectionRows, authAccounts] = await Promise.all([
           api.integrations(force),
           collections.length ? Promise.resolve(collections) : api.collections(),
-          getAuthMe().catch(() => null),
+          getAuthAccounts().catch(() => null),
         ])
         setIntegrations(integrationStatus)
         if (!collections.length) setCollections(collectionRows)
-        if (me?.username) {
-          setAccountForm((prev) => ({ ...prev, username: me.username }))
+        if (authAccounts) {
+          setAccountsState(authAccounts)
+          setAccountForm((prev) => ({ ...prev, username: authAccounts.current_username }))
         }
       } else if (target === 'automation') {
         const [sourceRows, hookRows, collectionRows] = await Promise.all([
@@ -189,7 +193,60 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
         accountForm.newPassword
       )
       setAccountForm({ username: updated.username, currentPassword: '', newPassword: '', confirmPassword: '' })
+      const refreshed = await getAuthAccounts().catch(() => null)
+      if (refreshed) setAccountsState(refreshed)
       setAccountNotice({ ok: true, text: t('admin.accountSaved') })
+    } catch (err) {
+      setAccountNotice({ ok: false, text: err instanceof Error ? err.message : t('admin.accountSaveFailed') })
+    } finally {
+      setAccountBusy(false)
+    }
+  }
+
+  async function addAccount() {
+    setAccountNotice(null)
+    if (!newAccountForm.username.trim()) {
+      setAccountNotice({ ok: false, text: t('admin.accountUsernameRequired') })
+      return
+    }
+    if (newAccountForm.password.length < 8) {
+      setAccountNotice({ ok: false, text: t('login.setupPasswordTooShort') })
+      return
+    }
+    setAccountBusy(true)
+    try {
+      const updated = await createAuthAccount(newAccountForm.username.trim(), newAccountForm.password)
+      setAccountsState(updated)
+      setNewAccountForm({ username: '', password: '' })
+      setAccountNotice({ ok: true, text: t('admin.accountAdded') })
+    } catch (err) {
+      setAccountNotice({ ok: false, text: err instanceof Error ? err.message : t('admin.accountSaveFailed') })
+    } finally {
+      setAccountBusy(false)
+    }
+  }
+
+  async function removeAccount(username: string) {
+    setAccountNotice(null)
+    setAccountBusy(true)
+    try {
+      const updated = await deleteAuthAccount(username)
+      setAccountsState(updated)
+      setAccountNotice({ ok: true, text: t('admin.accountRemoved') })
+    } catch (err) {
+      setAccountNotice({ ok: false, text: err instanceof Error ? err.message : t('admin.accountSaveFailed') })
+    } finally {
+      setAccountBusy(false)
+    }
+  }
+
+  async function toggleSelfRegistration(enabled: boolean) {
+    setAccountNotice(null)
+    setAccountBusy(true)
+    try {
+      const updated = await setAllowRegistration(enabled)
+      setAccountsState(updated)
+      setAccountNotice({ ok: true, text: enabled ? t('admin.registrationEnabledNotice') : t('admin.registrationDisabledNotice') })
     } catch (err) {
       setAccountNotice({ ok: false, text: err instanceof Error ? err.message : t('admin.accountSaveFailed') })
     } finally {
@@ -657,11 +714,60 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
           <section className="admin-card">
             <div className="section-heading-row">
               <h2>{t('admin.accountTitle')}</h2>
-              <TechnicalPill state="info" label={accountForm.username || 'admin'} />
+              <TechnicalPill state="info" label={`${accountsState?.accounts.length ?? 1}`} />
             </div>
             <p className="muted">{t('admin.accountHint')}</p>
+
+            {accountsState && (
+              <div className="admin-list technical-list" style={{ marginBottom: '1rem' }}>
+                {accountsState.accounts.map((item) => {
+                  const isCurrent = item.username.toLowerCase() === accountsState.current_username.toLowerCase()
+                  return (
+                    <div key={item.username} className="admin-row technical-row">
+                      <strong>{item.username}</strong>
+                      <TechnicalPill state={isCurrent ? 'ok' : 'info'} label={isCurrent ? t('admin.accountCurrentBadge') : t('admin.accountMemberBadge')} />
+                      <span />
+                      {!isCurrent && (
+                        <button type="button" disabled={accountBusy} onClick={() => void removeAccount(item.username)}>
+                          {t('admin.accountRemove')}
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            <div className="admin-actions technical-actions" style={{ marginBottom: '1rem' }}>
+              <input
+                placeholder={t('admin.accountAddUsernamePlaceholder')}
+                value={newAccountForm.username}
+                onChange={(event) => setNewAccountForm({ ...newAccountForm, username: event.target.value })}
+              />
+              <input
+                type="password"
+                autoComplete="new-password"
+                placeholder={t('login.setupPasswordPlaceholder')}
+                value={newAccountForm.password}
+                onChange={(event) => setNewAccountForm({ ...newAccountForm, password: event.target.value })}
+              />
+              <button type="button" disabled={accountBusy} onClick={() => void addAccount()}>
+                {t('admin.accountAdd')}
+              </button>
+            </div>
+
+            <label className="check" style={{ marginBottom: '1.15rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <input
+                type="checkbox"
+                checked={Boolean(accountsState?.allow_registration)}
+                disabled={accountBusy}
+                onChange={(event) => void toggleSelfRegistration(event.target.checked)}
+              />
+              <span>{t('admin.allowRegistrationToggle')}</span>
+            </label>
+
             <div className="model-config-form">
-              <label>{t('login.username')}
+              <label>{t('admin.accountMyUsername')}
                 <input
                   autoComplete="username"
                   value={accountForm.username}
