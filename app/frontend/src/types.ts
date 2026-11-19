@@ -273,9 +273,13 @@ export interface ModelSetup {
   paddle_vl_model: string
   glm_base_url: string
   glm_model: string
+  openai_vision_base_url: string
+  openai_vision_model: string
+  ocr_api_key_configured?: boolean
   qwen_enabled: boolean
   qwen_base_url: string
   qwen_model: string
+  qwen_api_key_configured?: boolean
   timeout_seconds: number
   ocr_task_soft_time_limit: number
   ocr_task_time_limit: number
@@ -284,10 +288,18 @@ export interface ModelSetup {
   ocr_task_base_overhead_seconds: number
   ocr_task_paddle_vl_seconds_per_chunk: number
   ocr_task_glm_seconds_per_page: number
+  ocr_task_openai_vision_seconds_per_page?: number
   ocr_task_ppocrv6_seconds_per_page: number
   ocr_pdf_text_layer_auto_enabled: boolean
   ocr_pdf_text_layer_min_chars: number
   ocr_pdf_text_layer_min_chars_per_page: number
+}
+
+export interface ModelSetupUpdate extends ModelSetup {
+  ocr_api_key?: string
+  qwen_api_key?: string
+  clear_ocr_api_key?: boolean
+  clear_qwen_api_key?: boolean
 }
 
 export interface ModelEndpointTestResult {

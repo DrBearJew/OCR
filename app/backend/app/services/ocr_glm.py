@@ -98,7 +98,7 @@ class GLMLlamaCppOCRProvider:
             "temperature": self.settings.llm_temperature,
             "max_tokens": self.settings.llm_max_tokens,
         }
-        headers = {"Content-Type": "application/json"}
+        headers = openai_auth_headers(self.settings.ocr_api_key)
         url = llama_chat_completions_url(self.settings.glm_llamacpp_base_url)
         try:
             response = httpx.post(
@@ -139,7 +139,11 @@ class GLMLlamaCppOCRProvider:
     def _validate_multimodal_config(self) -> None:
         if not str(self.settings.glm_mmproj_path or "").strip():
             raise OCRProviderError("GLM OCR multimodal configuration error: GLM_MMPROJ_PATH is empty")
-        model_ids = list_llama_model_ids(self.settings.glm_llamacpp_base_url, timeout_s=5.0)
+        model_ids = list_llama_model_ids(
+            self.settings.glm_llamacpp_base_url,
+            timeout_s=5.0,
+            api_key=self.settings.ocr_api_key,
+        )
         configured_names = {self.settings.glm_model_name}
         path = Path(self.settings.glm_model_path)
         if path.suffix.lower() == ".gguf":
@@ -202,7 +206,7 @@ class PaddleVLLlamaCppOCRProvider:
         }
         if ik:
             payload.update(repeat_penalty=1.0, seed=42, cache_prompt=False)
-        headers = {"Content-Type": "application/json"}
+        headers = openai_auth_headers(self.settings.ocr_api_key)
         url = llama_chat_completions_url(self.settings.paddle_vl_llamacpp_base_url)
         try:
             response = httpx.post(
@@ -277,7 +281,7 @@ class PaddleVLLlamaCppOCRProvider:
             "max_tokens": min(int(self.settings.llm_max_tokens), 2048),
             "early_stop_ratio": 0.0,
         }
-        headers = {"Content-Type": "application/json"}
+        headers = openai_auth_headers(self.settings.ocr_api_key)
         url = llama_ocr_batch_url(self.settings.paddle_vl_llamacpp_base_url)
         try:
             response = httpx.post(
@@ -334,7 +338,11 @@ class PaddleVLLlamaCppOCRProvider:
     def _validate_multimodal_config(self) -> None:
         if not str(self.settings.paddle_vl_mmproj_path or "").strip():
             raise OCRProviderError("PaddleOCR-VL multimodal configuration error: PADDLE_VL_MMPROJ_PATH is empty")
-        model_ids = list_llama_model_ids(self.settings.paddle_vl_llamacpp_base_url, timeout_s=5.0)
+        model_ids = list_llama_model_ids(
+            self.settings.paddle_vl_llamacpp_base_url,
+            timeout_s=5.0,
+            api_key=self.settings.ocr_api_key,
+        )
         configured_names = {self.settings.paddle_vl_model_name}
         path = Path(self.settings.paddle_vl_model_path)
         if path.suffix.lower() == ".gguf":
@@ -779,9 +787,23 @@ def unload_remote_model(base_url: str, model_name: str, *, timeout_s: float = 10
     return False
 
 
-def list_llama_model_ids(base_url: str, *, timeout_s: float = 5.0) -> list[str]:
+def openai_auth_headers(api_key: str | None = None, *, content_type: bool = True) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    if content_type:
+        headers["Content-Type"] = "application/json"
+    token = str(api_key or "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def list_llama_model_ids(base_url: str, *, timeout_s: float = 5.0, api_key: str | None = None) -> list[str]:
     try:
-        response = httpx.get(llama_models_url(base_url), timeout=timeout_s)
+        headers = openai_auth_headers(api_key, content_type=False)
+        kwargs: dict[str, object] = {"timeout": timeout_s}
+        if headers:
+            kwargs["headers"] = headers
+        response = httpx.get(llama_models_url(base_url), **kwargs)
         response.raise_for_status()
         payload = response.json()
     except Exception:  # noqa: BLE001
@@ -796,6 +818,103 @@ def list_llama_model_ids(base_url: str, *, timeout_s: float = 5.0) -> list[str]:
     return ids
 
 
+class OpenAIVisionOCRProvider:
+    """Generic OpenAI-compatible multimodal OCR adapter (LM Studio, llama.cpp, Ollama, vLLM)."""
+
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        prompt_loader: PromptLoader | None = None,
+    ) -> None:
+        self.settings = settings or get_settings()
+        self.prompt_loader = prompt_loader or PromptLoader(settings=self.settings)
+
+    def _resolve_model_name(self) -> str:
+        base_url = str(self.settings.openai_vision_base_url or "").strip()
+        if not base_url:
+            raise OCRProviderError("External vision OCR base URL is empty")
+        configured = str(self.settings.openai_vision_model_name or "").strip()
+        model_ids = list_llama_model_ids(base_url, timeout_s=5.0, api_key=self.settings.ocr_api_key)
+        if not configured or configured.lower() == "auto":
+            if model_ids:
+                return model_ids[0]
+            raise OCRProviderError(
+                "External vision OCR model is set to auto/empty and /v1/models returned no models"
+            )
+        if model_ids and configured not in model_ids:
+            raise OCRProviderError(
+                "External vision OCR model configuration error: "
+                f"configured model '{configured}' is not in /v1/models ({', '.join(model_ids)})"
+            )
+        return configured
+
+    def extract_text(self, file_path: str) -> OCRResult:
+        path = Path(file_path)
+        if not path.exists():
+            raise OCRProviderError(f"File not found: {file_path}")
+        model_name = self._resolve_model_name()
+        prompt = self.prompt_loader.render("ocr_prompt.tmpl")
+        mime_type, data = _image_data_for_llama(path)
+        payload = {
+            "model": model_name,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt.text},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime_type};base64,{data}"},
+                        },
+                    ],
+                }
+            ],
+            "temperature": self.settings.llm_temperature,
+            "max_tokens": min(int(self.settings.llm_max_tokens), 4096),
+        }
+        headers = openai_auth_headers(self.settings.ocr_api_key)
+        url = llama_chat_completions_url(self.settings.openai_vision_base_url)
+        try:
+            response = httpx.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=self.settings.llm_request_timeout_seconds,
+            )
+            response.raise_for_status()
+            raw = response.json()
+        except httpx.TimeoutException as exc:
+            raise OCRProviderError(
+                f"External vision OCR request timed out after {self.settings.llm_request_timeout_seconds}s"
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            raise OCRProviderError(
+                f"External vision OCR request failed with HTTP {exc.response.status_code}: {exc.response.text[:500]}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise OCRProviderError(f"External vision OCR request failed: {exc}") from exc
+        except ValueError as exc:
+            raise OCRProviderError("External vision OCR returned invalid JSON") from exc
+
+        choices = raw.get("choices") or []
+        if not choices:
+            raise OCRProviderError("External vision OCR returned no choices")
+        message = choices[0].get("message") or {}
+        text = str(message.get("content") or "").strip()
+        if not text:
+            raise OCRProviderError("External vision OCR returned empty text")
+        return OCRResult(
+            text=text,
+            raw_response={"provider": "openai_vision", "raw": raw},
+            prompt_name=prompt.name,
+            prompt_version=prompt.version,
+            model_role="openai_vision_ocr",
+            model_endpoint=self.settings.openai_vision_base_url,
+            model_name=model_name,
+            model_response_text=text,
+        )
+
+
 def build_ocr_provider(settings: Settings | None = None, provider_name: str | None = None) -> OCRProvider:
     settings = settings or get_settings()
     selected = provider_name or settings.ocr_provider
@@ -803,6 +922,8 @@ def build_ocr_provider(settings: Settings | None = None, provider_name: str | No
         return GLMLlamaCppOCRProvider(settings)
     if selected == "paddle_vl":
         return PaddleVLLlamaCppOCRProvider(settings)
+    if selected == "openai_vision":
+        return OpenAIVisionOCRProvider(settings)
     if selected == "ppocrv6":
         return PPOCRv6Provider(settings)
     return FakeOCRProvider()

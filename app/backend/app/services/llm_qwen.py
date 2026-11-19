@@ -10,7 +10,7 @@ import httpx
 
 from app.config import Settings, get_settings
 from app.services.model_gateway_lock import ModelGatewayLockTimeout, exclusive_model_gateway_lock
-from app.services.ocr_glm import llama_chat_completions_url, llama_health_urls
+from app.services.ocr_glm import list_llama_model_ids, llama_chat_completions_url, llama_health_urls, openai_auth_headers
 from app.services.prompt_loader import PromptLoader, RenderedPrompt
 
 
@@ -65,14 +65,33 @@ class QwenLlamaCppProvider:
         self.prompt_loader = prompt_loader or PromptLoader(settings=self.settings)
 
     def is_reachable(self) -> bool:
+        headers = openai_auth_headers(self.settings.qwen_api_key, content_type=False)
+        kwargs: dict[str, Any] = {"timeout": min(3.0, self.settings.llm_request_timeout_seconds)}
+        if headers:
+            kwargs["headers"] = headers
         for url in llama_health_urls(self.settings.qwen_llamacpp_base_url):
             try:
-                response = httpx.get(url, timeout=min(3.0, self.settings.llm_request_timeout_seconds))
-                if response.status_code < 500:
+                response = httpx.get(url, **kwargs)
+                if 200 <= response.status_code < 400:
                     return True
+                if response.status_code in {401, 403}:
+                    return False
             except httpx.HTTPError:
                 continue
         return False
+
+    def _resolve_model_name(self) -> str:
+        configured = str(self.settings.qwen_model_name or "").strip()
+        if configured and configured.lower() != "auto":
+            return configured
+        model_ids = list_llama_model_ids(
+            self.settings.qwen_llamacpp_base_url,
+            timeout_s=min(5.0, self.settings.llm_request_timeout_seconds),
+            api_key=self.settings.qwen_api_key,
+        )
+        if model_ids:
+            return model_ids[0]
+        return configured or "metadata"
 
     def refine_metadata(self, payload: dict[str, Any]) -> QwenRefinement:
         prompt = self.prompt_loader.render(
@@ -183,8 +202,9 @@ class QwenLlamaCppProvider:
             # Preserve the production metadata default. Zero-temperature
             # Gemma/Qwen metadata calls were more prone to empty/rigid answers.
             temperature = 0.1
+        model_name = self._resolve_model_name()
         body = {
-            "model": self.settings.qwen_model_name,
+            "model": model_name,
             "messages": [
                 {"role": "system", "content": self._system_prompt(json_only=json_only)},
                 {"role": "user", "content": prompt.text},
@@ -234,8 +254,14 @@ class QwenLlamaCppProvider:
                     retry_body = {**body, "messages": retry_messages}
                     raw = self._post_chat(url, retry_body)
         except httpx.HTTPStatusError as exc:
-            if json_only and body.get("response_format") and exc.response.status_code in {400, 422}:
-                fallback_body = {key: value for key, value in body.items() if key != "response_format"}
+            if exc.response.status_code in {400, 422} and (
+                (json_only and body.get("response_format")) or "chat_template_kwargs" in body
+            ):
+                fallback_body = {
+                    key: value
+                    for key, value in body.items()
+                    if key not in {"response_format", "chat_template_kwargs"}
+                }
                 try:
                     with exclusive_model_gateway_lock(
                         "qwen:metadata",
@@ -260,13 +286,13 @@ class QwenLlamaCppProvider:
             raise QwenProviderError(f"Qwen model gateway lock timeout: {exc}") from exc
 
         text = _chat_content(raw)
-        logger.info("Qwen %s completed prompt=%s model=%s", role_name, prompt.name, self.settings.qwen_model_name)
+        logger.info("Qwen %s completed prompt=%s model=%s", role_name, prompt.name, model_name)
         return QwenRefinement(
             raw_text=text,
             raw_response=raw,
             prompt=prompt,
             endpoint=self.settings.qwen_llamacpp_base_url,
-            model=self.settings.qwen_model_name,
+            model=model_name,
         )
 
     def _system_prompt(self, *, json_only: bool) -> str:
@@ -280,11 +306,10 @@ class QwenLlamaCppProvider:
         return max(configured, 240.0) if self.settings.qwen_metadata_thinking_enabled else configured
 
     def _post_chat(self, url: str, body: dict[str, Any]) -> dict[str, Any]:
-        response = httpx.post(
-            url,
-            json=body,
-            timeout=self._request_timeout(),
-        )
+        kwargs: dict[str, Any] = {"json": body, "timeout": self._request_timeout()}
+        if str(self.settings.qwen_api_key or "").strip():
+            kwargs["headers"] = openai_auth_headers(self.settings.qwen_api_key)
+        response = httpx.post(url, **kwargs)
         response.raise_for_status()
         return response.json()
 

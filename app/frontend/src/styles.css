@@ -1079,6 +1079,53 @@ pre {
   align-items: end;
 }
 
+.admin-preset-row,
+.detected-models-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.9rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.detected-models-row {
+  margin-top: 0.45rem;
+  margin-bottom: 0;
+}
+
+.preset-chip {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.preset-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.api-key-input-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.api-key-input-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.endpoint-test-result {
+  margin-top: 0.5rem;
+}
+
 .admin-advanced {
   margin-top: 0.85rem;
   border: 1px solid var(--border);

@@ -92,8 +92,8 @@ def update_model_setup(payload: ModelSetupWrite, db: Session = Depends(get_db)) 
 
 
 @router.post("/model-setup/test", response_model=ModelEndpointTestResult)
-def test_model_setup_endpoint(payload: ModelEndpointTestPayload) -> ModelEndpointTestResult:
-    return ModelEndpointTestResult(**check_model_endpoint(payload.model_dump()))
+def test_model_setup_endpoint(payload: ModelEndpointTestPayload, db: Session = Depends(get_db)) -> ModelEndpointTestResult:
+    return ModelEndpointTestResult(**check_model_endpoint(payload.model_dump(), db=db))
 
 
 @router.post("/reconcile", response_model=AdminActionResult)

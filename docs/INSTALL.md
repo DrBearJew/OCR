@@ -70,10 +70,15 @@ bash install-docker.sh --metadata-runtime cuda
 # AMD or Intel GPU via Linux Vulkan (/dev/dri)
 bash install-docker.sh --metadata-runtime vulkan
 
-# Existing OpenAI-compatible server
+# Existing OpenAI-compatible server for metadata (LM Studio, llama-server, Ollama, vLLM)
 bash install-docker.sh --metadata-runtime external \
-  --metadata-url http://inference.example.local:8080/v1 \
-  --metadata-model metadata
+  --metadata-url http://host.docker.internal:1234/v1 \
+  --metadata-model auto
+
+# Use an external vision model for OCR too (e.g., LM Studio / llama-server / Ollama)
+bash install-docker.sh \
+  --ocr-runtime external --ocr-url http://host.docker.internal:1234/v1 --ocr-model auto \
+  --metadata-runtime external --metadata-url http://host.docker.internal:1234/v1 --metadata-model auto
 ```
 
 All local metadata modes share the same Docker model volume, so switching between CPU, CUDA, and Vulkan reuses the downloaded weights.
@@ -88,7 +93,7 @@ Pass `--metadata` on subsequent runs to re-enable your saved runtime, or `--no-m
   - `DOKOCR_METADATA_GPU_LAYERS=<N>` — replaces `--fit` with an explicit layer count.
   - `DOKOCR_METADATA_DEVICES=<list>` — passed to `--device` (e.g. `CUDA0` or `Vulkan0`).
   - `CUDA_VISIBLE_DEVICES` / `GGML_VK_VISIBLE_DEVICES` — limits which physical GPUs the container sees (e.g. `GGML_VK_VISIBLE_DEVICES=1` exposes physical GPU 1 as `Vulkan0`).
-- **External servers:** Your server must accept OpenAI-compatible chat completions with JSON schema without requiring an API key. Inside Docker, `localhost` refers to the container itself—use a LAN hostname or `host.docker.internal` for a server running on the Docker host.
+- **External servers (LM Studio, `llama-server`, Ollama, vLLM):** Pass `--ocr-runtime external` for multimodal vision OCR and/or `--metadata-runtime external` for metadata extraction. Use `--ocr-model auto` / `--metadata-model auto` to pick the first served model from `/v1/models`, and add `--ocr-api-key` / `--metadata-api-key` if your endpoint requires a Bearer token. Inside Docker, `localhost` refers to the container itself—use a LAN hostname or `host.docker.internal` (already mapped to `host-gateway` in `compose.yml`) for servers running on the Docker host. You can also switch presets and click detected models directly in **Admin → Models**.
 
 > [!NOTE]
 > If you have already saved custom model endpoints in **Admin → Model Setup**, those UI settings take priority over `.env`. Update them in the Admin UI when switching endpoints.
@@ -100,10 +105,15 @@ Run `bash install-docker.sh --help` to see all flags.
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--directory PATH` | `./dokocr` | Target install directory. |
+| `--ocr-runtime MODE` | `local` | OCR runtime: `local` (PP-OCRv6 CPU) or `external` (OpenAI-compatible vision OCR). |
+| `--ocr-url URL` | — | Base URL for `--ocr-runtime external` (HTTP/HTTPS, no embedded credentials or query string). |
+| `--ocr-model NAME` | `auto` | Model ID sent to an external vision OCR server (`auto` picks the first model from `/v1/models`). |
+| `--ocr-api-key KEY` | — | Optional Bearer API key for the external OCR server (stored in `.env` with `0600` permissions). |
 | `--metadata` / `--no-metadata` | Off | Enable your saved metadata runtime (CPU on a fresh install) or disable metadata. |
 | `--metadata-runtime MODE` | — | Enable and save a runtime: `unified`, `cpu`, `cuda`, `vulkan`, or `external`. |
 | `--metadata-url URL` | — | Base URL for `external` mode (HTTP/HTTPS, no embedded credentials or query string). |
-| `--metadata-model NAME` | `metadata` | Model ID sent to an `external` server. |
+| `--metadata-model NAME` | `metadata` | Model ID sent to an `external` server (or `auto` to pick from `/v1/models`). |
+| `--metadata-api-key KEY` | — | Optional Bearer API key for the external metadata server (stored in `.env` with `0600` permissions). |
 | `--image-tag TAG` | `main` | Image tag and matching repository ref for Compose files. |
 | `--bind IPv4` | `127.0.0.1` | Host IP to bind the web UI and API ports. |
 | `--port PORT` | `3001` | Host port for the web UI. |

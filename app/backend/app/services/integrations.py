@@ -14,7 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.services.ocr_glm import list_llama_model_ids, llama_health_urls
+from app.services.ocr_glm import list_llama_model_ids, llama_health_urls, openai_auth_headers
 from app.services.model_setup import settings_with_model_setup
 
 
@@ -66,12 +66,14 @@ def check_llama(
     timeout_s: float,
     health_cache: dict[str, tuple[bool, str, int | None, int]] | None = None,
     cache_lock: threading.Lock | None = None,
+    api_key: str | None = None,
 ) -> IntegrationStatus:
     start = time.perf_counter()
     normalized_url = (base_url or "").strip().rstrip("/")
+    cache_key = f"{normalized_url}|{'auth' if (api_key or '').strip() else 'anon'}"
     if health_cache is not None and normalized_url:
         with cache_lock or threading.Lock():
-            cached = health_cache.get(normalized_url)
+            cached = health_cache.get(cache_key)
         if cached is not None:
             ok, detail, status_code, latency_ms = cached
             meta: dict[str, Any] = {"base_url": base_url, "model": model}
@@ -79,16 +81,20 @@ def check_llama(
                 meta["status_code"] = status_code
             return IntegrationStatus(name, ok, detail, latency_ms, meta)
 
+    headers = openai_auth_headers(api_key, content_type=False)
+    get_kwargs: dict[str, Any] = {"timeout": min(5.0, timeout_s)}
+    if headers:
+        get_kwargs["headers"] = headers
     last_error = "not checked"
     for url in llama_health_urls(base_url):
         try:
-            response = httpx.get(url, timeout=min(5.0, timeout_s))
-            if response.status_code < 500:
+            response = httpx.get(url, **get_kwargs)
+            if 200 <= response.status_code < 400:
                 latency = _elapsed_ms(start)
                 detail = f"reachable via {url}"
                 if health_cache is not None and normalized_url:
                     with cache_lock or threading.Lock():
-                        health_cache[normalized_url] = (True, detail, response.status_code, latency)
+                        health_cache[cache_key] = (True, detail, response.status_code, latency)
                 return IntegrationStatus(
                     name,
                     True,
@@ -96,13 +102,16 @@ def check_llama(
                     latency,
                     {"base_url": base_url, "model": model, "status_code": response.status_code},
                 )
+            if response.status_code in {401, 403}:
+                last_error = f"Authentication failed (HTTP {response.status_code}) at {url}"
+                break
             last_error = f"HTTP {response.status_code} from {url}"
         except httpx.HTTPError as exc:
             last_error = str(exc)
     latency = _elapsed_ms(start)
     if health_cache is not None and normalized_url:
         with cache_lock or threading.Lock():
-            health_cache[normalized_url] = (False, last_error, None, latency)
+            health_cache[cache_key] = (False, last_error, None, latency)
     return IntegrationStatus(name, False, last_error, latency, {"base_url": base_url, "model": model})
 
 
@@ -111,17 +120,19 @@ def _cached_model_ids(
     timeout_s: float,
     models_cache: dict[str, list[str]] | None = None,
     cache_lock: threading.Lock | None = None,
+    api_key: str | None = None,
 ) -> list[str]:
     normalized_url = (base_url or "").strip().rstrip("/")
+    cache_key = f"{normalized_url}|{'auth' if (api_key or '').strip() else 'anon'}"
     if models_cache is not None and normalized_url:
         with cache_lock or threading.Lock():
-            cached = models_cache.get(normalized_url)
+            cached = models_cache.get(cache_key)
         if cached is not None:
             return list(cached)
-    model_ids = list_llama_model_ids(base_url, timeout_s=timeout_s)
+    model_ids = list_llama_model_ids(base_url, timeout_s=timeout_s, api_key=api_key)
     if models_cache is not None and normalized_url:
         with cache_lock or threading.Lock():
-            models_cache[normalized_url] = list(model_ids)
+            models_cache[cache_key] = list(model_ids)
     return model_ids
 
 
@@ -144,6 +155,7 @@ def check_glm_multimodal(
         timeout_s=min(5.0, settings.llm_request_timeout_seconds),
         models_cache=models_cache,
         cache_lock=cache_lock,
+        api_key=settings.ocr_api_key,
     )
     metadata["available_models"] = model_ids
     configured_names = {settings.glm_model_name}
@@ -180,6 +192,7 @@ def check_paddle_vl_multimodal(
         timeout_s=min(5.0, settings.llm_request_timeout_seconds),
         models_cache=models_cache,
         cache_lock=cache_lock,
+        api_key=settings.ocr_api_key,
     )
     metadata["available_models"] = model_ids
     configured_names = {settings.paddle_vl_model_name}
@@ -246,6 +259,7 @@ def collect_integrations(db: Session, settings: Settings | None = None) -> dict[
             settings.llm_request_timeout_seconds,
             health_cache,
             cache_lock,
+            api_key=settings.ocr_api_key,
         )
         paddle_mm = check_paddle_vl_multimodal(settings, models_cache, cache_lock)
         glm_llama = check_llama(
@@ -255,6 +269,7 @@ def collect_integrations(db: Session, settings: Settings | None = None) -> dict[
             settings.llm_request_timeout_seconds,
             health_cache,
             cache_lock,
+            api_key=settings.ocr_api_key,
         )
         glm_mm = check_glm_multimodal(settings, models_cache, cache_lock)
         qwen_llama = check_llama(
@@ -264,6 +279,7 @@ def collect_integrations(db: Session, settings: Settings | None = None) -> dict[
             settings.llm_request_timeout_seconds,
             health_cache,
             cache_lock,
+            api_key=settings.qwen_api_key,
         )
         return paddle_llama, paddle_mm, glm_llama, glm_mm, qwen_llama
 
@@ -285,6 +301,17 @@ def collect_integrations(db: Session, settings: Settings | None = None) -> dict[
         qwen_llama,
         workers_status,
     ]
+    if settings.ocr_provider == "openai_vision":
+        openai_vision_status = check_llama(
+            "openai_vision_ocr",
+            settings.openai_vision_base_url,
+            settings.openai_vision_model_name or "auto",
+            settings.llm_request_timeout_seconds,
+            health_cache,
+            cache_lock,
+            api_key=settings.ocr_api_key,
+        )
+        statuses.insert(2, openai_vision_status)
     return {
         "ok": all(item.ok for item in statuses[:2]),
         "integrations": [item.as_dict() for item in statuses],

@@ -27,6 +27,12 @@ const defaultModelForm: ModelFormState = {
 }
 
 const DOKOCR_LLAMA_SWAP_URL = 'http://model-runtime:8092/v1'
+const ENGINE_PRESETS = [
+  { id: 'lmstudio', label: 'LM Studio (:1234)', url: 'http://host.docker.internal:1234/v1', provider: 'openai_vision' as const, model: 'auto' },
+  { id: 'llamacpp', label: 'llama.cpp (:8080)', url: 'http://host.docker.internal:8080/v1', provider: 'openai_vision' as const, model: 'auto' },
+  { id: 'ollama', label: 'Ollama (:11434)', url: 'http://host.docker.internal:11434/v1', provider: 'openai_vision' as const, model: 'auto' },
+  { id: 'internal', label: 'Internal (:8092)', url: DOKOCR_LLAMA_SWAP_URL, provider: 'paddle_vl' as const, model: 'paddleocr-vl' },
+]
 
 const defaultRuntimeSetup: ModelSetup = {
   mode: 'smart',
@@ -35,9 +41,13 @@ const defaultRuntimeSetup: ModelSetup = {
   paddle_vl_model: 'paddleocr-vl',
   glm_base_url: DOKOCR_LLAMA_SWAP_URL,
   glm_model: 'glm',
+  openai_vision_base_url: 'http://host.docker.internal:1234/v1',
+  openai_vision_model: 'auto',
+  ocr_api_key_configured: false,
   qwen_enabled: true,
   qwen_base_url: DOKOCR_LLAMA_SWAP_URL,
   qwen_model: 'metadata',
+  qwen_api_key_configured: false,
   timeout_seconds: 120,
   ocr_task_soft_time_limit: 600,
   ocr_task_time_limit: 660,
@@ -46,6 +56,7 @@ const defaultRuntimeSetup: ModelSetup = {
   ocr_task_base_overhead_seconds: 300,
   ocr_task_paddle_vl_seconds_per_chunk: 180,
   ocr_task_glm_seconds_per_page: 180,
+  ocr_task_openai_vision_seconds_per_page: 120,
   ocr_task_ppocrv6_seconds_per_page: 30,
   ocr_pdf_text_layer_auto_enabled: true,
   ocr_pdf_text_layer_min_chars: 80,
@@ -58,6 +69,11 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
   const [loading, setLoading] = useState(false)
 
   const [runtimeSetup, setRuntimeSetup] = useState<ModelSetup>(defaultRuntimeSetup)
+  const [ocrApiKeyInput, setOcrApiKeyInput] = useState('')
+  const [qwenApiKeyInput, setQwenApiKeyInput] = useState('')
+  const [clearOcrApiKey, setClearOcrApiKey] = useState(false)
+  const [clearQwenApiKey, setClearQwenApiKey] = useState(false)
+  const [endpointTestTarget, setEndpointTestTarget] = useState<'paddle' | 'glm' | 'openai_vision' | 'qwen' | null>(null)
   const [collections, setCollections] = useState<Collection[]>([])
   const [selectedCollectionId, setSelectedCollectionId] = useState('')
   const [modelForm, setModelForm] = useState<ModelFormState>(defaultModelForm)
@@ -159,9 +175,17 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
     try {
       const saved = await api.saveModelSetup({
         ...runtimeSetup,
-        qwen_enabled: Boolean(runtimeSetup.qwen_base_url.trim() && runtimeSetup.qwen_model.trim())
+        qwen_enabled: Boolean(runtimeSetup.qwen_base_url.trim() && runtimeSetup.qwen_model.trim()),
+        ocr_api_key: ocrApiKeyInput.trim() || undefined,
+        qwen_api_key: qwenApiKeyInput.trim() || undefined,
+        clear_ocr_api_key: clearOcrApiKey,
+        clear_qwen_api_key: clearQwenApiKey
       })
       setRuntimeSetup(saved)
+      setOcrApiKeyInput('')
+      setQwenApiKeyInput('')
+      setClearOcrApiKey(false)
+      setClearQwenApiKey(false)
       setMessage(t('admin.modelSetupSaved'))
     } catch (err) {
       setError(err instanceof Error ? err.message : t('admin.modelSetupSaveFailed'))
@@ -170,29 +194,81 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
     }
   }
 
-  function useInternalGatewayPreset() {
-    setRuntimeSetup({
-      ...runtimeSetup,
-      mode: 'smart',
-      ocr_provider: runtimeSetup.ocr_provider === 'fake' ? 'paddle_vl' : runtimeSetup.ocr_provider,
-      paddle_vl_base_url: DOKOCR_LLAMA_SWAP_URL,
-      glm_base_url: DOKOCR_LLAMA_SWAP_URL,
-      qwen_base_url: DOKOCR_LLAMA_SWAP_URL
-    })
+  function applyEnginePreset(preset: typeof ENGINE_PRESETS[number]) {
+    if (preset.id === 'internal') {
+      setRuntimeSetup({
+        ...runtimeSetup,
+        mode: 'smart',
+        ocr_provider: runtimeSetup.ocr_provider === 'fake' || runtimeSetup.ocr_provider === 'openai_vision' ? 'paddle_vl' : runtimeSetup.ocr_provider,
+        paddle_vl_base_url: DOKOCR_LLAMA_SWAP_URL,
+        glm_base_url: DOKOCR_LLAMA_SWAP_URL,
+        qwen_base_url: DOKOCR_LLAMA_SWAP_URL,
+        qwen_model: 'metadata'
+      })
+    } else {
+      setRuntimeSetup({
+        ...runtimeSetup,
+        mode: 'smart',
+        ocr_provider: 'openai_vision',
+        openai_vision_base_url: preset.url,
+        openai_vision_model: preset.model,
+        qwen_enabled: true,
+        qwen_base_url: preset.url,
+        qwen_model: preset.model
+      })
+    }
     setEndpointTest(null)
+    setEndpointTestTarget(null)
   }
 
-  async function testRuntimeEndpoint(kind: 'paddle' | 'glm' | 'qwen') {
-    const base_url = kind === 'glm' ? runtimeSetup.glm_base_url : kind === 'qwen' ? runtimeSetup.qwen_base_url : runtimeSetup.paddle_vl_base_url
-    const model = kind === 'glm' ? runtimeSetup.glm_model : kind === 'qwen' ? runtimeSetup.qwen_model : runtimeSetup.paddle_vl_model
+  function useInternalGatewayPreset() {
+    applyEnginePreset(ENGINE_PRESETS[3])
+  }
+
+  async function testRuntimeEndpoint(kind: 'paddle' | 'glm' | 'openai_vision' | 'qwen') {
+    const base_url = kind === 'glm'
+      ? runtimeSetup.glm_base_url
+      : kind === 'qwen'
+        ? runtimeSetup.qwen_base_url
+        : kind === 'openai_vision'
+          ? runtimeSetup.openai_vision_base_url
+          : runtimeSetup.paddle_vl_base_url
+    const model = kind === 'glm'
+      ? runtimeSetup.glm_model
+      : kind === 'qwen'
+        ? runtimeSetup.qwen_model
+        : kind === 'openai_vision'
+          ? runtimeSetup.openai_vision_model
+          : runtimeSetup.paddle_vl_model
+    const api_key = kind === 'qwen' ? qwenApiKeyInput.trim() : ocrApiKeyInput.trim()
+    const use_saved_key_for = !api_key ? (kind === 'qwen' ? 'qwen' : 'ocr') : undefined
     setSetupBusy(true)
     setEndpointTest(null)
+    setEndpointTestTarget(kind)
     try {
-      setEndpointTest(await api.testModelEndpoint({ base_url, model, timeout_seconds: runtimeSetup.timeout_seconds }))
+      setEndpointTest(await api.testModelEndpoint({
+        base_url,
+        model,
+        timeout_seconds: runtimeSetup.timeout_seconds,
+        api_key: api_key || undefined,
+        use_saved_key_for
+      }))
     } catch (err) {
       setEndpointTest({ ok: false, detail: err instanceof Error ? err.message : t('admin.endpointTestFailed'), available_models: [] })
     } finally {
       setSetupBusy(false)
+    }
+  }
+
+  function selectDetectedModel(modelId: string) {
+    if (endpointTestTarget === 'qwen') {
+      setRuntimeSetup({ ...runtimeSetup, qwen_model: modelId, qwen_enabled: true })
+    } else if (endpointTestTarget === 'openai_vision') {
+      setRuntimeSetup({ ...runtimeSetup, openai_vision_model: modelId })
+    } else if (endpointTestTarget === 'glm') {
+      setRuntimeSetup({ ...runtimeSetup, glm_model: modelId })
+    } else {
+      setRuntimeSetup({ ...runtimeSetup, paddle_vl_model: modelId })
     }
   }
 
@@ -295,11 +371,20 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
               <TechnicalPill state={runtimeSetup.ocr_provider === 'fake' ? 'info' : 'ok'} label={providerLabel(runtimeSetup.ocr_provider, t)} />
             </div>
 
+            <div className="admin-preset-row">
+              <span className="admin-preset-label">{t('admin.enginePresets', 'Quick setup')}:</span>
+              {ENGINE_PRESETS.map((preset) => (
+                <button key={preset.id} type="button" className="preset-chip" disabled={setupBusy} onClick={() => applyEnginePreset(preset)}>
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+
             <div className="admin-form-grid">
               <label>{t('admin.setupMode')}
                 <select value={runtimeSetup.mode} onChange={(event) => {
                   const mode = event.target.value
-                  const provider = mode === 'local' ? 'ppocrv6' : mode === 'smart' ? 'paddle_vl' : 'fake'
+                  const provider = mode === 'local' ? 'ppocrv6' : mode === 'smart' ? (runtimeSetup.ocr_provider === 'openai_vision' ? 'openai_vision' : 'paddle_vl') : 'fake'
                   setRuntimeSetup({ ...runtimeSetup, mode, ocr_provider: provider })
                 }}>
                   <option value="fake">{t('admin.modeFake')}</option>
@@ -310,22 +395,36 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
               <label>{t('admin.defaultOcrProvider')}
                 <select value={runtimeSetup.ocr_provider} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, ocr_provider: event.target.value })}>
                   <option value="paddle_vl">{t('admin.providerOptionSmart')}</option>
+                  <option value="openai_vision">{t('admin.providerOptionOpenAIVision', 'External Vision (LM Studio / llama.cpp / Ollama)')}</option>
                   <option value="ppocrv6">{t('admin.providerOptionLocal')}</option>
                   <option value="glm">{t('admin.providerOptionSecondary')}</option>
                   <option value="fake">{t('admin.providerOptionFake')}</option>
                 </select>
               </label>
-              <label>{t('admin.paddleBaseUrl')}
-                <input value={runtimeSetup.paddle_vl_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, paddle_vl_base_url: event.target.value })} placeholder={DOKOCR_LLAMA_SWAP_URL} />
-              </label>
-              <label>{t('admin.paddleModel')}
-                <input value={runtimeSetup.paddle_vl_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, paddle_vl_model: event.target.value })} placeholder="paddleocr-vl" />
-              </label>
+              {runtimeSetup.ocr_provider === 'openai_vision' ? (
+                <>
+                  <label>{t('admin.openaiVisionBaseUrl', 'External vision OCR endpoint')}
+                    <input value={runtimeSetup.openai_vision_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, openai_vision_base_url: event.target.value })} placeholder="http://host.docker.internal:1234/v1" />
+                  </label>
+                  <label>{t('admin.openaiVisionModel', 'External vision model ID')}
+                    <input value={runtimeSetup.openai_vision_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, openai_vision_model: event.target.value })} placeholder="auto" />
+                  </label>
+                </>
+              ) : (
+                <>
+                  <label>{t('admin.paddleBaseUrl')}
+                    <input value={runtimeSetup.paddle_vl_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, paddle_vl_base_url: event.target.value })} placeholder={DOKOCR_LLAMA_SWAP_URL} />
+                  </label>
+                  <label>{t('admin.paddleModel')}
+                    <input value={runtimeSetup.paddle_vl_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, paddle_vl_model: event.target.value })} placeholder="paddleocr-vl" />
+                  </label>
+                </>
+              )}
               <label>{t('admin.qwenBaseUrl')}
                 <input value={runtimeSetup.qwen_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_base_url: event.target.value })} placeholder={DOKOCR_LLAMA_SWAP_URL} />
               </label>
               <label>{t('admin.qwenModel')}
-                <input value={runtimeSetup.qwen_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_model: event.target.value })} placeholder="metadata" />
+                <input value={runtimeSetup.qwen_model} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, qwen_model: event.target.value })} placeholder="auto" />
               </label>
               <label>{t('admin.timeoutSeconds')}
                 <input type="number" min="5" value={runtimeSetup.timeout_seconds} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, timeout_seconds: Number(event.target.value) || 120 })} />
@@ -336,6 +435,34 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
               <summary>{t('admin.advanced', 'Advanced')}</summary>
               <div className="admin-advanced-body">
                 <div className="admin-form-grid">
+                  <label>{t('admin.ocrApiKey', 'OCR Bearer API key (optional)')}
+                    <div className="api-key-input-row">
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        value={ocrApiKeyInput}
+                        onChange={(event) => { setOcrApiKeyInput(event.target.value); setClearOcrApiKey(false) }}
+                        placeholder={runtimeSetup.ocr_api_key_configured && !clearOcrApiKey ? t('admin.apiKeySavedPlaceholder', 'Saved — leave blank to keep') : t('admin.apiKeyOptionalPlaceholder', 'Optional Bearer token')}
+                      />
+                      {runtimeSetup.ocr_api_key_configured && !clearOcrApiKey && (
+                        <button type="button" onClick={() => { setClearOcrApiKey(true); setOcrApiKeyInput('') }}>{t('admin.clearApiKey', 'Clear')}</button>
+                      )}
+                    </div>
+                  </label>
+                  <label>{t('admin.qwenApiKey', 'Metadata Bearer API key (optional)')}
+                    <div className="api-key-input-row">
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        value={qwenApiKeyInput}
+                        onChange={(event) => { setQwenApiKeyInput(event.target.value); setClearQwenApiKey(false) }}
+                        placeholder={runtimeSetup.qwen_api_key_configured && !clearQwenApiKey ? t('admin.apiKeySavedPlaceholder', 'Saved — leave blank to keep') : t('admin.apiKeyOptionalPlaceholder', 'Optional Bearer token')}
+                      />
+                      {runtimeSetup.qwen_api_key_configured && !clearQwenApiKey && (
+                        <button type="button" onClick={() => { setClearQwenApiKey(true); setQwenApiKeyInput('') }}>{t('admin.clearApiKey', 'Clear')}</button>
+                      )}
+                    </div>
+                  </label>
                   <label>{t('admin.glmBaseUrl')}
                     <input value={runtimeSetup.glm_base_url} onChange={(event) => setRuntimeSetup({ ...runtimeSetup, glm_base_url: event.target.value })} placeholder={DOKOCR_LLAMA_SWAP_URL} />
                   </label>
@@ -387,15 +514,32 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
             </details>
 
             <div className="button-row form-actions runtime-setup-actions">
-              <button type="button" onClick={() => void testRuntimeEndpoint('paddle')} disabled={setupBusy}>{t('admin.testPaddle')}</button>
+              <button
+                type="button"
+                onClick={() => void testRuntimeEndpoint(runtimeSetup.ocr_provider === 'openai_vision' ? 'openai_vision' : 'paddle')}
+                disabled={setupBusy}
+              >
+                {t('admin.testPaddle')}
+              </button>
               <button type="button" onClick={() => void testRuntimeEndpoint('qwen')} disabled={setupBusy}>{t('admin.testQwen')}</button>
               <button type="button" className="primary" onClick={() => void saveRuntimeSetup()} disabled={setupBusy}><Save size={16} /> {t('admin.saveModelSetup')}</button>
             </div>
             {endpointTest && (
-              <p className={endpointTest.ok ? 'success-message' : 'error'}>
-                {translateEndpointDetail(endpointTest.detail, t)}
-                {endpointTest.available_models.length ? ` · ${endpointTest.available_models.join(', ')}` : ''}
-              </p>
+              <div className="endpoint-test-result">
+                <p className={endpointTest.ok ? 'success-message' : 'error'}>
+                  {translateEndpointDetail(endpointTest.detail, t)}
+                </p>
+                {endpointTest.available_models.length > 0 && (
+                  <div className="detected-models-row">
+                    <span>{t('admin.clickModelToSelect', 'Detected models (click to select)')}:</span>
+                    {endpointTest.available_models.map((modelId) => (
+                      <button key={modelId} type="button" className="preset-chip" onClick={() => selectDetectedModel(modelId)}>
+                        {modelId}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
           </section>
 
@@ -413,6 +557,7 @@ export default function AdminPage({ onOpenDocument }: { onOpenDocument: (id: str
               <label>{t('admin.ocrEngine')}
                 <select value={modelForm.ocr_engine} onChange={(event) => setModelForm({ ...modelForm, ocr_engine: event.target.value })}>
                   <option value="paddle_vl">{t('admin.engineOptionPaddle')}</option>
+                  <option value="openai_vision">{t('admin.providerOptionOpenAIVision', 'External Vision (LM Studio / llama.cpp / Ollama)')}</option>
                   <option value="ppocrv6">{t('admin.engineOptionPpocr')}</option>
                   <option value="glm">{t('admin.engineOptionGlm')}</option>
                   <option value="fake">{t('admin.engineOptionFake')}</option>
@@ -635,6 +780,7 @@ function providerLabel(provider: string, t: (key: string, fallback?: string) => 
   if (provider === 'fake') return t('admin.providerOptionFake')
   if (provider === 'ppocrv6') return t('admin.providerOptionLocal')
   if (provider === 'paddle_vl') return t('admin.providerOptionSmart')
+  if (provider === 'openai_vision') return t('admin.providerOptionOpenAIVision', 'External Vision')
   if (provider === 'glm') return t('admin.providerOptionSecondary')
   return provider
 }

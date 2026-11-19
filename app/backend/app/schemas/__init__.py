@@ -526,9 +526,13 @@ class ModelSetupRead(BaseModel):
     paddle_vl_model: str = "paddleocr-vl"
     glm_base_url: str = ""
     glm_model: str = "glm"
+    openai_vision_base_url: str = ""
+    openai_vision_model: str = ""
+    ocr_api_key_configured: bool = False
     qwen_enabled: bool = False
     qwen_base_url: str = ""
     qwen_model: str = "qwen"
+    qwen_api_key_configured: bool = False
     timeout_seconds: float = 120.0
     ocr_task_soft_time_limit: int = Field(default=600, ge=1)
     ocr_task_time_limit: int = Field(default=660, ge=1)
@@ -537,6 +541,7 @@ class ModelSetupRead(BaseModel):
     ocr_task_base_overhead_seconds: int = Field(default=300, ge=1)
     ocr_task_paddle_vl_seconds_per_chunk: int = Field(default=180, ge=1)
     ocr_task_glm_seconds_per_page: int = Field(default=180, ge=1)
+    ocr_task_openai_vision_seconds_per_page: int = Field(default=120, ge=1)
     ocr_task_ppocrv6_seconds_per_page: int = Field(default=30, ge=1)
     ocr_pdf_text_layer_auto_enabled: bool = True
     ocr_pdf_text_layer_min_chars: int = Field(default=80, ge=1)
@@ -544,13 +549,18 @@ class ModelSetupRead(BaseModel):
 
 
 class ModelSetupWrite(ModelSetupRead):
-    pass
+    ocr_api_key: str | None = None
+    qwen_api_key: str | None = None
+    clear_ocr_api_key: bool = False
+    clear_qwen_api_key: bool = False
 
 
 class ModelEndpointTestPayload(BaseModel):
     base_url: str
     model: str = ""
     timeout_seconds: float | None = None
+    api_key: str | None = None
+    use_saved_key_for: str | None = None
 
 
 class ModelEndpointTestResult(BaseModel):

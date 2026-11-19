@@ -212,7 +212,9 @@ def test_compose_contract() -> None:
     check("./" not in compose, "standalone Compose must not bind-mount source paths")
     for image in ("ocr-backend", "ocr-frontend", "ocr-metadata"):
         check(f"ghcr.io/drbearjew/{image}:${{DOKOCR_IMAGE_TAG:-main}}" in compose, f"missing tagged {image} image")
-    check("OCR_PROVIDER: ppocrv6" in compose and "PPOCRV6_TIER: medium" in compose, "default must use real PP-OCRv6 medium")
+    check("OCR_PROVIDER: ${DOKOCR_OCR_PROVIDER:-ppocrv6}" in compose and "PPOCRV6_TIER: medium" in compose, "default must use real PP-OCRv6 medium")
+    check("OPENAI_VISION_BASE_URL: ${DOKOCR_OCR_URL:-}" in compose and "OPENAI_VISION_MODEL: ${DOKOCR_OCR_MODEL:-}" in compose, "external vision OCR URL/model must be configurable")
+    check("OCR_API_KEY: ${DOKOCR_OCR_API_KEY:-}" in compose and "QWEN_API_KEY: ${DOKOCR_METADATA_API_KEY:-}" in compose, "optional Bearer API keys must pass through")
     check("LLM_METADATA_REFINEMENT_ENABLED: ${DOKOCR_METADATA_ENABLED:-false}" in compose, "metadata refinement must be opt-in")
     check("profiles: [metadata]" in compose, "metadata image must stay behind the metadata profile")
     check("QWEN_LLAMACPP_BASE_URL: ${DOKOCR_METADATA_URL:-http://metadata:8080/v1}" in compose, "metadata URL must default to internal service DNS")
@@ -604,6 +606,36 @@ def main() -> None:
         check(result.returncode != 0 and not any(event[0] == "curl" or (event[0] == "docker" and event[1] == "compose" and "config" in event) for event in read_calls(log)), "metadata URL without external runtime was accepted or downloaded config")
         result = run_installer(script, bindir, log, COMPOSE, work / "external-without-url", ["--metadata-runtime", "external"])
         check(result.returncode != 0 and "requires a server URL" in result.stderr and not any(event[0] == "curl" or (event[0] == "docker" and event[1] == "compose" and "config" in event) for event in read_calls(log)), "external runtime without a URL was accepted")
+
+        lmstudio_install = work / "lmstudio-external-ocr"
+        result = run_installer(
+            script, bindir, log, COMPOSE, lmstudio_install,
+            [
+                "--ocr-runtime", "external",
+                "--ocr-url", "http://host.docker.internal:1234/v1",
+                "--ocr-model", "auto",
+                "--ocr-api-key", "sk-ocr-test-123",
+                "--metadata-runtime", "external",
+                "--metadata-url", "http://host.docker.internal:1234/v1",
+                "--metadata-model", "auto",
+                "--metadata-api-key", "sk-meta-test-456",
+            ],
+        )
+        check(result.returncode == 0, f"external OCR + metadata install failed:\n{result.stderr}")
+        lm_env = dotenv(lmstudio_install / ".env")
+        check(lm_env["DOKOCR_OCR_RUNTIME"] == "external" and lm_env["DOKOCR_OCR_PROVIDER"] == "openai_vision", "external OCR must select openai_vision provider")
+        check(lm_env["DOKOCR_OCR_URL"] == "http://host.docker.internal:1234/v1" and lm_env["DOKOCR_OCR_MODEL"] == "auto", "external OCR URL/model not written")
+        check(lm_env["DOKOCR_OCR_API_KEY"] == "sk-ocr-test-123" and lm_env["DOKOCR_METADATA_API_KEY"] == "sk-meta-test-456", "API keys not persisted in .env")
+        check("sk-ocr-test-123" not in result.stdout and "sk-meta-test-456" not in result.stdout, "API keys must never be printed to stdout")
+
+        result = run_installer(
+            script, bindir, log, COMPOSE, work / "ocr-external-with-unified",
+            ["--ocr-runtime", "external", "--ocr-url", "http://host.docker.internal:1234/v1", "--metadata-runtime", "unified"],
+        )
+        check(result.returncode != 0 and "cannot be combined" in result.stderr, "external OCR + unified metadata conflict was not rejected")
+
+        result = run_installer(script, bindir, log, COMPOSE, work / "ocr-url-without-external", ["--ocr-url", "http://host.docker.internal:1234/v1"])
+        check(result.returncode != 0 and "require --ocr-runtime external" in result.stderr, "OCR URL without external OCR runtime was accepted")
 
         unsafe_dotenv = work / "unsafe-dotenv"
         result = run_installer(script, bindir, log, COMPOSE, unsafe_dotenv)

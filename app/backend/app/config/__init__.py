@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     ocr_task_base_overhead_seconds: int = 300
     ocr_task_paddle_vl_seconds_per_chunk: int = 180
     ocr_task_glm_seconds_per_page: int = 180
+    ocr_task_openai_vision_seconds_per_page: int = 120
     ocr_task_ppocrv6_seconds_per_page: int = 30
     ocr_task_fake_seconds_per_page: int = 5
     ocr_max_retries: int = 2
@@ -71,7 +72,7 @@ class Settings(BaseSettings):
     login_rate_limit_attempts: int = 5
     login_rate_limit_window_seconds: int = 300
 
-    ocr_provider: str = Field(default="fake", pattern="^(fake|glm|paddle_vl|ppocrv6)$")
+    ocr_provider: str = Field(default="fake", pattern="^(fake|glm|paddle_vl|ppocrv6|openai_vision)$")
     glm_llamacpp_base_url: str = "http://model-runtime:8092/v1"
     glm_model_path: str = "glm"
     glm_mmproj_path: str = "/llm-models/glm-mmproj.gguf"
@@ -81,12 +82,17 @@ class Settings(BaseSettings):
     paddle_vl_mmproj_path: str = "/llm-models/paddleocr-vl-mmproj.gguf"
     paddle_vl_ik_profile: bool = False
 
+    openai_vision_base_url: str = "http://host.docker.internal:1234/v1"
+    openai_vision_model: str = ""
+    ocr_api_key: str = ""
+
     ppocrv6_tier: str = Field(default="medium", pattern="^(tiny|small|medium)$")
     ppocrv6_engine: str = "onnxruntime"
     ppocrv6_device: str = "cpu"
 
     qwen_llamacpp_base_url: str = "http://model-runtime:8092/v1"
     qwen_model_path: str = "metadata"
+    qwen_api_key: str = ""
 
     llm_request_timeout_seconds: float = 120.0
     llm_max_tokens: int = 4096
@@ -164,6 +170,10 @@ class Settings(BaseSettings):
     @property
     def paddle_vl_model_name(self) -> str:
         return self._model_name_from_config(self.paddle_vl_model_path)
+
+    @property
+    def openai_vision_model_name(self) -> str:
+        return self._model_name_from_config(self.openai_vision_model)
 
     @property
     def allowed_extensions_set(self) -> set[str]:

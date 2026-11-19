@@ -58,7 +58,7 @@ def resolve_ocr_config(document: Document, settings: Settings | None = None) -> 
     else:
         mode = OCRMode(str(merged.get("ocr_mode") or settings.ocr_mode))
     engine = str(merged.get("ocr_engine") or settings.ocr_provider).strip() or settings.ocr_provider
-    if engine not in {"fake", "glm", "paddle_vl", "ppocrv6"}:
+    if engine not in {"fake", "glm", "paddle_vl", "ppocrv6", "openai_vision"}:
         engine = settings.ocr_provider
     return EffectiveOCRConfig(
         ocr_mode=mode,

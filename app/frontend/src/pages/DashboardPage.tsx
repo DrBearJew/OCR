@@ -65,7 +65,7 @@ interface ProcessingOptionsState {
   qwenEnrichment: boolean
   overwriteManualValues: boolean
   preserveLockedFields: boolean
-  ocrEngine: 'paddle_vl' | 'ppocrv6'
+  ocrEngine: 'paddle_vl' | 'ppocrv6' | 'openai_vision'
   ocrLanguage: string
   ocrPageMode: 'all' | 'first_n'
   ocrPageLimit: number
@@ -753,7 +753,7 @@ function ProcessingOptionsPanel({ options, setOptions, qwenStatus }: { options: 
         <Toggle label={t('dashboard.qwenEnrichment')} checked={options.qwenEnrichment && qwenAvailable} disabled={!qwenAvailable} onChange={(checked) => set({ qwenEnrichment: checked, qwenAutofill: checked || options.qwenAutofill })} />
         <Toggle label={t('dashboard.overwriteManual')} checked={options.overwriteManualValues} onChange={(checked) => set({ overwriteManualValues: checked })} />
         <Toggle label={t('dashboard.preserveManual')} checked={options.preserveLockedFields} onChange={(checked) => set({ preserveLockedFields: checked })} />
-        <label>{t('dashboard.ocrEngine')}<select value={options.ocrEngine} onChange={(event) => set({ ocrEngine: event.target.value as ProcessingOptionsState['ocrEngine'] })}><option value="paddle_vl">{t('dashboard.smartParser')} · PaddleOCR-VL</option><option value="ppocrv6">{t('dashboard.fastOcr')} · PP-OCRv6 medium</option></select></label>
+        <label>{t('dashboard.ocrEngine')}<select value={options.ocrEngine} onChange={(event) => set({ ocrEngine: event.target.value as ProcessingOptionsState['ocrEngine'] })}><option value="paddle_vl">{t('dashboard.smartParser')} · PaddleOCR-VL</option><option value="openai_vision">{t('admin.providerOptionOpenAIVision', 'External Vision (LM Studio / llama.cpp / Ollama)')}</option><option value="ppocrv6">{t('dashboard.fastOcr')} · PP-OCRv6 medium</option></select></label>
         <label>{t('dashboard.ocrLanguage')}<select value={options.ocrLanguage} onChange={(event) => set({ ocrLanguage: event.target.value })}><option value="deu+eng">{t('dashboard.germanEnglish')}</option><option value="auto">{t('dashboard.autoDetect')}</option><option value="deu">{t('language.de')}</option><option value="eng">{t('language.en')}</option></select></label>
         <label>{t('dashboard.ocrPages')}<select value={options.ocrPageMode} onChange={(event) => set({ ocrPageMode: event.target.value as ProcessingOptionsState['ocrPageMode'] })}><option value="all">{t('dashboard.allPages')}</option><option value="first_n">{t('dashboard.firstNPages')}</option></select></label>
         <label>{t('dashboard.pageLimit')}<input type="number" min="1" max="100" value={options.ocrPageLimit} onChange={(event) => set({ ocrPageLimit: Number(event.target.value) || 1 })} /></label>

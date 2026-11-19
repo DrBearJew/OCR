@@ -13,6 +13,12 @@ METADATA_RUNTIME_ARG=""
 METADATA_RUNTIME_ARG_SET=false
 METADATA_URL_ARG=""
 METADATA_MODEL_ARG=""
+METADATA_API_KEY_ARG=""
+OCR_RUNTIME_ARG=""
+OCR_RUNTIME_ARG_SET=false
+OCR_URL_ARG=""
+OCR_MODEL_ARG=""
+OCR_API_KEY_ARG=""
 DIRECTORY_ARG_SET=false
 
 usage() {
@@ -23,10 +29,15 @@ Usage: bash install-docker.sh [options]
 
 Options:
   --directory DIR    Install files here (default: ./dokocr)
+  --ocr-runtime MODE Choose local (PP-OCRv6 CPU) or external (OpenAI-compatible vision OCR)
+  --ocr-url URL      External OpenAI-compatible vision OCR server URL (requires --ocr-runtime external)
+  --ocr-model NAME   External OCR model ID (default: auto)
+  --ocr-api-key KEY  Optional Bearer API key for external OCR server
   --metadata         Enable metadata using the saved runtime (CPU on a new install)
   --metadata-runtime MODE  Choose unified (PaddleOCR-VL + LFM), cpu, cuda, vulkan, or external
   --metadata-url URL  External OpenAI-compatible server URL (requires external runtime)
   --metadata-model NAME  External served model alias (default: metadata)
+  --metadata-api-key KEY Optional Bearer API key for external metadata server
   --no-metadata      Disable optional metadata refinement on an existing install
   --image-tag TAG    Use this trusted repository ref/image tag (default: main)
   --bind IPv4        Host address for the web/API ports (default: 127.0.0.1)
@@ -57,6 +68,44 @@ while (($#)); do
       [[ "$DIRECTORY_ARG_SET" == false ]] || fail "--directory may be specified only once"
       INSTALL_DIR_INPUT=$2
       DIRECTORY_ARG_SET=true
+      shift 2
+      ;;
+    --ocr-runtime)
+      (($# >= 2)) || fail "--ocr-runtime requires local or external"
+      [[ "$OCR_RUNTIME_ARG_SET" == false ]] || fail "--ocr-runtime may be specified only once"
+      case "$2" in
+        local|external) OCR_RUNTIME_ARG=$2 ;;
+        *) fail "Invalid --ocr-runtime '$2'; choose local or external" ;;
+      esac
+      OCR_RUNTIME_ARG_SET=true
+      shift 2
+      ;;
+    --ocr-url)
+      (($# >= 2)) || fail "--ocr-url requires a value"
+      [[ -n "$2" ]] || fail "--ocr-url cannot be empty"
+      [[ -z "$OCR_URL_ARG" ]] || fail "--ocr-url may be specified only once"
+      OCR_URL_ARG=$2
+      shift 2
+      ;;
+    --ocr-model)
+      (($# >= 2)) || fail "--ocr-model requires a value"
+      [[ -n "$2" ]] || fail "--ocr-model cannot be empty"
+      [[ -z "$OCR_MODEL_ARG" ]] || fail "--ocr-model may be specified only once"
+      OCR_MODEL_ARG=$2
+      shift 2
+      ;;
+    --ocr-api-key)
+      (($# >= 2)) || fail "--ocr-api-key requires a value"
+      [[ -n "$2" ]] || fail "--ocr-api-key cannot be empty"
+      [[ -z "$OCR_API_KEY_ARG" ]] || fail "--ocr-api-key may be specified only once"
+      OCR_API_KEY_ARG=$2
+      shift 2
+      ;;
+    --metadata-api-key)
+      (($# >= 2)) || fail "--metadata-api-key requires a value"
+      [[ -n "$2" ]] || fail "--metadata-api-key cannot be empty"
+      [[ -z "$METADATA_API_KEY_ARG" ]] || fail "--metadata-api-key may be specified only once"
+      METADATA_API_KEY_ARG=$2
       shift 2
       ;;
     --metadata)
@@ -231,6 +280,11 @@ validate_metadata_gpu_value() {
   fi
 }
 
+validate_api_key() {
+  local value=$1 label=$2
+  [[ "$value" =~ ^[A-Za-z0-9._:/+=@-]{1,512}$ ]] || fail "$label must be 1-512 printable token characters without whitespace or shell expansion"
+}
+
 if [[ -n "$IMAGE_TAG_ARG" ]]; then validate_image_tag "$IMAGE_TAG_ARG"; fi
 if [[ -n "$BIND_ARG" ]]; then validate_bind "$BIND_ARG"; fi
 if [[ -n "$PORT_ARG" ]]; then PORT_ARG=$(validate_port "$PORT_ARG" "--port"); fi
@@ -238,6 +292,10 @@ if [[ -n "$API_PORT_ARG" ]]; then API_PORT_ARG=$(validate_port "$API_PORT_ARG" "
 if [[ -n "$PROJECT_ARG" ]]; then validate_project "$PROJECT_ARG"; fi
 if [[ -n "$METADATA_URL_ARG" ]]; then validate_metadata_url "$METADATA_URL_ARG"; fi
 if [[ -n "$METADATA_MODEL_ARG" ]]; then validate_metadata_model "$METADATA_MODEL_ARG"; fi
+if [[ -n "$METADATA_API_KEY_ARG" ]]; then validate_api_key "$METADATA_API_KEY_ARG" "--metadata-api-key"; fi
+if [[ -n "$OCR_URL_ARG" ]]; then validate_metadata_url "$OCR_URL_ARG"; fi
+if [[ -n "$OCR_MODEL_ARG" ]]; then validate_metadata_model "$OCR_MODEL_ARG"; fi
+if [[ -n "$OCR_API_KEY_ARG" ]]; then validate_api_key "$OCR_API_KEY_ARG" "--ocr-api-key"; fi
 
 # Refuse to adopt or overwrite a directory unless it is empty or carries our marker.
 INSTALL_DIR_INPUT=${INSTALL_DIR_INPUT%/}
@@ -315,8 +373,15 @@ lookup_env_value DOKOCR_METADATA_ENABLED; SAVED_METADATA=$ENV_VALUE
 lookup_env_value DOKOCR_METADATA_RUNTIME; SAVED_METADATA_RUNTIME=$ENV_VALUE
 lookup_env_value DOKOCR_METADATA_URL; SAVED_METADATA_URL=$ENV_VALUE
 lookup_env_value DOKOCR_METADATA_MODEL; SAVED_METADATA_MODEL=$ENV_VALUE
+lookup_env_value DOKOCR_METADATA_API_KEY; SAVED_METADATA_API_KEY=$ENV_VALUE
 lookup_env_value DOKOCR_METADATA_EXTERNAL_URL; SAVED_EXTERNAL_URL_KEY=$ENV_VALUE
 lookup_env_value DOKOCR_METADATA_EXTERNAL_MODEL; SAVED_EXTERNAL_MODEL_KEY=$ENV_VALUE
+lookup_env_value DOKOCR_OCR_RUNTIME; SAVED_OCR_RUNTIME=$ENV_VALUE
+lookup_env_value DOKOCR_OCR_URL; SAVED_OCR_URL=$ENV_VALUE
+lookup_env_value DOKOCR_OCR_MODEL; SAVED_OCR_MODEL=$ENV_VALUE
+lookup_env_value DOKOCR_OCR_API_KEY; SAVED_OCR_API_KEY=$ENV_VALUE
+lookup_env_value DOKOCR_OCR_EXTERNAL_URL; SAVED_OCR_EXTERNAL_URL=$ENV_VALUE
+lookup_env_value DOKOCR_OCR_EXTERNAL_MODEL; SAVED_OCR_EXTERNAL_MODEL=$ENV_VALUE
 lookup_env_value DOKOCR_METADATA_GPU_LAYERS; SAVED_METADATA_GPU_LAYERS=$ENV_VALUE
 lookup_env_value DOKOCR_METADATA_DEVICES; SAVED_METADATA_DEVICES=$ENV_VALUE
 lookup_env_value DOKOCR_BIND; SAVED_BIND=$ENV_VALUE
@@ -341,6 +406,11 @@ else
 fi
 METADATA_EXTERNAL_URL=${METADATA_URL_ARG:-${SAVED_METADATA_URL:-${SAVED_EXTERNAL_URL_KEY:-}}}
 METADATA_EXTERNAL_MODEL=${METADATA_MODEL_ARG:-${SAVED_METADATA_MODEL:-${SAVED_EXTERNAL_MODEL_KEY:-metadata}}}
+METADATA_API_KEY=${METADATA_API_KEY_ARG:-${SAVED_METADATA_API_KEY:-}}
+OCR_RUNTIME=${OCR_RUNTIME_ARG:-${SAVED_OCR_RUNTIME:-local}}
+OCR_EXTERNAL_URL=${OCR_URL_ARG:-${SAVED_OCR_URL:-${SAVED_OCR_EXTERNAL_URL:-}}}
+OCR_EXTERNAL_MODEL=${OCR_MODEL_ARG:-${SAVED_OCR_MODEL:-${SAVED_OCR_EXTERNAL_MODEL:-auto}}}
+OCR_API_KEY=${OCR_API_KEY_ARG:-${SAVED_OCR_API_KEY:-}}
 METADATA_GPU_LAYERS=$SAVED_METADATA_GPU_LAYERS
 METADATA_DEVICES=$SAVED_METADATA_DEVICES
 BIND=${BIND_ARG:-${SAVED_BIND:-127.0.0.1}}
@@ -355,19 +425,37 @@ POSTGRES_PASSWORD=${SAVED_POSTGRES_PASSWORD:-}
 validate_image_tag "$IMAGE_TAG"
 [[ "$METADATA_ENABLED" == true || "$METADATA_ENABLED" == false ]] || fail "DOKOCR_METADATA_ENABLED in $ENV_FILE must be true or false"
 case "$METADATA_RUNTIME" in unified|cpu|cuda|vulkan|external) ;; *) fail "DOKOCR_METADATA_RUNTIME in $ENV_FILE must be unified, cpu, cuda, vulkan, or external" ;; esac
+case "$OCR_RUNTIME" in local|external) ;; *) fail "DOKOCR_OCR_RUNTIME in $ENV_FILE must be local or external" ;; esac
 [[ -z "$SAVED_METADATA_URL" ]] || validate_metadata_url "$SAVED_METADATA_URL"
 [[ -z "$SAVED_EXTERNAL_URL_KEY" ]] || validate_metadata_url "$SAVED_EXTERNAL_URL_KEY"
 [[ -z "$SAVED_METADATA_MODEL" ]] || validate_metadata_model "$SAVED_METADATA_MODEL"
 [[ -z "$SAVED_EXTERNAL_MODEL_KEY" ]] || validate_metadata_model "$SAVED_EXTERNAL_MODEL_KEY"
 [[ -z "$METADATA_EXTERNAL_URL" ]] || validate_metadata_url "$METADATA_EXTERNAL_URL"
 [[ -z "$METADATA_EXTERNAL_MODEL" ]] || validate_metadata_model "$METADATA_EXTERNAL_MODEL"
+[[ -z "$METADATA_API_KEY" ]] || validate_api_key "$METADATA_API_KEY" "DOKOCR_METADATA_API_KEY"
+[[ -z "$SAVED_OCR_URL" ]] || validate_metadata_url "$SAVED_OCR_URL"
+[[ -z "$SAVED_OCR_EXTERNAL_URL" ]] || validate_metadata_url "$SAVED_OCR_EXTERNAL_URL"
+[[ -z "$SAVED_OCR_MODEL" ]] || validate_metadata_model "$SAVED_OCR_MODEL"
+[[ -z "$SAVED_OCR_EXTERNAL_MODEL" ]] || validate_metadata_model "$SAVED_OCR_EXTERNAL_MODEL"
+[[ -z "$OCR_EXTERNAL_URL" ]] || validate_metadata_url "$OCR_EXTERNAL_URL"
+[[ -z "$OCR_EXTERNAL_MODEL" ]] || validate_metadata_model "$OCR_EXTERNAL_MODEL"
+[[ -z "$OCR_API_KEY" ]] || validate_api_key "$OCR_API_KEY" "DOKOCR_OCR_API_KEY"
 [[ -z "$METADATA_GPU_LAYERS" ]] || validate_metadata_gpu_value "$METADATA_GPU_LAYERS" DOKOCR_METADATA_GPU_LAYERS
 [[ -z "$METADATA_DEVICES" ]] || validate_metadata_gpu_value "$METADATA_DEVICES" DOKOCR_METADATA_DEVICES
-if [[ -n "$METADATA_URL_ARG" || -n "$METADATA_MODEL_ARG" ]]; then
-  [[ "$METADATA_RUNTIME" == external ]] || fail "--metadata-url and --metadata-model require --metadata-runtime external (or a saved external runtime)"
+if [[ -n "$METADATA_URL_ARG" || -n "$METADATA_MODEL_ARG" || -n "$METADATA_API_KEY_ARG" ]]; then
+  [[ "$METADATA_RUNTIME" == external ]] || fail "--metadata-url, --metadata-model, and --metadata-api-key require --metadata-runtime external (or a saved external runtime)"
 fi
 if [[ "$METADATA_RUNTIME" == external && -z "$METADATA_EXTERNAL_URL" ]]; then
   fail "The external metadata runtime requires a server URL; use --metadata-runtime external --metadata-url URL"
+fi
+if [[ -n "$OCR_URL_ARG" || -n "$OCR_MODEL_ARG" || -n "$OCR_API_KEY_ARG" ]]; then
+  [[ "$OCR_RUNTIME" == external ]] || fail "--ocr-url, --ocr-model, and --ocr-api-key require --ocr-runtime external (or a saved external OCR runtime)"
+fi
+if [[ "$OCR_RUNTIME" == external && -z "$OCR_EXTERNAL_URL" ]]; then
+  fail "The external OCR runtime requires a server URL; use --ocr-runtime external --ocr-url URL"
+fi
+if [[ "$OCR_RUNTIME" == external && "$METADATA_ENABLED" == true && "$METADATA_RUNTIME" == unified ]]; then
+  fail "--ocr-runtime external cannot be combined with --metadata-runtime unified (unified already provides PaddleOCR-VL OCR); use --metadata-runtime external, cpu, cuda, or vulkan"
 fi
 validate_bind "$BIND"
 PORT=$(validate_port "$PORT" "DOKOCR_PORT")
@@ -463,7 +551,7 @@ fi
 
 is_managed_env_key() {
   case "$1" in
-    COMPOSE_FILE|COMPOSE_PROJECT_NAME|COMPOSE_PROFILES|DOKOCR_IMAGE_TAG|DOKOCR_METADATA_ENABLED|DOKOCR_METADATA_RUNTIME|DOKOCR_METADATA_URL|DOKOCR_METADATA_MODEL|DOKOCR_METADATA_EXTERNAL_URL|DOKOCR_METADATA_EXTERNAL_MODEL|DOKOCR_METADATA_GPU_LAYERS|DOKOCR_METADATA_DEVICES|DOKOCR_BIND|DOKOCR_PORT|DOKOCR_API_PORT|ADMIN_USERNAME|ADMIN_PASSWORD|SECRET_KEY|POSTGRES_PASSWORD)
+    COMPOSE_FILE|COMPOSE_PROJECT_NAME|COMPOSE_PROFILES|DOKOCR_IMAGE_TAG|DOKOCR_OCR_RUNTIME|DOKOCR_OCR_PROVIDER|DOKOCR_OCR_URL|DOKOCR_OCR_MODEL|DOKOCR_OCR_API_KEY|DOKOCR_OCR_EXTERNAL_URL|DOKOCR_OCR_EXTERNAL_MODEL|DOKOCR_METADATA_ENABLED|DOKOCR_METADATA_RUNTIME|DOKOCR_METADATA_URL|DOKOCR_METADATA_MODEL|DOKOCR_METADATA_API_KEY|DOKOCR_METADATA_EXTERNAL_URL|DOKOCR_METADATA_EXTERNAL_MODEL|DOKOCR_METADATA_GPU_LAYERS|DOKOCR_METADATA_DEVICES|DOKOCR_BIND|DOKOCR_PORT|DOKOCR_API_PORT|ADMIN_USERNAME|ADMIN_PASSWORD|SECRET_KEY|POSTGRES_PASSWORD)
       return 0
       ;;
     *)
@@ -485,6 +573,18 @@ fi
   printf 'COMPOSE_PROJECT_NAME=%s\n' "$PROJECT_NAME"
   if [[ "$METADATA_ENABLED" == true && "$METADATA_RUNTIME" != external ]]; then printf 'COMPOSE_PROFILES=metadata\n'; fi
   printf 'DOKOCR_IMAGE_TAG=%s\n' "$IMAGE_TAG"
+  printf 'DOKOCR_OCR_RUNTIME=%s\n' "$OCR_RUNTIME"
+  printf 'DOKOCR_OCR_EXTERNAL_URL=%s\n' "$OCR_EXTERNAL_URL"
+  printf 'DOKOCR_OCR_EXTERNAL_MODEL=%s\n' "$OCR_EXTERNAL_MODEL"
+  if [[ "$OCR_RUNTIME" == external ]]; then
+    printf 'DOKOCR_OCR_PROVIDER=openai_vision\n'
+    printf 'DOKOCR_OCR_URL=%s\n' "$OCR_EXTERNAL_URL"
+    printf 'DOKOCR_OCR_MODEL=%s\n' "$OCR_EXTERNAL_MODEL"
+    printf 'DOKOCR_OCR_API_KEY=%s\n' "$OCR_API_KEY"
+  else
+    printf 'DOKOCR_OCR_PROVIDER=ppocrv6\n'
+    printf 'DOKOCR_OCR_URL=\nDOKOCR_OCR_MODEL=\nDOKOCR_OCR_API_KEY=\n'
+  fi
   printf 'DOKOCR_METADATA_ENABLED=%s\n' "$METADATA_ENABLED"
   printf 'DOKOCR_METADATA_RUNTIME=%s\n' "$METADATA_RUNTIME"
   printf 'DOKOCR_METADATA_EXTERNAL_URL=%s\n' "$METADATA_EXTERNAL_URL"
@@ -492,8 +592,9 @@ fi
   if [[ "$METADATA_RUNTIME" == external ]]; then
     printf 'DOKOCR_METADATA_URL=%s\n' "$METADATA_EXTERNAL_URL"
     printf 'DOKOCR_METADATA_MODEL=%s\n' "$METADATA_EXTERNAL_MODEL"
+    printf 'DOKOCR_METADATA_API_KEY=%s\n' "$METADATA_API_KEY"
   else
-    printf 'DOKOCR_METADATA_URL=\nDOKOCR_METADATA_MODEL=\n'
+    printf 'DOKOCR_METADATA_URL=\nDOKOCR_METADATA_MODEL=\nDOKOCR_METADATA_API_KEY=\n'
   fi
   [[ -z "$METADATA_GPU_LAYERS" ]] || printf 'DOKOCR_METADATA_GPU_LAYERS=%s\n' "$METADATA_GPU_LAYERS"
   [[ -z "$METADATA_DEVICES" ]] || printf 'DOKOCR_METADATA_DEVICES=%s\n' "$METADATA_DEVICES"
@@ -520,7 +621,9 @@ if [[ "$METADATA_ENABLED" == true && "$METADATA_RUNTIME" != external ]]; then PR
 compose() {
   (
     unset COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_ENV_FILES COMPOSE_PATH_SEPARATOR COMPOSE_DISABLE_ENV_FILE
-    unset DOKOCR_IMAGE_TAG DOKOCR_METADATA_ENABLED DOKOCR_METADATA_RUNTIME DOKOCR_METADATA_URL DOKOCR_METADATA_MODEL
+    unset DOKOCR_IMAGE_TAG DOKOCR_OCR_RUNTIME DOKOCR_OCR_PROVIDER DOKOCR_OCR_URL DOKOCR_OCR_MODEL DOKOCR_OCR_API_KEY
+    unset DOKOCR_OCR_EXTERNAL_URL DOKOCR_OCR_EXTERNAL_MODEL
+    unset DOKOCR_METADATA_ENABLED DOKOCR_METADATA_RUNTIME DOKOCR_METADATA_URL DOKOCR_METADATA_MODEL DOKOCR_METADATA_API_KEY
     unset DOKOCR_METADATA_EXTERNAL_URL DOKOCR_METADATA_EXTERNAL_MODEL DOKOCR_METADATA_GPU_LAYERS DOKOCR_METADATA_DEVICES
     unset CUDA_VISIBLE_DEVICES GGML_VK_VISIBLE_DEVICES
     unset DOKOCR_BIND DOKOCR_PORT DOKOCR_API_PORT ADMIN_USERNAME ADMIN_PASSWORD SECRET_KEY POSTGRES_PASSWORD
@@ -609,6 +712,9 @@ APP_HOST=$BIND
 if [[ "$APP_HOST" == 0.0.0.0 ]]; then APP_HOST=localhost; fi
 printf '\nDok OCR is ready: http://%s:%s\n' "$APP_HOST" "$PORT"
 printf 'Admin username: %s\nCredentials: %s\n' "$ADMIN_USERNAME" "$ENV_FILE"
+if [[ "$OCR_RUNTIME" == external ]]; then
+  printf 'OCR: external OpenAI-compatible vision server (%s, model: %s).\n' "$OCR_EXTERNAL_URL" "$OCR_EXTERNAL_MODEL"
+fi
 if [[ "$METADATA_ENABLED" == true && "$METADATA_RUNTIME" == external ]]; then
   printf 'Optional metadata refinement is enabled with the selected external server/model.\n'
 elif [[ "$METADATA_ENABLED" == true ]]; then
@@ -617,6 +723,6 @@ elif [[ "$METADATA_ENABLED" == true ]]; then
   else
     printf 'Optional LFM2.5 metadata refinement is enabled with the %s runtime. Its model is stored in the persistent metadata-models volume.\n' "$METADATA_RUNTIME"
   fi
-else
+elif [[ "$OCR_RUNTIME" != external ]]; then
   printf 'OCR: real PP-OCRv6 medium CPU mode; optional LFM2.5 metadata download is disabled.\n'
 fi

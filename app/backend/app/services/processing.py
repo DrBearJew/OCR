@@ -220,6 +220,8 @@ def _ocr_budget_seconds_per_unit(engine: str, settings: Any) -> int:
         return int(settings.ocr_task_paddle_vl_seconds_per_chunk)
     if normalized == "glm":
         return int(settings.ocr_task_glm_seconds_per_page)
+    if normalized == "openai_vision":
+        return int(getattr(settings, "ocr_task_openai_vision_seconds_per_page", 120))
     if normalized == "ppocrv6":
         return int(settings.ocr_task_ppocrv6_seconds_per_page)
     return int(settings.ocr_task_fake_seconds_per_page)

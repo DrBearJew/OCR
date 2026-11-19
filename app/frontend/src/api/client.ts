@@ -1,4 +1,4 @@
-import type { ActivityItem, ActivityListPage, AdminActionResult, Batch, BatchDetail, Collection, CollectionPageData, CollectionSummary, CustomFieldDefinition, DashboardSummary, Document, DocumentListPage, DocumentCustomFieldValue, DocumentEvent, DocumentPage, FailedReviewSummary, Folder, FolderContentsPage, IngestionJob, IngestionSource, IntegrationSummary, ModelEndpointTestResult, ModelSetup, JobInfo, PaperlessMetadata, ProcessingHook, ProcessingSummary, RecordListPage, RecordRow, SavedView, SearchResult, SearchResultPage } from '../types'
+import type { ActivityItem, ActivityListPage, AdminActionResult, Batch, BatchDetail, Collection, CollectionPageData, CollectionSummary, CustomFieldDefinition, DashboardSummary, Document, DocumentListPage, DocumentCustomFieldValue, DocumentEvent, DocumentPage, FailedReviewSummary, Folder, FolderContentsPage, IngestionJob, IngestionSource, IntegrationSummary, ModelEndpointTestResult, ModelSetup, ModelSetupUpdate, JobInfo, PaperlessMetadata, ProcessingHook, ProcessingSummary, RecordListPage, RecordRow, SavedView, SearchResult, SearchResultPage } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 const TOKEN_KEY = 'dokocr_token'
@@ -279,11 +279,11 @@ export const api = {
     return promise
   },
   modelSetup: () => request<ModelSetup>('/api/admin/model-setup'),
-  saveModelSetup: (payload: ModelSetup) => {
+  saveModelSetup: (payload: ModelSetupUpdate) => {
     clearIntegrationsCache()
     return request<ModelSetup>('/api/admin/model-setup', { method: 'PATCH', body: JSON.stringify(payload) })
   },
-  testModelEndpoint: (payload: { base_url: string; model?: string; timeout_seconds?: number }) =>
+  testModelEndpoint: (payload: { base_url: string; model?: string; timeout_seconds?: number; api_key?: string; use_saved_key_for?: 'ocr' | 'qwen' }) =>
     request<ModelEndpointTestResult>('/api/admin/model-setup/test', { method: 'POST', body: JSON.stringify(payload) }),
   reconcile: () => request<AdminActionResult>('/api/admin/reconcile', { method: 'POST' }),
   retryFailed: () => request<AdminActionResult>('/api/admin/retry-failed', { method: 'POST' }),
