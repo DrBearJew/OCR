@@ -266,43 +266,47 @@ export default function DocumentsPage({ onOpenDocument, onUpload }: { onOpenDocu
   }
 
   return (
-    <main className="documents-console">
-      <header className="page-header console-header">
-        <div className="console-title-group">
+    <main className="documents-console sheet-page sheet-page-flush">
+      <header className="sheet-header">
+        <div className="sheet-title-block">
           <h1>{t('documents.title')}</h1>
-          <div className="doc-stats-strip" aria-label={t('documents.title')}>
+          <div className="sheet-summary-line" aria-label={t('documents.title')}>
             <span><strong>{stats.total.toLocaleString()}</strong> {t('documents.kpiTotal')}</span>
-            {stats.processing > 0 && <span className="tone-blue"><strong>{stats.processing.toLocaleString()}</strong> {t('documents.kpiProcessing')}</span>}
-            {stats.needsReview > 0 && <span className="tone-orange"><strong>{stats.needsReview.toLocaleString()}</strong> {t('documents.kpiNeedsReview')}</span>}
-            {stats.failed > 0 && <span className="tone-red"><strong>{stats.failed.toLocaleString()}</strong> {t('documents.kpiFailedOcr')}</span>}
+            {stats.processing > 0 && <><span aria-hidden="true">·</span><span className="tone-blue"><strong>{stats.processing.toLocaleString()}</strong> {t('documents.kpiProcessing')}</span></>}
+            {stats.needsReview > 0 && <><span aria-hidden="true">·</span><span className="tone-orange"><strong>{stats.needsReview.toLocaleString()}</strong> {t('documents.kpiNeedsReview')}</span></>}
+            {stats.failed > 0 && <><span aria-hidden="true">·</span><span className="tone-red"><strong>{stats.failed.toLocaleString()}</strong> {t('documents.kpiFailedOcr')}</span></>}
+            <span aria-hidden="true">·</span>
             <span className="tone-green"><strong>{stats.synced.toLocaleString()}</strong> {t('documents.kpiSynced')}</span>
           </div>
         </div>
         <div className="button-row">
-          <button type="button" className="primary" onClick={() => onUpload?.()}><UploadCloud size={16} /> {t('documents.upload')}</button>
-          <button type="button" className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={16} /></button>
+          <button type="button" className="primary" onClick={() => onUpload?.()}><UploadCloud size={15} /> {t('documents.upload')}</button>
+          <button type="button" className="icon-button" title={t('common.refresh')} onClick={() => void load()}><RefreshCw size={15} /></button>
         </div>
       </header>
-      {error && <p className="warning">{error}</p>}
-      {message && <p className="success-message">{message}</p>}
-      <section className="documents-console-grid">
-        <section className="document-table-panel workflow-card">
-          <div className="document-toolbar">
-            <label className="toolbar-search"><Search size={16} /><input placeholder={t('documents.searchPlaceholder')} value={filters.title || ''} onChange={(event) => updateFilter('title', event.target.value)} /></label>
-            <select value={filters.collection_name || ''} onChange={(event) => updateFilter('collection_name', event.target.value)}>
-              <option value="">{t('dashboard.collection')}</option>
-              <option>Eingangsrechnung</option>
-              <option>Ausgangsrechnung</option>
-              <option>Belege</option>
-            </select>
-            <select value={filters.state || ''} onChange={(event) => updateFilter('state', event.target.value)}>
-              <option value="">{t('fields.status')}</option>
-              <option value="complete">{t('common.complete')}</option>
-              <option value="failed">{t('common.failed')}</option>
-              <option value="ocr_processing">{t('common.processing')}</option>
-            </select>
-            <SavedViewsBar section="documents" filters={filters} onApply={(next) => { setFilters(next); void load(next, false, null) }} />
-          </div>
+
+      {error && <p className="warning sheet-banner">{error}</p>}
+      {message && <p className="success-message sheet-banner">{message}</p>}
+
+      <div className="sheet-filter-strip document-toolbar">
+        <label className="toolbar-search"><Search size={15} /><input placeholder={t('documents.searchPlaceholder')} value={filters.title || ''} onChange={(event) => updateFilter('title', event.target.value)} /></label>
+        <select value={filters.collection_name || ''} onChange={(event) => updateFilter('collection_name', event.target.value)}>
+          <option value="">{t('dashboard.collection')}</option>
+          <option>Eingangsrechnung</option>
+          <option>Ausgangsrechnung</option>
+          <option>Belege</option>
+        </select>
+        <select value={filters.state || ''} onChange={(event) => updateFilter('state', event.target.value)}>
+          <option value="">{t('fields.status')}</option>
+          <option value="complete">{t('common.complete')}</option>
+          <option value="failed">{t('common.failed')}</option>
+          <option value="ocr_processing">{t('common.processing')}</option>
+        </select>
+        <SavedViewsBar section="documents" filters={filters} onApply={(next) => { setFilters(next); void load(next, false, null) }} />
+      </div>
+
+      <section className="documents-split-workbench">
+        <section className="document-table-panel">
           <div className={`bulk-bar console-bulk ${selectedIds.size > 0 ? 'has-selection' : ''}`}>
             <span>{bulkTargetLabel()}</span>
             {hasActiveFilters() && totalEstimate > 0 && (
@@ -344,11 +348,11 @@ export default function DocumentsPage({ onOpenDocument, onUpload }: { onOpenDocu
                   else next.delete(document.id)
                   setSelectedIds(next)
                 }} />
-                <span className="doc-title-cell"><FileText size={16} /><strong>{document.manual_title_override || document.extracted_title || document.original_filename}</strong><small>{document.original_filename}</small></span>
+                <span className="doc-title-cell"><FileText size={15} /><strong>{document.manual_title_override || document.extracted_title || document.original_filename}</strong><small>{document.original_filename}</small></span>
                 <span className="pill">{document.collection_name}</span>
                 <StatusBadge value={document.processing_state === 'complete' && document.review_state === 'needs_review' ? 'needs_review' : document.processing_state} />
-                <span>{document.extracted_date || new Date(document.created_at).toLocaleDateString()}</span>
-                <span>{document.extracted_amount || '—'}</span>
+                <span className="doc-date-cell">{document.extracted_date || new Date(document.created_at).toLocaleDateString()}</span>
+                <span className="doc-amount-cell">{document.extracted_amount || '—'}</span>
               </div>
             ))}
           </div>
@@ -362,8 +366,13 @@ export default function DocumentsPage({ onOpenDocument, onUpload }: { onOpenDocu
             {nextCursor && <button type="button" className="primary" disabled={loadingMore} onClick={() => void loadMoreDocuments()}>{t('common.loadMore', 'Load more')}</button>}
           </div>
         </section>
-        {selected && <DocumentPreviewPanel document={selected} pages={selectedPages} loading={detailLoading} onOpenDocument={onOpenDocument} />}
-        {selected && <DocumentInspector document={selected} events={selectedEvents} loading={detailLoading} busy={Boolean(busyAction)} onOpenDocument={onOpenDocument} onMarkReviewed={() => void markReviewed(selected)} onDelete={() => void deleteDocument(selected)} />}
+
+        {selected && (
+          <aside className="document-sheet-pane">
+            <DocumentPreviewPanel document={selected} pages={selectedPages} loading={detailLoading} onOpenDocument={onOpenDocument} />
+            <DocumentInspector document={selected} events={selectedEvents} loading={detailLoading} busy={Boolean(busyAction)} onOpenDocument={onOpenDocument} onMarkReviewed={() => void markReviewed(selected)} onDelete={() => void deleteDocument(selected)} />
+          </aside>
+        )}
       </section>
     </main>
   )
@@ -381,7 +390,7 @@ function DocumentPreviewPanel({ document, pages, loading, onOpenDocument }: { do
   const canPreview = document.mime_type?.startsWith('image/') || document.mime_type === 'application/pdf'
   const isPdf = document.mime_type === 'application/pdf'
   const mediaStyle = isPdf
-    ? { width: '100%', maxWidth: '1100px', height: 'min(68vh, 760px)' }
+    ? { width: '100%', maxWidth: '1100px', height: 'min(42vh, 420px)' }
     : { width: `${zoom}%`, maxWidth: zoom <= 100 ? '100%' : 'none' }
 
   useEffect(() => {
@@ -432,7 +441,7 @@ function DocumentPreviewPanel({ document, pages, loading, onOpenDocument }: { do
   }
 
   return (
-    <section className="document-preview-panel workflow-card">
+    <section className="document-preview-panel">
       <div className="card-title-row">
         <h2>{document.original_filename}</h2>
         <div className="button-row preview-zoom-controls">
@@ -444,8 +453,8 @@ function DocumentPreviewPanel({ document, pages, loading, onOpenDocument }: { do
             </>
           )}
           <button type="button" className="icon-button" title={t('documents.largePreview')} onClick={() => setLargePreviewOpen(true)}><Maximize2 size={15} /></button>
-          <a className="icon-button" href={downloadUrl(document.id)} title={t('common.download')}><Download size={16} /></a>
-          <button className="icon-button" onClick={() => onOpenDocument(document.id)} title={t('common.open')}><FileText size={16} /></button>
+          <a className="icon-button" href={downloadUrl(document.id)} title={t('common.download')}><Download size={15} /></a>
+          <button className="icon-button" onClick={() => onOpenDocument(document.id)} title={t('common.open')}><FileText size={15} /></button>
         </div>
       </div>
       <div ref={previewSurfaceRef} className="document-preview-surface console-preview zoomable-preview" onClick={handlePreviewClick} title={isPdf ? 'Use the PDF toolbar for pages and zoom.' : 'Click image to zoom around that point'}>
@@ -455,14 +464,17 @@ function DocumentPreviewPanel({ document, pages, loading, onOpenDocument }: { do
             : <img className="zoomable-preview-media" style={mediaStyle} src={previewUrl(document.id)} alt={document.original_filename} />
         ) : document.thumbnail_path && !document.id.startsWith('demo-') ? <img className="zoomable-preview-media" style={mediaStyle} src={thumbnailUrl(document.id)} alt={document.original_filename} /> : <InvoiceMockup />}
       </div>
-      <div className="ocr-tabs">
-        <button type="button" className={activeTab === 'ocr' ? 'active' : ''} onClick={() => setActiveTab('ocr')}>{t('documents.ocrText')}</button>
-        <button type="button" className={activeTab === 'raw' ? 'active' : ''} onClick={() => setActiveTab('raw')}>{t('documents.rawOcr')}</button>
-        <button type="button" className={activeTab === 'layout' ? 'active' : ''} onClick={() => setActiveTab('layout')}>{t('documents.layout')}</button>
-      </div>
-      {activeTab === 'ocr' && <pre className="ocr-preview console-ocr">{document.ocr_text || document.ocr_snippet || 'Open the document detail page to load full OCR text.'}</pre>}
-      {activeTab === 'raw' && <pre className="ocr-preview console-ocr json-preview">{formatJson(document.raw_ocr_json, 'No raw OCR JSON stored for this document yet.')}</pre>}
-      {activeTab === 'layout' && <LayoutPreview pages={pages} loading={loading} />}
+      <details className="sheet-ocr-disclosure">
+        <summary>{t('documents.ocrText')}</summary>
+        <div className="ocr-tabs">
+          <button type="button" className={activeTab === 'ocr' ? 'active' : ''} onClick={() => setActiveTab('ocr')}>{t('documents.ocrText')}</button>
+          <button type="button" className={activeTab === 'raw' ? 'active' : ''} onClick={() => setActiveTab('raw')}>{t('documents.rawOcr')}</button>
+          <button type="button" className={activeTab === 'layout' ? 'active' : ''} onClick={() => setActiveTab('layout')}>{t('documents.layout')}</button>
+        </div>
+        {activeTab === 'ocr' && <pre className="ocr-preview console-ocr">{document.ocr_text || document.ocr_snippet || 'Open the document detail page to load full OCR text.'}</pre>}
+        {activeTab === 'raw' && <pre className="ocr-preview console-ocr json-preview">{formatJson(document.raw_ocr_json, 'No raw OCR JSON stored for this document yet.')}</pre>}
+        {activeTab === 'layout' && <LayoutPreview pages={pages} loading={loading} />}
+      </details>
       {largePreviewOpen && <LargePreviewModal document={document} onClose={() => setLargePreviewOpen(false)} />}
     </section>
   )
@@ -545,7 +557,7 @@ function DocumentInspector({ document, events, loading, busy, onOpenDocument, on
   }, [document.id])
 
   return (
-    <aside className="document-detail-panel workflow-card">
+    <div className="document-detail-panel">
       <div className="detail-tabs">
         <button type="button" className={activeTab === 'details' ? 'active' : ''} onClick={() => setActiveTab('details')}>{t('documents.details')}</button>
         <button type="button" className={activeTab === 'metadata' ? 'active' : ''} onClick={() => setActiveTab('metadata')}>{t('documents.metadata')}</button>
@@ -557,9 +569,9 @@ function DocumentInspector({ document, events, loading, busy, onOpenDocument, on
       <div className="detail-actions">
         <button type="button" onClick={() => onOpenDocument(document.id)}>{t('common.open')}</button>
         <button type="button" className="primary" disabled={busy || document.id.startsWith('demo-') || document.review_state === 'reviewed'} onClick={onMarkReviewed}>{t('documents.markReviewed')}</button>
-        <button type="button" className="danger-button" disabled={document.id.startsWith('demo-')} onClick={onDelete}><Trash2 size={16} /> {t('common.delete')}</button>
+        <button type="button" className="danger-button" disabled={document.id.startsWith('demo-')} onClick={onDelete}><Trash2 size={15} /> {t('common.delete')}</button>
       </div>
-    </aside>
+    </div>
   )
 }
 
