@@ -1947,11 +1947,24 @@ pre {
 
 /* Framed File Preview Card on Dashboard */
 .dash-preview-card {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   padding: 1.05rem 1.2rem;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
   box-shadow: 0 1px 2px rgba(28, 25, 23, 0.035);
+}
+
+.dash-preview-card .file-preview-card,
+.dash-preview-card .document-preview-layout {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.dash-preview-card .fit-preview .document-preview-object {
+  max-width: 100%;
 }
 
 .dash-preview-card .document-preview-heading {
