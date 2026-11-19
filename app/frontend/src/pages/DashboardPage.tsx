@@ -415,8 +415,6 @@ export default function DashboardPage({ onOpenDocument, onSearch }: DashboardPag
           {archiveStats.recentDocs.length > 0 && (
             <RecentArchiveCard documents={archiveStats.recentDocs} onOpenDocument={onOpenDocument} onSearch={onSearch} />
           )}
-
-          <ProcessingProfilePanel options={processingOptions} setOptions={setProcessingOptions} qwenStatus={qwenStatus} />
         </section>
 
         <aside className="metadata-redesign-rail">
@@ -429,6 +427,7 @@ export default function DashboardPage({ onOpenDocument, onSearch }: DashboardPag
             onRunOcr={() => void runSelected('ocr')}
             onExtract={() => void runSelected('metadata')}
             onReview={() => void runSelected('review')}
+            profileSelector={<ProcessingProfilePanel options={processingOptions} setOptions={setProcessingOptions} qwenStatus={qwenStatus} />}
           />
           <div className="dash-config-stack">
             <RecordSetupCard collectionName={collectionName} setCollectionName={setCollectionName} value={sharedTitle} setValue={setSharedTitle} folderPath={folderPath} setFolderPath={setFolderPath} collections={collections} />
@@ -647,59 +646,84 @@ function CustomFieldInput({ field, value, onChange }: { field: CustomFieldDefini
 function ProcessingProfilePanel({ options, setOptions, qwenStatus }: { options: ProcessingOptionsState; setOptions: (value: ProcessingOptionsState) => void; qwenStatus: QwenStatus }) {
   const { t } = useI18n()
   const qwenAvailable = qwenStatus === 'available'
+  const [explicitProfile, setExplicitProfile] = useState<'quick' | 'standard' | 'accuracy' | 'archive' | null>(null)
+  const inferredProfile: 'quick' | 'standard' | 'accuracy' | 'archive' =
+    options.ocrEngine === 'ppocrv6' && options.ocrPageMode === 'first_n'
+      ? 'quick'
+      : options.ocrEngine === 'paddle_vl' && options.qwenAutofill && options.qwenEnrichment
+        ? 'accuracy'
+        : options.ocrEngine === 'paddle_vl' && options.qwenAutofill
+          ? 'standard'
+          : 'archive'
+  const activeKey = explicitProfile ?? inferredProfile
+
   const profiles = [
     {
-      key: 'quick',
+      key: 'quick' as const,
       title: t('dashboard.profileQuick'),
       copy: t('dashboard.profileQuickCopy'),
       tag: t('dashboard.profileQuickTag'),
-      icon: <RefreshCw size={24} />,
-      active: options.ocrEngine === 'ppocrv6' && options.ocrPageMode === 'first_n',
+      icon: <RefreshCw size={14} />,
       patch: { ocrEngine: 'ppocrv6' as const, ocrPageMode: 'first_n' as const, ocrPageLimit: 3, qwenAutofill: false, qwenEnrichment: false, extractTables: false }
     },
     {
-      key: 'standard',
+      key: 'standard' as const,
       title: t('dashboard.profileStandard'),
       copy: t('dashboard.profileStandardCopy'),
       tag: t('dashboard.profileStandardTag'),
-      icon: <FileText size={24} />,
-      active: options.ocrEngine === 'paddle_vl' && options.qwenAutofill && !options.qwenEnrichment,
+      icon: <FileText size={14} />,
       patch: { ocrEngine: 'paddle_vl' as const, ocrPageMode: 'all' as const, ocrPageLimit: 100, qwenAutofill: qwenAvailable, qwenEnrichment: false, extractTables: true, collectionRules: true }
     },
     {
-      key: 'accuracy',
+      key: 'accuracy' as const,
       title: t('dashboard.profileAccuracy'),
       copy: t('dashboard.profileAccuracyCopy'),
       tag: t('dashboard.profileAccuracyTag'),
-      icon: <Sparkles size={24} />,
-      active: options.ocrEngine === 'paddle_vl' && options.qwenAutofill && options.qwenEnrichment,
+      icon: <Sparkles size={14} />,
       patch: { ocrEngine: 'paddle_vl' as const, ocrPageMode: 'all' as const, ocrPageLimit: 100, qwenAutofill: qwenAvailable, qwenEnrichment: qwenAvailable, extractTables: true, collectionRules: true, preserveLockedFields: true }
     },
     {
-      key: 'archive',
+      key: 'archive' as const,
       title: t('dashboard.profileArchive'),
       copy: t('dashboard.profileArchiveCopy'),
       tag: t('dashboard.profileArchiveTag'),
-      icon: <ClipboardCheck size={24} />,
-      active: options.collectionRules && options.preserveLockedFields && !options.overwriteManualValues,
+      icon: <ClipboardCheck size={14} />,
       patch: { collectionRules: true, preserveLockedFields: true, overwriteManualValues: false, extractTables: true }
     }
   ]
+
+  const current = profiles.find((item) => item.key === activeKey) || profiles[1]
+
   return (
-    <section className="workflow-card processing-profile-card">
-      <div className="card-title-row"><h2>{t('dashboard.processingProfiles')}</h2><span>{t('dashboard.processingProfilesCopy')}</span></div>
-      <div className="processing-profile-grid">
-        {profiles.map((profile) => (
-          <button type="button" key={profile.key} className={`processing-profile-tile ${profile.active ? 'active' : ''}`} onClick={() => setOptions({ ...options, ...profile.patch })}>
-            <span className="profile-icon">{profile.icon}</span>
-            <strong>{profile.title}</strong>
-            <small>{profile.copy}</small>
-            <em>{profile.tag}</em>
-            {profile.active && <b><Check size={15} /></b>}
-          </button>
-        ))}
+    <div className="dash-profile-selector" role="radiogroup" aria-label={t('dashboard.processingProfiles')}>
+      <div className="dash-profile-label-row">
+        <span>{t('dashboard.processingProfiles')}</span>
+        <em>{current.tag}</em>
       </div>
-    </section>
+      <div className="dash-profile-pills">
+        {profiles.map((profile) => {
+          const isActive = profile.key === activeKey
+          return (
+            <button
+              type="button"
+              role="radio"
+              aria-checked={isActive}
+              key={profile.key}
+              className={`dash-profile-pill ${isActive ? 'active' : ''}`}
+              onClick={() => {
+                setExplicitProfile(profile.key)
+                setOptions({ ...options, ...profile.patch })
+              }}
+            >
+              <span className="dash-profile-icon">{profile.icon}</span>
+              <strong>{profile.title}</strong>
+              {isActive && <Check size={13} className="dash-profile-check" />}
+            </button>
+          )
+        })}
+      </div>
+      <p className="dash-profile-hint">{current.copy}</p>
+    </div>
   )
 }
 
@@ -959,7 +983,7 @@ function OCRTextPreview({ selected }: { selected?: UploadDraftFile }) {
   )
 }
 
-function NextActionsBar({ stagedCount, disabled, hasUploadedRecord, actionBusy, onProcessAll, onRunOcr, onExtract, onReview }: { stagedCount: number; disabled: boolean; hasUploadedRecord: boolean; actionBusy: 'process' | 'ocr' | 'metadata' | 'review' | 'delete' | null; onProcessAll: () => void; onRunOcr: () => void; onExtract: () => void; onReview: () => void }) {
+function NextActionsBar({ stagedCount, disabled, hasUploadedRecord, actionBusy, onProcessAll, onRunOcr, onExtract, onReview, profileSelector }: { stagedCount: number; disabled: boolean; hasUploadedRecord: boolean; actionBusy: 'process' | 'ocr' | 'metadata' | 'review' | 'delete' | null; onProcessAll: () => void; onRunOcr: () => void; onExtract: () => void; onReview: () => void; profileSelector: ReactNode }) {
   const { t } = useI18n()
   return (
     <section className="next-actions dash-forest-panel">
@@ -967,6 +991,7 @@ function NextActionsBar({ stagedCount, disabled, hasUploadedRecord, actionBusy, 
         <h2>{t('dashboard.nextActions')}</h2>
         <span className="dash-staged-badge">{stagedCount} {stagedCount === 1 ? t('dashboard.file') : t('dashboard.files')}</span>
       </div>
+      {profileSelector}
       <div className="primary-process-row">
         {hasUploadedRecord ? (
           <button type="button" className="dash-forest-cta process-button" disabled={disabled} onClick={onProcessAll}>
