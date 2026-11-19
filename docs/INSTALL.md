@@ -52,7 +52,9 @@ On a CPU with AVX-512 BF16, VBMI, and VNNI support:
 bash install-docker.sh --metadata-runtime unified
 ```
 
-This starts a single inference container backed by one `ik_llama.cpp` binary and `llama-swap`. Dok OCR uses PaddleOCR-VL for OCR and LFM2.5-8B-A1B for metadata, loading one model at a time and unloading it when idle.
+This starts a single inference container backed by one custom `ik_llama.cpp` binary and `llama-swap`. Dok OCR uses PaddleOCR-VL for OCR and LFM2.5-8B-A1B for metadata, loading one model at a time and unloading it when idle.
+
+Why pick `unified` on a CPU-only host: this image bundles our custom PaddleOCR-VL CPU kernels (unmasked `D=72` IQK vision attention, AVX-512 BF16 FFN tail fix, MRoPE/causal-mask parity, and fast LFM2.5 CPU decoding). Those kernels live inside this compiled binary and do not carry over to external engines like LM Studio or Ollama—use `external` instead when you already have a GPU or separate inference server.
 
 First startup downloads and verifies ~7.85 GB of public model files into the persistent model volume and quantizes the OCR weights automatically.
 
