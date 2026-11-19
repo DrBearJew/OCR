@@ -1486,6 +1486,7 @@ pre {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 0.8rem;
   color: var(--text-muted);
@@ -1493,9 +1494,9 @@ pre {
 }
 
 .pdf-viewer-page-indicator input {
-  width: 3.1rem;
+  width: 2.5rem;
   min-height: 26px;
-  padding: 0.15rem 0.35rem;
+  padding: 0.15rem 0.25rem;
   text-align: center;
   font-family: var(--font-mono);
   font-size: 0.8rem;
