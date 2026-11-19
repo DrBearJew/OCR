@@ -303,17 +303,21 @@ export default function DocumentsPage({ onOpenDocument, onUpload }: { onOpenDocu
             </select>
             <SavedViewsBar section="documents" filters={filters} onApply={(next) => { setFilters(next); void load(next, false, null) }} />
           </div>
-          <div className="bulk-bar console-bulk">
+          <div className={`bulk-bar console-bulk ${selectedIds.size > 0 ? 'has-selection' : ''}`}>
             <span>{bulkTargetLabel()}</span>
-            <label className="bulk-scope-toggle" title={t('documents.bulkFilterHelp')}>
-              <input type="checkbox" checked={bulkAllMatching} disabled={!hasActiveFilters() || !totalEstimate} onChange={(event) => setBulkAllMatching(event.target.checked)} />
-              {t('documents.applyToMatching')}
-            </label>
+            {hasActiveFilters() && totalEstimate > 0 && (
+              <label className="bulk-scope-toggle" title={t('documents.bulkFilterHelp')}>
+                <input type="checkbox" checked={bulkAllMatching} onChange={(event) => setBulkAllMatching(event.target.checked)} />
+                {t('documents.applyToMatching')}
+              </label>
+            )}
             <button disabled={bulkActionDisabled()} onClick={() => void bulk('retry')}>{t('common.retryOcr')}</button>
             <button disabled={bulkActionDisabled()} onClick={() => void bulk('reextract')}>{t('common.reextract')}</button>
             <button disabled={bulkActionDisabled()} onClick={() => void bulk('set_review_state', { review_state: 'needs_review', review_reason: 'Bulk marked for review' })}>{t('common.needsReview')}</button>
             <button disabled={bulkActionDisabled()} onClick={() => void bulk('set_review_state', { review_state: 'reviewed', review_reason: null })}>{t('common.reviewed')}</button>
-            <button className="danger-button" disabled={Boolean(busyAction) || !Array.from(selectedIds).filter((id) => !id.startsWith('demo-')).length} onClick={() => void deleteSelectedDocuments()}><Trash2 size={15} /> {t('documents.deleteSelected')}</button>
+            {selectedIds.size > 0 && (
+              <button className="danger-button" disabled={Boolean(busyAction)} onClick={() => void deleteSelectedDocuments()}><Trash2 size={14} /> {t('documents.deleteSelected')}</button>
+            )}
           </div>
           <div className="document-console-table">
             <div className="doc-table-head">
@@ -562,25 +566,32 @@ function DocumentInspector({ document, events, loading, busy, onOpenDocument, on
 function DocumentDetailsFields({ document }: { document: Document }) {
   const { t } = useI18n()
   const tags = document.llm_suggested_tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
-  const field = (value: string | null | undefined) => value?.trim() || 'NA'
-  const currency = typeof document.metadata_json?.currency === 'string' ? document.metadata_json.currency : document.extracted_amount ? 'EUR' : 'NA'
+  const field = (value: string | null | undefined) => value?.trim() || '—'
+  const currency = typeof document.metadata_json?.currency === 'string' ? document.metadata_json.currency : document.extracted_amount ? 'EUR' : ''
+  const amountDisplay = document.extracted_amount?.trim() ? `${document.extracted_amount.trim()}${currency ? ` ${currency}` : ''}` : '—'
   return (
-    <div className="detail-tab-panel">
-      <label>{t('fields.title')}<input value={document.manual_title_override || document.extracted_title || document.original_filename} readOnly /></label>
-      <label>{t('dashboard.collection')}<select value={document.collection_name} disabled><option>{document.collection_name}</option></select></label>
-      <label>{t('fields.correspondentSender')}<input value={field(document.extracted_sender)} readOnly /></label>
-      <label>{t('fields.recipientCustomer')}<input value={field(document.extracted_recipient)} readOnly /></label>
-      <div className="detail-two">
-        <label>{t('fields.invoiceNumber')}<input value={field(document.extracted_invoice_number)} readOnly /></label>
-        <label>{t('fields.invoiceDate')}<input value={field(document.extracted_date)} readOnly /></label>
+    <div className="detail-tab-panel inspector-kv-panel">
+      <div className="inspector-title-block">
+        <strong>{document.manual_title_override || document.extracted_title || document.original_filename}</strong>
+        <small>{document.original_filename}</small>
       </div>
-      <div className="detail-two">
-        <label>{t('fields.amountGross')}<input value={field(document.extracted_amount)} readOnly /></label>
-        <label>{t('fields.currency')}<select value={currency} disabled><option>{currency}</option></select></label>
-      </div>
-      <label>{t('fields.statusReviewState')}<select value={document.review_state} disabled><option>{document.review_state}</option></select></label>
-      <label>{t('fields.tags')}<div className="tag-input">{tags.length ? tags.map((tag) => <button type="button" key={tag}>{tag}</button>) : <span>{t('documents.noTags', 'No tags')}</span>}</div></label>
-      <label>{t('fields.notes')}<textarea placeholder={t('documents.addNotes')} readOnly /></label>
+      <dl className="inspector-kv-list">
+        <div><dt>{t('dashboard.collection')}</dt><dd><span className="pill">{document.collection_name}</span></dd></div>
+        <div><dt>{t('fields.statusReviewState')}</dt><dd><StatusBadge value={document.review_state} /></dd></div>
+        <div><dt>{t('fields.correspondentSender')}</dt><dd>{field(document.extracted_sender)}</dd></div>
+        <div><dt>{t('fields.recipientCustomer')}</dt><dd>{field(document.extracted_recipient)}</dd></div>
+        <div><dt>{t('fields.invoiceNumber')}</dt><dd>{field(document.extracted_invoice_number)}</dd></div>
+        <div><dt>{t('fields.invoiceDate')}</dt><dd>{field(document.extracted_date)}</dd></div>
+        <div><dt>{t('fields.amountGross')}</dt><dd className="kv-strong">{amountDisplay}</dd></div>
+        <div>
+          <dt>{t('fields.tags')}</dt>
+          <dd>
+            {tags.length ? (
+              <div className="inspector-tag-row">{tags.map((tag) => <span className="pill" key={tag}>{tag}</span>)}</div>
+            ) : '—'}
+          </dd>
+        </div>
+      </dl>
     </div>
   )
 }

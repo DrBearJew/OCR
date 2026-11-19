@@ -14,17 +14,35 @@ interface ShellProps {
   onLogout: () => void
 }
 
-const navItems = [
-  { keys: ['dashboard'], path: '/dashboard', labelKey: 'nav.dashboard', icon: BarChart3 },
-  { keys: ['collections', 'collection'], path: '/collections', labelKey: 'nav.collections', icon: Layers },
-  { keys: ['folders'], path: '/folders', labelKey: 'nav.folders', icon: FolderTree },
-  { keys: ['documents', 'document'], path: '/documents', labelKey: 'nav.documents', icon: FileText },
-  { keys: ['search'], path: '/search', labelKey: 'nav.search', icon: Search },
-  { keys: ['processing'], path: '/processing', labelKey: 'nav.processing', icon: ListChecks },
-  { keys: ['failed'], path: '/failed', labelKey: 'nav.failed', icon: AlertTriangle },
-  { keys: ['schemas'], path: '/schemas', labelKey: 'nav.schemas', icon: Database },
-  { keys: ['admin'], path: '/admin', labelKey: 'nav.admin', icon: Settings },
-  { keys: ['activity'], path: '/activity', labelKey: 'nav.activity', icon: Activity }
+const navGroups = [
+  {
+    labelKey: 'shell.groupWorkspace',
+    fallback: 'Workspace',
+    items: [
+      { keys: ['dashboard'], path: '/dashboard', labelKey: 'nav.dashboard', icon: BarChart3 },
+      { keys: ['documents', 'document'], path: '/documents', labelKey: 'nav.documents', icon: FileText },
+      { keys: ['collections', 'collection'], path: '/collections', labelKey: 'nav.collections', icon: Layers },
+      { keys: ['folders'], path: '/folders', labelKey: 'nav.folders', icon: FolderTree },
+      { keys: ['search'], path: '/search', labelKey: 'nav.search', icon: Search },
+    ]
+  },
+  {
+    labelKey: 'shell.groupQueue',
+    fallback: 'Queue',
+    items: [
+      { keys: ['failed'], path: '/failed', labelKey: 'nav.failed', icon: AlertTriangle },
+      { keys: ['processing'], path: '/processing', labelKey: 'nav.processing', icon: ListChecks },
+      { keys: ['activity'], path: '/activity', labelKey: 'nav.activity', icon: Activity },
+    ]
+  },
+  {
+    labelKey: 'shell.groupSystem',
+    fallback: 'System',
+    items: [
+      { keys: ['schemas'], path: '/schemas', labelKey: 'nav.schemas', icon: Database },
+      { keys: ['admin'], path: '/admin', labelKey: 'nav.admin', icon: Settings },
+    ]
+  }
 ]
 
 export default function AppShell({ active, children, onNavigate, onLogout }: ShellProps) {
@@ -49,22 +67,32 @@ function Sidebar({ active, onNavigate, onLogout }: { active: NavKey; onNavigate:
   return (
     <aside className="sidebar">
       <button className="brand-button" aria-label={t('nav.dashboard')} onClick={() => onNavigate('/dashboard')}>
-        <span className="brand-mark"><FileSearch size={18} /></span>
+        <span className="brand-mark"><FileSearch size={16} /></span>
         <span>Dok OCR</span>
       </button>
       <nav>
-        {navItems.map((item) => {
-          const Icon = item.icon
-          return (
-            <button key={item.labelKey} className={item.keys.includes(active) ? 'active' : ''} aria-label={t(item.labelKey)} onClick={() => onNavigate(item.path)}>
-              <Icon size={17} />
-              <span>{t(item.labelKey)}</span>
-            </button>
-          )
-        })}
+        {navGroups.map((group) => (
+          <div className="sidebar-group" key={group.labelKey}>
+            <span className="sidebar-group-label">{t(group.labelKey, group.fallback)}</span>
+            {group.items.map((item) => {
+              const Icon = item.icon
+              return (
+                <button
+                  key={item.labelKey}
+                  className={item.keys.includes(active) ? 'active' : ''}
+                  aria-label={t(item.labelKey)}
+                  onClick={() => onNavigate(item.path)}
+                >
+                  <Icon size={16} />
+                  <span>{t(item.labelKey)}</span>
+                </button>
+              )
+            })}
+          </div>
+        ))}
       </nav>
       <button className="logout" onClick={onLogout}>
-        <LogOut size={17} /> <span>{t('shell.signOut')}</span>
+        <LogOut size={16} /> <span>{t('shell.signOut')}</span>
       </button>
     </aside>
   )
@@ -87,30 +115,50 @@ export function TopStatusBar({ onNavigate, onToggleSidebar, sidebarCollapsed }: 
   const status = summarizeSystemHealth(summary, t)
   return (
     <header className="top-status-bar">
-      <button
-        className={`top-menu ${sidebarCollapsed ? 'active' : ''}`}
-        title={sidebarCollapsed ? t('shell.expandNav') : t('shell.collapseNav')}
-        aria-label={sidebarCollapsed ? t('shell.expandNav') : t('shell.collapseNav')}
-        aria-pressed={sidebarCollapsed}
-        onClick={onToggleSidebar}
-      >
-        <Menu size={20} />
-      </button>
-      <div className="health-chip-row">
+      <div className="top-bar-left">
         <button
-          type="button"
-          className={`system-status-pill system-status-${status.state}`}
-          title={status.tooltip}
-          onClick={() => onNavigate('/admin')}
+          className={`top-menu ${sidebarCollapsed ? 'active' : ''}`}
+          title={sidebarCollapsed ? t('shell.expandNav') : t('shell.collapseNav')}
+          aria-label={sidebarCollapsed ? t('shell.expandNav') : t('shell.collapseNav')}
+          aria-pressed={sidebarCollapsed}
+          onClick={onToggleSidebar}
         >
-          <i />
-          <span>{status.label}</span>
+          <Menu size={18} />
         </button>
+        <div className="health-chip-row">
+          <button
+            type="button"
+            className={`system-status-pill system-status-${status.state}`}
+            title={status.tooltip}
+            onClick={() => onNavigate('/admin')}
+          >
+            <i />
+            <span>{status.label}</span>
+          </button>
+        </div>
       </div>
       <div className="top-actions">
+        <button
+          type="button"
+          className="top-search-trigger"
+          title={t('shell.globalSearch')}
+          aria-label={t('shell.globalSearch')}
+          onClick={() => onNavigate('/search')}
+        >
+          <Search size={14} />
+          <span>{t('nav.search')}</span>
+        </button>
         <LanguageSwitch language={language} setLanguage={setLanguage} compact />
-        <button title={t('shell.globalSearch')} aria-label={t('shell.globalSearch')} onClick={() => onNavigate('/search')}><Search size={18} /></button>
-        <button className="admin-menu" title={t('shell.adminSettings')} aria-label={t('shell.openAdminSettings')} onClick={() => onNavigate('/admin')}><b>AD</b><span>{t('nav.admin')}</span></button>
+        <button
+          type="button"
+          className="admin-menu"
+          title={t('shell.adminSettings')}
+          aria-label={t('shell.openAdminSettings')}
+          onClick={() => onNavigate('/admin')}
+        >
+          <Settings size={15} />
+          <span>{t('nav.admin')}</span>
+        </button>
       </div>
     </header>
   )
