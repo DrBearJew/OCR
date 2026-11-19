@@ -3454,8 +3454,15 @@ button.ghost-accent:hover:not(:disabled) {
 
 .collection-peek-ocr pre {
   margin-top: 0.5rem;
-  max-height: 11rem;
-  font-size: 0.75rem;
+  max-height: 22rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
   background: var(--surface);
 }
 

@@ -413,6 +413,21 @@ export default function CollectionDetailPage({ slug, onOpenDocument, onOpenSchem
 
 function CollectionPeekPanel({ document, busy, onOpenDocument, onMarkReviewed, onReextract }: { document: Document | null; busy: boolean; onOpenDocument: (id: string) => void; onMarkReviewed: (document: Document) => void; onReextract: (document: Document) => void }) {
   const { t, language } = useI18n()
+  const [fullOcrText, setFullOcrText] = useState<string | null>(null)
+  const docId = document?.id || ''
+
+  useEffect(() => {
+    setFullOcrText(null)
+    if (!docId || docId.startsWith('demo-')) return
+    let cancelled = false
+    void api.document(docId).then((detail) => {
+      if (!cancelled) setFullOcrText(detail.ocr_text ?? null)
+    }).catch(() => {
+      if (!cancelled) setFullOcrText(null)
+    })
+    return () => { cancelled = true }
+  }, [docId, document?.updated_at])
+
   if (!document) {
     return (
       <aside className="collection-peek-panel workflow-card empty-peek-panel">
@@ -428,7 +443,7 @@ function CollectionPeekPanel({ document, busy, onOpenDocument, onMarkReviewed, o
   const pdfPreviewSource = isPdf ? `${previewUrl(document.id)}#page=1&navpanes=0` : null
   const title = document.manual_title_override || document.extracted_title || document.original_filename
   const updated = new Date(document.updated_at).toLocaleString(language === 'de' ? 'de-DE' : undefined)
-  const snippet = (document.ocr_text || document.ocr_snippet || '').trim()
+  const ocrText = (fullOcrText ?? document.ocr_text ?? document.ocr_snippet ?? '').trim()
   const tags = document.llm_suggested_tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0).slice(0, 4)
 
   return (
@@ -471,7 +486,7 @@ function CollectionPeekPanel({ document, busy, onOpenDocument, onMarkReviewed, o
       </section>
       <details className="collection-peek-ocr">
         <summary>{t('documents.ocrText')}</summary>
-        <pre>{snippet ? compactText(snippet, 520) : t('documents.noActivityEvents', 'No OCR text preview available yet.')}</pre>
+        <pre>{ocrText || t('documents.noActivityEvents', 'No OCR text preview available yet.')}</pre>
       </details>
       <div className="collection-peek-activity">
         <span>{t('common.updated', 'Updated')} {updated}</span>
@@ -491,9 +506,4 @@ function collectionDocumentPreviewUrl(document: Document): string | null {
   if (document.mime_type === 'application/pdf') return previewPageUrl(document.id, 1)
   if (document.mime_type?.startsWith('image/')) return previewUrl(document.id)
   return document.thumbnail_path ? thumbnailUrl(document.id) : null
-}
-
-function compactText(value: string, limit: number) {
-  const compact = value.replace(/\s+/g, ' ').trim()
-  return compact.length > limit ? `${compact.slice(0, limit).trim()}…` : compact
 }
